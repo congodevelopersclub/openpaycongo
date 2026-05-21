@@ -1,17 +1,22 @@
-import 'package:bloc/bloc.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
 import '../models/server_config.dart';
 import '../services/Config/config_service.dart';
 import '../services/Telemetry/telemetry.dart';
 
 abstract class ConfigEvent {}
+
 class LoadConfig extends ConfigEvent {}
+
 class SaveConfig extends ConfigEvent {
   final ServerConfig config;
   SaveConfig(this.config);
 }
 
 abstract class ConfigState {}
+
 class ConfigInitial extends ConfigState {}
+
 class ConfigLoaded extends ConfigState {
   final ServerConfig config;
   ConfigLoaded(this.config);

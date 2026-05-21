@@ -1,10 +1,13 @@
-import 'package:bloc/bloc.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
 import '../models/parser_source.dart';
 import '../services/Parsers/parser_store.dart';
 import '../services/Telemetry/telemetry.dart';
 
 abstract class ParserEvent {}
+
 class LoadParsers extends ParserEvent {}
+
 class AddParser extends ParserEvent {
   final String name;
   final String regex;
@@ -12,7 +15,9 @@ class AddParser extends ParserEvent {
 }
 
 abstract class ParserState {}
+
 class ParserInitial extends ParserState {}
+
 class ParserLoaded extends ParserState {
   final List<ParserSource> parsers;
   ParserLoaded(this.parsers);

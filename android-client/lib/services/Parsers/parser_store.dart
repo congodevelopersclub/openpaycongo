@@ -1,5 +1,6 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+
 import '../../models/parser_source.dart';
 
 class ParserStore {
@@ -8,13 +9,17 @@ class ParserStore {
   Future<Database> _database() async {
     if (_db != null) return _db!;
     final path = join(await getDatabasesPath(), 'parsers.db');
-    _db = await openDatabase(path, version: 1, onCreate: (db, version) {
-      db.execute('''CREATE TABLE parsers(
+    _db = await openDatabase(
+      path,
+      version: 1,
+      onCreate: (db, version) {
+        db.execute('''CREATE TABLE parsers(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             regex TEXT NOT NULL
           )''');
-    });
+      },
+    );
     return _db!;
   }
 

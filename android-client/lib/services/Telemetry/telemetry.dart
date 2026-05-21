@@ -1,5 +1,5 @@
-import 'package:opentelemetry_api/opentelemetry_api.dart';
-import 'package:opentelemetry_sdk/opentelemetry_sdk.dart';
+import 'package:opentelemetry/api.dart';
+import 'package:opentelemetry/sdk.dart';
 
 class Telemetry {
   Telemetry._();
@@ -8,12 +8,12 @@ class Telemetry {
   late final Tracer tracer;
 
   Future<void> init() async {
-    final exporter = ConsoleSpanExporter();
-    final provider = TracerProvider(
+    final exporter = ConsoleExporter();
+    final provider = TracerProviderBase(
       processors: [SimpleSpanProcessor(exporter)],
-      resource: Resource([ResourceAttributes.serviceName: 'opencongopay']),
+      resource: Resource([Attribute.fromString(ResourceAttributes.serviceName, 'opencongopay')]),
     );
     tracer = provider.getTracer('opencongopay');
-    globalTracerProvider = provider;
+    registerGlobalTracerProvider(provider);
   }
 }

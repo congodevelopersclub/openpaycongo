@@ -1,9 +1,7 @@
-import 'dart:collection';
-
+import 'package:another_telephony/telephony.dart';
 import 'package:opencongopay/models/paymentdetail.dart';
-import 'package:telephony/telephony.dart';
-import 'package:test/test.dart';
 import 'package:opencongopay/services/SmsListener/smsparser.dart';
+import 'package:test/test.dart';
 
 void main() {
   test('Process Message with Orange Regex Return the correct values', () {
@@ -31,7 +29,7 @@ void main() {
         "balance": "350000",
         "currency": "CDF",
         "reference": "PP221226.6981.B30320",
-      }
+      },
     ];
 
     for (final detail in details) {
