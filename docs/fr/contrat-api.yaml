@@ -56,3 +56,5 @@ paths:
       responses:
         '200':
           description: OK
+# OBSOLETE: ce document historique n'est pas le contrat implemente ni le contrat planifie.
+# Le contrat canonique est ../openapi.yaml. Il documente /v1/sync/*, les scopes et RFC 9457.

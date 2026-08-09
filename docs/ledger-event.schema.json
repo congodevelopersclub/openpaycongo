@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/ledger-event.schema.json",
+  "title": "Canonical public ledger event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "wallet_id", "kind", "amount_minor", "currency", "provider", "reference", "occurred_at", "received_at", "parser_version", "source", "device_sequence", "idempotency_key", "payload_digest"],
+  "properties": {
+    "event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "wallet_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "kind": { "type": "string", "enum": ["credit", "debit"] },
+    "amount_minor": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$", "description": "Positive DECIMAL(20,0)-portable minor-unit integer encoded as a decimal string." },
+    "currency": { "type": "string", "enum": ["CDF", "USD"] },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "reference": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "occurred_at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "UTC RFC 3339 timestamp." },
+    "received_at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "UTC RFC 3339 timestamp." },
+    "parser_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "source": { "type": "string", "enum": ["sms", "merchant", "manual", "recovery"] },
+    "device_sequence": { "type": "string", "pattern": "^[0-9]{1,20}$", "description": "Authenticated-replica local sequence; gaps and out-of-order arrival are allowed." },
+    "idempotency_key": { "type": "string", "minLength": 16, "maxLength": 255 },
+    "payload_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "SHA-256 of UTF-8 RFC 8785/JCS canonical public event excluding this field." },
+    "expected_wallet_revision": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,19})$", "description": "Required only for debits." }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "debit" } } }, "then": { "properties": { "expected_wallet_revision": true }, "required": ["expected_wallet_revision"] }, "else": { "not": { "required": ["expected_wallet_revision"] } } }
+  ]
+}

@@ -32,6 +32,9 @@ migrate_working_dir/
 .pub/
 /build/
 
+# Docker-only documentation contract validator dependencies
+/docs/node_modules/
+
 # Symbolication related
 app.*.symbols
 

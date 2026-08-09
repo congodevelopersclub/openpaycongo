@@ -1,0 +1,216 @@
+openapi: 3.1.0
+info:
+  title: OpenPay Congo Canonical Sync API
+  version: 1.0.0-draft
+  description: |
+    Planned interoperability contract only. It does not describe the current Go prototype.
+    V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
+    wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
+servers:
+  - url: https://api.example.invalid
+security:
+  - MobileOAuth: []
+  - MerchantOAuth: []
+paths:
+  /v1/sync/push:
+    post:
+      summary: Persist exactly one canonical event for replication or merchant integration
+      operationId: pushEvent
+      security:
+        - MobileOAuth: [ledger:write]
+        - MerchantOAuth: [ledger:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event]
+              properties:
+                event:
+                  $ref: ./ledger-event.schema.json
+      responses:
+        '201':
+          description: Event persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushResult'
+        '200':
+          description: Idempotent replay; returns the original result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushResult'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/sync/pull:
+    get:
+      summary: Read replicated events after an opaque cursor
+      operationId: pullEvents
+      security:
+        - MobileOAuth: [ledger:read]
+        - MerchantOAuth: [ledger:read]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 1024 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Ordered page of immutable events
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [events, next_cursor]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: ./ledger-event.schema.json }
+                  next_cursor: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/sync/ack:
+    post:
+      summary: Monotonically and idempotently acknowledge an applied cursor for the authenticated replica
+      operationId: acknowledgeCursor
+      security:
+        - MobileOAuth: [ledger:ack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cursor]
+              properties:
+                cursor: { type: string, minLength: 1, maxLength: 1024 }
+      responses:
+        '204': { description: Acknowledged; older cursor is an idempotent no-op }
+        '409': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default:
+          $ref: '#/components/responses/Problem'
+  /healthz:
+    get:
+      summary: Process liveness only
+      security: []
+      responses:
+        '200': { description: Process is alive }
+  /readyz:
+    get:
+      summary: Dependency and migration readiness
+      security: []
+      responses:
+        '200':
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+        '503':
+          description: Not ready; write admission is closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+  /version:
+    get:
+      summary: Deployed build and contract identity
+      security: []
+      responses:
+        '200':
+          description: Version metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [build, contract_version, implementation, adapter, migration_revision]
+                properties:
+                  build: { type: string }
+                  contract_version: { type: string }
+                  implementation: { type: string }
+                  adapter: { type: string }
+                  migration_revision: { type: string }
+components:
+  securitySchemes:
+    MobileOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://identity.example.invalid/oauth/authorize
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            ledger:write: Persist a tenant-authorized canonical event from an enrolled device
+            ledger:read: Read a tenant-authorized replicated event page
+            ledger:ack: Acknowledge a cursor for the enrolled replica
+    MerchantOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            ledger:write: Persist a tenant-authorized canonical event
+            ledger:read: Read a tenant-authorized replicated event page
+            ledger:ack: Acknowledge application of a pull cursor
+  schemas:
+    PushResult:
+      type: object
+      additionalProperties: false
+      required: [event_id, status, cursor]
+      properties:
+        event_id: { type: string }
+        status: { type: string, enum: [persisted, replayed] }
+        cursor: { type: string }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, request_id]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri-reference }
+        code: { type: string, pattern: '^[a-z0-9_]{1,64}$' }
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [datastore, migration, topology, projection, write_admission, contract_version, migration_revision, adapter, implementation]
+      properties:
+        datastore: { type: string, enum: [ok, failed] }
+        migration: { type: string, enum: [current, pending, failed] }
+        topology: { type: string, enum: [supported, unsupported] }
+        projection: { type: string, enum: [healthy, rebuilding, failed] }
+        write_admission: { type: string, enum: [open, closed] }
+        contract_version: { type: string }
+        migration_revision: { type: string }
+        adapter: { type: string }
+        implementation: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    IdempotencyConflict:
+      description: The same tenant/idempotency key was supplied with a different digest
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
