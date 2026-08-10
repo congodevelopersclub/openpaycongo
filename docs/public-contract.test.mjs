@@ -146,6 +146,10 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
     assert.match(dockerIgnore, new RegExp(`!${source.replaceAll('.', '\\.')}`));
   }
   assert.doesNotMatch(contractDockerfile, /COPY wallet-plugin-go\/internal\/pairing\/testdata\/\s/, 'contract image must copy vectors individually');
+  const analyticsVector = 'wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json';
+  assert.match(contractDockerfile, new RegExp(`COPY ${analyticsVector.replaceAll('.', '\\.')} /workspace/${analyticsVector.replaceAll('.', '\\.')}`));
+  assert.match(dockerIgnore, new RegExp(`!${analyticsVector.replaceAll('.', '\\.')}`));
+  assert.doesNotMatch(contractDockerfile, /COPY wallet-plugin-go\/internal\/analytics\/testdata\/\s/, 'contract image must copy analytics vectors individually');
   assert.match(contractDockerfile, /FROM dependencies AS test[\s\S]*RUN npm test/);
   assert.match(flutterDockerfile, /flutter analyze/);
   assert.match(flutterDockerfile, /flutter test/);

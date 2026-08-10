@@ -140,3 +140,71 @@ The QR references the long-lived OpenPay enrollment-signing identity, never CDN/
   notifications, backups, or screenshots retained by the app. Administrator issue/read/confirm responses are
   `private, no-store`; every other pairing success and error carries the same cache directive, and the UI
   clears pairing material when leaving the flow.
+
+## Compact sales analytics slice
+
+The sales dashboard is a rebuildable read model, never a second source of financial truth. Its only inputs are
+immutable canonical ledger/payment facts after tenant authorization and durable ledger acceptance. The
+projection-specific event vocabulary is `payment_captured`, `payment_refunded`, `payment_voided`, and
+`payment_reconciled`; adapters for Go, Node/Fastify, and Laravel must map the same persisted facts without
+provider-name inference or database-specific aggregation. Raw SMS, parser candidates, and mutable provider
+payloads are excluded. This slice provides the portable contract and Go domain/application reference only;
+HTTP and SQLite/MySQL/Postgres/Mongo adapters remain later parity slices.
+
+Acceptance criteria:
+
+- Money is a positive 1–20 digit minor-unit decimal string at the event boundary. Aggregation uses exact
+  integer arithmetic with no floating point, never combines currencies, allows signed net totals, and rounds
+  average ticket to the nearest minor unit with ties upward. A three-uppercase-letter currency value is only
+  syntactically valid; each deployment must use an explicit supported-code and minor-unit registry. Currencies
+  and providers are lexically ordered.
+- Gross is the sum of non-voided captures occurring in the window; payment count counts those captures.
+  Refund value/count use refund occurrence time; net is gross minus refunds. A void suppresses its exact
+  related capture and must match its full amount, currency, and provider. Every refund, void, and reconciliation
+  must reference a capture with matching currency and provider, and every correction `occurred_at` must be at or
+  after the capture `occurred_at`. Orphans, mismatches, predating corrections, and corrections after a valid void
+  become bounded action-required cues rather than changing money. Reconciliation records no money.
+- Correction lifecycle order is `(occurred_at, event_id)`, independent of ingestion and rebuild page order. A
+  full-amount void before every otherwise-valid correction is terminal. If any valid refund precedes the void,
+  the void is a `lifecycle_conflict`: the capture and prior refund totals remain, and subsequent corrections are
+  quarantined as lifecycle conflicts rather than silently erasing or changing those totals. A correction may be
+  ingested before its capture and still apply when its event-time lifecycle is valid.
+- Consumers recompute `payload_digest` as lowercase SHA-256 over RFC 8785 canonical JSON containing every other
+  event field. Exact full-event replay is a no-op. The same ID with any changed field conflicts even if an
+  adapter repeats the old supplied digest; a stale or forged digest is invalid. Arrival order, offline delay,
+  replay, and rebuild page boundaries cannot change projection version, metrics, ETag, or cues. Refunds beyond
+  captured value become bounded action-required cues, never invented ledger corrections.
+- Reconciliation lag is measured in integer seconds from durable receipt of each non-voided capture to its
+  earliest reconciliation receipt, or to query `snapshot_at` while outstanding. Only events whose trusted
+  `received_at` is at or before `snapshot_at` enter that immutable query snapshot. Sync freshness instead uses
+  the service's trusted `observed_at` clock against the latest visible durable receipt; future snapshots fail
+  validation and a future watermark can never appear fresh. Thresholds are contract constants: 24 hours for
+  overdue reconciliation, 15 minutes for stale sync, and one hour for delayed/offline arrival.
+- The caller supplies exact UTC-second `from`, `to`, and `snapshot_at` receipt-time cutoff, an IANA timezone, `hour` or `day`, and
+  comparison choice. Fractional seconds and numeric offsets are invalid. Windows are 1 minute through 93 days,
+  series are at most 500 buckets, and day buckets use consecutive local-midnight boundaries with bounded partial
+  first and last buckets. The shared `America/New_York` fall-back vector proves a 25-hour day without merging or
+  duplicating money. Comparison is the immediately preceding equal-duration UTC window.
+- A projection contains at most 10,000 unique events after deduplication and accepts at most 20,000 raw event
+  records per rebuild, 64 providers, and 16 currencies. Source reads are fixed pages with a bounded page count;
+  every seen cursor is tracked and any repeated/non-advancing cursor fails. Implementations reject excessive
+  query, raw work, unique event, series, provider, or currency cardinality before unbounded work or allocation.
+- Rebuild opens one immutable source snapshot carrying a stable token and monotonically comparable generation;
+  every page must repeat it exactly. It computes privately and performs one atomic projection replacement,
+  guarded by generation compare-and-swap, only after all pages validate. An older slow rebuild cannot replace a newer generation. Crash,
+  cancellation, drift, or source failure leaves the last ready projection visible. Projection version is SHA-256
+  over lexically event-ID-sorted `(event_id, payload_digest)`.
+- `GET /v1/analytics/sales` requires tenant-bound `analytics:read`; tenant identity is injected from the
+  verified principal and never trusted from request JSON. Administrator, enrolled mobile, and merchant OAuth
+  may carry that same scope. Cross-tenant reads fail closed and cache entries must include authorization scope.
+- Ready responses expose `sales-analytics-v1`, projection version, exact `snapshot_at`, trusted `observed_at`,
+  source watermark/freshness, reconciliation state, and bounded action cues. The strong ETag is SHA-256 over
+  RFC 8785 canonical JSON of the complete response except its `etag` member. Responses use
+  `Cache-Control: private, max-age=30, must-revalidate` plus `Vary: Authorization`; matching conditional reads
+  return 304. Missing/rebuilding/failed projections return 503 and must not present stale state as ready.
+  A valid empty projection reports sync status `no_events` and omits watermark/freshness instead of inventing
+  a timestamp or claiming that an unobserved replica is fresh.
+- Contract tests validate JSON Schemas, the shared event/query/result vector, OpenAPI scopes/cache headers, Go
+  race behavior, reversed/out-of-order rebuild, exact replay/conflict, crash-before-replace, offline delay,
+  refunds/voids, predating corrections, refund-before-void conflicts, arrival-order-only correction-before-capture,
+  DST, and cardinality bounds. Node and Laravel must consume the same vector before release.

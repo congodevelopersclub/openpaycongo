@@ -19,5 +19,6 @@ COPY wallet-plugin-go/Dockerfile /workspace/wallet-plugin-go/Dockerfile
 COPY wallet-plugin-go/internal/pairing/testdata/pairing-signed-qr.vector.json /workspace/wallet-plugin-go/internal/pairing/testdata/pairing-signed-qr.vector.json
 COPY wallet-plugin-go/internal/pairing/testdata/pairing-key-schedule.vector.json /workspace/wallet-plugin-go/internal/pairing/testdata/pairing-key-schedule.vector.json
 COPY wallet-plugin-go/internal/pairing/testdata/pairing-protocol.vector.json /workspace/wallet-plugin-go/internal/pairing/testdata/pairing-protocol.vector.json
+COPY wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json /workspace/wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json
 WORKDIR /workspace/docs
 RUN npm test

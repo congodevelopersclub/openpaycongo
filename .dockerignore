@@ -32,4 +32,9 @@ wallet-plugin-go/internal/pairing/testdata/*
 !wallet-plugin-go/internal/pairing/testdata/pairing-signed-qr.vector.json
 !wallet-plugin-go/internal/pairing/testdata/pairing-key-schedule.vector.json
 !wallet-plugin-go/internal/pairing/testdata/pairing-protocol.vector.json
+!wallet-plugin-go/internal/analytics/
+wallet-plugin-go/internal/analytics/*
+!wallet-plugin-go/internal/analytics/testdata/
+wallet-plugin-go/internal/analytics/testdata/*
+!wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json
 docs/node_modules
