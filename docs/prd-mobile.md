@@ -67,6 +67,20 @@ Build a local-first mobile inbox/outbox that durably records canonical event int
 
 The app must never represent a local parse, a displayed balance, or a queued request as a confirmed payment. The current Flutter project remains an incomplete prototype until these decisions are implemented and released with evidence.
 
+## SMS capture, review and Gemma 4 (implemented prototype boundary)
+
+Prototype presents **Payment Inbox** as the visual epicenter. No seeded payment data. A user may add bounded redacted manual evidence; a syntactically valid sender remains `Review required` because manual text is not OS sender metadata, while an invalid sender is visibly `Rejected` with a reason. Neither state credits a wallet or claims durable/encrypted storage. The configured exact trusted sender is shown separately and applies only to future OS-origin metadata. This is a volatile UI/domain boundary, not native capture activation or offline durability.
+
+Automatic SMS capture is unavailable until a future native Android component proves default SMS handler role eligibility for target SDK and distribution. The manual-first manifest declares neither `READ_SMS` nor `RECEIVE_SMS` and registers no SMS receiver. App must explain the requirement before any future role flow and must not imply Flutter UI can grant that role. Unsupported, denied and role-ineligible installs retain the manual/merchant workflow.
+
+Trusted sender invariant: normalize only OS sender metadata into exact E.164 (`+` plus 8–15 digits) or 3–11 upper-case ASCII alphanumeric ID. Refuse wildcard matching, arbitrary regex, Unicode lookalikes and message-body sender claims. The manual template is a bounded sequence of literal text and exactly one each of `{amount}`, `{currency}` and `{reference}`; adjacent, duplicate, missing or unknown fields are refused and matching is linear. Bound a future OS envelope to 4 KiB, eight segments, 31 days and five minutes of clock skew. Raw SMS capture and durable storage remain unimplemented; future sync may send only canonical approved events after an audited encrypted inbox exists.
+
+Gemma 4 remains capability-gated with no constructible `ready` UI state in this slice. Model-package verification and inference are ports only; native LiteRT-LM integration is pending. A future adapter must verify local model digest/signature before exposing an action. Proposal input/output and time are bounded; strict JSON fields, provider, amount, currency, reference, confidence and replay are deterministically checked. Every valid proposal still requires human review and can never establish sender trust, activate a parser, create a payment event or credit a ledger. Missing model, inadequate device, timeout, circuit-open, malformed output or runtime failure leaves manual review usable and changes no accounting/parser state. No background SMS upload.
+
+## Native implementation follow-up
+
+See `docs/github-issue-native-sms-keystore.md`. No production role receiver, permission requester, secure vault or Gemma runtime is implemented by Flutter slice.
+
 ## User Stories (continued)
 
 17. As a merchant, I want Payments Inbox to be the default epicenter, so that pending financial work is visible first.

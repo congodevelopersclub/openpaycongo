@@ -17,14 +17,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "12.1.0"
-  another_telephony:
-    dependency: "direct main"
-    description:
-      name: another_telephony
-      sha256: "7dd16759099ea3e4ce762c4f5bbfa097940335555d5caa916aaa52eec6a70cb6"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.4.1"
   args:
     dependency: transitive
     description:
@@ -114,7 +106,7 @@ packages:
     source: hosted
     version: "1.15.1"
   crypto:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
