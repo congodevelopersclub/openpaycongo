@@ -3,7 +3,11 @@ services:
     image: node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
     working_dir: /test
     command: ["node", "fake-upstream.mjs"]
-    volumes: ["./test:/test:ro"]
+    environment: ["EXPECTED_BACKEND_TOKEN=compose-test-backend-token-000001", "EXPECTED_ADMIN_USER=admin"]
+    volumes:
+      - "./test:/test:ro"
+      - "../docs/sales-analytics-response.valid.json:/fixture/sales-analytics-response.valid.json:ro"
+      - "admin_secrets:/output"
     network_mode: bridge
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9090/healthz').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"]
@@ -13,7 +17,8 @@ services:
       start_period: 1s
   admin:
     build: .
-    environment: ["BACKEND_ORIGIN=http://upstream:9090"]
+    environment: ["BACKEND_ORIGIN=http://upstream:9090", "OPENPAY_ADMIN_BACKEND_TOKEN=compose-test-backend-token-000001"]
+    volumes: ["admin_secrets:/run/secrets:ro"]
     depends_on:
       upstream:
         condition: service_healthy
@@ -33,3 +38,6 @@ services:
         condition: service_healthy
     network_mode: bridge
     links: ["admin:admin", "upstream:upstream"]
+
+volumes:
+  admin_secrets:

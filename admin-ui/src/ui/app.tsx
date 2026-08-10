@@ -6,10 +6,13 @@ import {
   type WorkspaceState
 } from "../application/connection-workspace";
 import type { ConnectionSnapshot } from "../domain/readiness";
+import type { SalesDashboard } from "../application/sales-dashboard";
+import { SalesDashboardView } from "./sales-dashboard";
 
 export interface AppProps {
   readonly workspace: ConnectionWorkspace;
   readonly initialState: WorkspaceState;
+  readonly salesDashboard: SalesDashboard;
   readonly now?: () => number;
 }
 
@@ -139,7 +142,7 @@ const useWorkspaceState = (
   return [state, refreshing, refresh];
 };
 
-export const App = ({ workspace, initialState, now = Date.now }: AppProps) => {
+export const App = ({ workspace, initialState, salesDashboard, now = Date.now }: AppProps) => {
   const [state, refreshing, refresh] = useWorkspaceState(workspace, initialState, now);
   const copy = statusCopy(state, now());
   const snapshot = snapshotOf(state);
@@ -157,9 +160,10 @@ export const App = ({ workspace, initialState, now = Date.now }: AppProps) => {
         </div>
         <span class="mode">Read-only</span>
       </header>
-      <section class={`focus focus--${state.kind}`} role="status" aria-live="polite" aria-busy={refreshing}>
+      <SalesDashboardView dashboard={salesDashboard} now={now} />
+      <section class={`focus focus--${state.kind}`} role="status" aria-label="Payment readiness" aria-live="polite" aria-busy={refreshing}>
         <p class="eyebrow">{copy.eyebrow}</p>
-        <h1>{copy.title}</h1>
+        <h2>{copy.title}</h2>
         <p class="detail">{copy.detail}</p>
         {snapshot !== undefined && (
           <p class="freshness">

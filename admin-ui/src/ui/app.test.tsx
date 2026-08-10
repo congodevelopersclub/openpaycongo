@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConnectionWorkspace, freshnessTtlMilliseconds, type ConnectionPort } from "../application/connection-workspace";
+import { SalesDashboard } from "../application/sales-dashboard";
 import type { ConnectionSnapshot } from "../domain/readiness";
 import { App } from "./app";
 
@@ -23,6 +24,31 @@ const snapshot = (writeAdmission: "open" | "closed", observedAt = 10_000): Conne
   }
 });
 
+const salesDashboard = (): SalesDashboard => new SalesDashboard({
+  fetch: async (query) => {
+    const etag = `"${"a".repeat(64)}"`;
+    return {
+      kind: "modified",
+      etag,
+      snapshot: {
+        contractVersion: "sales-analytics-v1",
+        projectionVersion: "b".repeat(64),
+        readiness: "ready",
+        tenantId: "test",
+        snapshotAt: query.snapshotAt,
+        observedAt: query.snapshotAt,
+        timeZone: query.timeZone,
+        current: { from: query.from, to: query.to, currencies: [], providers: [] },
+        series: [],
+        reconciliation: { lagSecondsMax: "0", unreconciledCount: "0" },
+        sync: { status: "no_events" },
+        actionRequired: [],
+        etag
+      }
+    };
+  }
+}, { tenantId: "test", sessionCacheId: "app-test" });
+
 const setVisibility = (value: DocumentVisibilityState): void => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value });
 };
@@ -41,8 +67,8 @@ describe("App", () => {
       })
     };
     const workspace = new ConnectionWorkspace(port, { now: () => 10_000 }, { next: () => 0.5 });
-    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} now={() => 10_000} />);
-    const liveRegion = screen.getByRole("status");
+    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} salesDashboard={salesDashboard()} now={() => 10_000} />);
+    const liveRegion = screen.getByRole("status", { name: "Payment readiness" });
     expect(liveRegion.getAttribute("aria-live")).toBe("polite");
     await waitFor(() => expect(liveRegion.getAttribute("aria-busy")).toBe("true"));
     if (complete === undefined) {
@@ -63,7 +89,7 @@ describe("App", () => {
       }
     };
     const workspace = new ConnectionWorkspace(port, { now: () => 10_000 }, { next: () => 0.5 });
-    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} now={() => 10_000} />);
+    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} salesDashboard={salesDashboard()} now={() => 10_000} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Payments are paused" })).toBeTruthy());
     const button = screen.getByRole("button", { name: "Check again" });
     button.focus();
@@ -88,7 +114,7 @@ describe("App", () => {
       }
     };
     const workspace = new ConnectionWorkspace(port, { now: () => now }, { next: () => 0.5 });
-    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} now={() => now} />);
+    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} salesDashboard={salesDashboard()} now={() => now} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Payments may be accepted" })).toBeTruthy());
     setVisibility("hidden");
     document.dispatchEvent(new Event("visibilitychange"));
@@ -96,7 +122,7 @@ describe("App", () => {
     setVisibility("visible");
     document.dispatchEvent(new Event("visibilitychange"));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Last check is stale" })).toBeTruthy());
-    expect(screen.getByRole("status").textContent).toContain("Payments must remain paused");
+    expect(screen.getByRole("status", { name: "Payment readiness" }).textContent).toContain("Payments must remain paused");
     if (completeRefresh === undefined) {
       throw new Error("Visible resume did not start a refresh.");
     }
@@ -113,9 +139,9 @@ describe("App", () => {
       }
     };
     const workspace = new ConnectionWorkspace(port, { now: () => 20_000 }, { next: () => 0.5 });
-    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} now={() => 20_000} />);
+    render(<App workspace={workspace} initialState={{ kind: "loading", circuit: "closed" }} salesDashboard={salesDashboard()} now={() => 20_000} />);
     const button = await screen.findByRole("button", { name: "Check now" });
-    expect(screen.getByRole("status").textContent).toContain("overrides this backoff");
+    expect(screen.getByRole("status", { name: "Payment readiness" }).textContent).toContain("overrides this backoff");
     await userEvent.click(button);
     await waitFor(() => expect(calls).toBe(2));
   });

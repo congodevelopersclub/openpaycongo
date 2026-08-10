@@ -1,5 +1,6 @@
 import type { ConnectionPort } from "../application/connection-workspace";
 import type { ConnectionSnapshot, Readiness, ServerIdentity } from "../domain/readiness";
+import { BoundaryFailure, readBoundedJsonObject } from "./bounded-json";
 
 export interface FetchLike {
   readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
@@ -22,11 +23,6 @@ export class TransportFailure extends Error {
 const maximumResponseBytes = 16_384;
 const maximumFieldLength = 128;
 const requestDeadlineMilliseconds = 3_000;
-const jsonMime = /^application\/json(?:\s*;.*)?$/i;
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-};
 const requiredString = (record: Record<string, unknown>, name: string): string => {
   const value = record[name];
   const valid = typeof value === "string" && value.length > 0 && value.length <= maximumFieldLength;
@@ -60,49 +56,14 @@ const validateBaseUrl = (baseUrl: BaseUrl): string => {
 };
 
 const readBoundedObject = async (response: Response): Promise<Record<string, unknown>> => {
-  const mime = response.headers.get("content-type") ?? "";
-  if (!jsonMime.test(mime)) {
-    throw new TransportFailure("mime", "Operational endpoint did not return JSON.");
-  }
-  const declaredSize = Number(response.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declaredSize) && declaredSize > maximumResponseBytes) {
-    await response.body?.cancel();
-    throw new TransportFailure("oversize", "Operational response exceeds the byte limit.");
-  }
-  if (response.body === null) {
-    throw new TransportFailure("shape", "Operational response body is missing.");
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let byteCount = 0;
-  while (true) {
-    const part = await reader.read();
-    if (part.done) {
-      break;
-    }
-    byteCount += part.value.byteLength;
-    if (byteCount > maximumResponseBytes) {
-      await reader.cancel("response byte limit exceeded");
-      throw new TransportFailure("oversize", "Operational response exceeds the byte limit.");
-    }
-    chunks.push(part.value);
-  }
-  const bytes = new Uint8Array(byteCount);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  let decoded: unknown;
   try {
-    decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    throw new TransportFailure("shape", "Operational response is not valid UTF-8 JSON.");
+    return await readBoundedJsonObject(response, maximumResponseBytes);
+  } catch (error: unknown) {
+    if (error instanceof BoundaryFailure) {
+      throw new TransportFailure(error.kind, `Operational ${error.message.toLowerCase()}`);
+    }
+    throw error;
   }
-  if (!isRecord(decoded)) {
-    throw new TransportFailure("shape", "Operational response must be an object.");
-  }
-  return decoded;
 };
 
 const readIdentity = (value: Record<string, unknown>): ServerIdentity => ({
