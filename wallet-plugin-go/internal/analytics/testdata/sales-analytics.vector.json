@@ -1,0 +1,38 @@
+{
+  "contract_version": "sales-analytics-v1",
+  "query": {
+    "from": "2026-11-01T04:00:00Z",
+    "to": "2026-11-02T05:00:00Z",
+    "snapshot_at": "2026-11-02T12:00:00Z",
+    "time_zone": "America/New_York",
+    "interval": "day",
+    "comparison": true
+  },
+  "events": [
+    {"event_id":"018f0000-0000-7000-8000-000000000001","tenant_id":"tenant-demo","kind":"payment_captured","amount_minor":"4000","currency":"CDF","provider":"orange-money","payment_id":"previous","occurred_at":"2026-10-31T16:00:00Z","received_at":"2026-10-31T16:00:10Z","payload_digest":"f2a84ff09b45286862f0e759339fc486e658a39bca26ce85c2de38978fda53a9"},
+    {"event_id":"018f0000-0000-7000-8000-000000000002","tenant_id":"tenant-demo","kind":"payment_captured","amount_minor":"10000","currency":"CDF","provider":"orange-money","payment_id":"capture-cdf","occurred_at":"2026-11-01T05:30:00Z","received_at":"2026-11-01T05:30:10Z","payload_digest":"0048839fc11cae97da52d7e4c4b368624191ff5e515c376f48d0e63d8c435749"},
+    {"event_id":"018f0000-0000-7000-8000-000000000003","tenant_id":"tenant-demo","kind":"payment_captured","amount_minor":"500","currency":"USD","provider":"mpesa","payment_id":"capture-usd","occurred_at":"2026-11-01T06:30:00Z","received_at":"2026-11-01T08:30:00Z","payload_digest":"b16361634e3c667b16f0d0366156e7fe4d8fb23254a89f9fce4519960c00b5a5"},
+    {"event_id":"018f0000-0000-7000-8000-000000000004","tenant_id":"tenant-demo","kind":"payment_refunded","amount_minor":"2000","currency":"CDF","provider":"orange-money","payment_id":"refund-cdf","related_event_id":"018f0000-0000-7000-8000-000000000002","occurred_at":"2026-11-01T07:00:00Z","received_at":"2026-11-01T07:00:10Z","payload_digest":"8299ec54b552bce5430fc3f7e24b568fdbf8db1b2db1827bb3e7e966724b54d3"},
+    {"event_id":"018f0000-0000-7000-8000-000000000005","tenant_id":"tenant-demo","kind":"payment_captured","amount_minor":"3000","currency":"CDF","provider":"airtel-money","payment_id":"voided-capture","occurred_at":"2026-11-01T07:30:00Z","received_at":"2026-11-01T07:30:05Z","payload_digest":"a3bd89b5242bb2f194e29b72400298f7a8c48caf8c6f0c144ab375ee6b06e968"},
+    {"event_id":"018f0000-0000-7000-8000-000000000006","tenant_id":"tenant-demo","kind":"payment_voided","amount_minor":"3000","currency":"CDF","provider":"airtel-money","payment_id":"void","related_event_id":"018f0000-0000-7000-8000-000000000005","occurred_at":"2026-11-01T08:00:00Z","received_at":"2026-11-01T08:00:05Z","payload_digest":"54cc0a958814f74a3cd124ad106e220f0199cd62bb8db7be134d8302450bfea1"},
+    {"event_id":"018f0000-0000-7000-8000-000000000007","tenant_id":"tenant-demo","kind":"payment_reconciled","amount_minor":"0","currency":"CDF","provider":"orange-money","payment_id":"reconciled","related_event_id":"018f0000-0000-7000-8000-000000000002","occurred_at":"2026-11-01T06:00:00Z","received_at":"2026-11-01T06:00:00Z","payload_digest":"f1bde3e5a759f1c53bf6a2f715fc73bd1ea472e245e93765e3872d18c2d8921b"}
+  ],
+  "expected": {
+    "projection_version": "4062f08d5c8cf890ed4d10acb8d3129a90d6774448ffd2db0055f696ad18a341",
+    "etag": "\"7f9e7556da0279a20179dfcff9276d8fe98355c4a54f1aaf25c7dfee2100a8d2\"",
+    "current_currencies": [
+      {"currency":"CDF","gross_minor":"10000","refunds_minor":"2000","net_minor":"8000","payment_count":"1","refund_count":"1","average_ticket_minor":"10000"},
+      {"currency":"USD","gross_minor":"500","refunds_minor":"0","net_minor":"500","payment_count":"1","refund_count":"0","average_ticket_minor":"500"}
+    ],
+    "current_providers": [
+      {"provider":"mpesa","currencies":[{"currency":"USD","gross_minor":"500","refunds_minor":"0","net_minor":"500","payment_count":"1","refund_count":"0","average_ticket_minor":"500"}]},
+      {"provider":"orange-money","currencies":[{"currency":"CDF","gross_minor":"10000","refunds_minor":"2000","net_minor":"8000","payment_count":"1","refund_count":"1","average_ticket_minor":"10000"}]}
+    ],
+    "comparison_cdf_gross_minor": "4000",
+    "series_boundaries": [["2026-11-01T04:00:00Z","2026-11-02T05:00:00Z"]],
+    "reconciliation_lag_seconds_max": "99000",
+    "unreconciled_count": "1",
+    "sync_freshness_seconds": "99000",
+    "action_required": ["late_arrival","reconciliation_overdue","stale_sync"]
+  }
+}
