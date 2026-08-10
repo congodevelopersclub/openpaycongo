@@ -21,3 +21,7 @@ Mobile/user authorization uses authorization code plus PKCE and an enrolled devi
 Services authorize each request by tenant and scope, validate the public contract, persist the immutable event before projection, and publish cursor-based changes. Replays with the same idempotency key and digest return the original result; the same key with a different digest returns `409`.
 
 See [interoperability](interoperability.md), [reliability](reliability.md), and the canonical [OpenAPI contract](openapi.yaml).
+
+## Enrollment boundary
+
+Device enrollment follows [ADR 004](adr-004-secure-device-enrollment.md). The onion boundary is a typed pairing domain and application service surrounded by clock, randomness, identity signer, `KeyProtector`, and atomic repository ports. Go chi, Node Fastify, and Laravel adapters must remain interchangeable behind the public schemas and black-box tests. A later shared Preact/TypeScript administration UI may request and display a QR, revoke an enrollment, and show audit state; it does not perform server cryptography or receive persisted secrets.

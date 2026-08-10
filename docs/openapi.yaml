@@ -12,6 +12,189 @@ security:
   - MobileOAuth: []
   - MerchantOAuth: []
 paths:
+  /v1/pairing/intents:
+    post:
+      summary: Issue one short-lived signed enrollment QR for the authenticated tenant
+      operationId: issuePairingIntent
+      security:
+        - AdministratorOAuth: [pairing:intent:create]
+      responses:
+        '201':
+          description: Enrollment QR issued; display transiently and never retain a screenshot
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/json:
+              schema:
+                $ref: ./pairing-qr.schema.json
+        '401': { $ref: '#/components/responses/PairingProblem' }
+        '403': { $ref: '#/components/responses/PairingProblem' }
+        '429': { $ref: '#/components/responses/PairingProblem' }
+        default:
+          $ref: '#/components/responses/PairingProblem'
+  /v1/pairing/complete:
+    post:
+      summary: Atomically consume a PairingIntent and return encrypted key confirmation
+      operationId: completePairing
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./pairing-completion.schema.json
+      responses:
+        '201':
+          description: Intent consumed; device awaits administrator short-code confirmation
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+          content:
+            application/json:
+              schema:
+                $ref: ./pairing-completion-result.schema.json
+        '200':
+          description: Exact encrypted request replay; original encrypted response returned
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+          content:
+            application/json:
+              schema:
+                $ref: ./pairing-completion-result.schema.json
+        '404':
+          $ref: '#/components/responses/PairingUnavailable'
+        '429': { $ref: '#/components/responses/PairingUnavailable' }
+        default:
+          $ref: '#/components/responses/PairingUnavailable'
+  /v1/pairing/intents/{intent_id}/confirmation:
+    get:
+      summary: Read the authenticated administrator pairing display state
+      operationId: getPairingConfirmation
+      security:
+        - AdministratorOAuth: [pairing:confirm]
+      parameters:
+        - name: intent_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+      responses:
+        '200':
+          description: Pairing state; code is display-only and never sufficient authorization
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairingConfirmationState'
+        '401': { $ref: '#/components/responses/PairingProblem' }
+        '403': { $ref: '#/components/responses/PairingProblem' }
+        '404': { $ref: '#/components/responses/PairingProblem' }
+        default:
+          $ref: '#/components/responses/PairingProblem'
+    post:
+      summary: Activate on matching displays or revoke on mismatch
+      operationId: confirmPairing
+      security:
+        - AdministratorOAuth: [pairing:confirm]
+      parameters:
+        - name: intent_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, decision, reason]
+              properties:
+                request_id: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+                decision: { type: string, enum: [codes_match, codes_mismatch] }
+                reason: { type: string, enum: [codes_compared_match, codes_compared_mismatch] }
+              oneOf:
+                - properties:
+                    decision: { const: codes_match }
+                    reason: { const: codes_compared_match }
+                - properties:
+                    decision: { const: codes_mismatch }
+                    reason: { const: codes_compared_mismatch }
+      responses:
+        '200':
+          description: Terminal administrator confirmation decision
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, enum: [active, revoked, expired] }
+        '401': { $ref: '#/components/responses/PairingProblem' }
+        '403': { $ref: '#/components/responses/PairingProblem' }
+        '404': { $ref: '#/components/responses/PairingProblem' }
+        '409':
+          description: A different terminal confirmation decision or request already won
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default:
+          $ref: '#/components/responses/PairingProblem'
+  /v1/pairing/device-status:
+    get:
+      summary: Read pairing state using the bearer delivered only inside the encrypted completion response
+      operationId: getPhonePairingStatus
+      security:
+        - PairingStatusBearer: []
+      responses:
+        '200':
+          description: Current phone pairing state; SAS is never returned on this channel
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, enum: [pending_confirmation, active, revoked, expired] }
+        '404': { $ref: '#/components/responses/PairingUnavailable' }
+        default: { $ref: '#/components/responses/PairingUnavailable' }
+    post:
+      summary: Acknowledge that the phone learned an exact terminal pairing state
+      operationId: acknowledgePhonePairingStatus
+      security:
+        - PairingStatusBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, revoked, expired] }
+      responses:
+        '204':
+          description: Exact terminal status acknowledgement recorded or idempotently replayed
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+        '404': { $ref: '#/components/responses/PairingUnavailable' }
+        default: { $ref: '#/components/responses/PairingUnavailable' }
   /v1/sync/push:
     post:
       summary: Persist exactly one canonical event for replication or merchant integration
@@ -149,6 +332,20 @@ paths:
                   migration_revision: { type: string }
 components:
   securitySchemes:
+    PairingStatusBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-256-bit-pairing-status-token
+      description: Token delivered only inside the authenticated s2c encrypted completion response; never an administrator OAuth token
+    AdministratorOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://identity.example.invalid/oauth/authorize
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            pairing:intent:create: Issue a short-lived PairingIntent QR for the authenticated tenant administrator
+            pairing:confirm: Confirm matching displays or revoke a pending pairing as the authenticated tenant administrator
     MobileOAuth:
       type: oauth2
       flows:
@@ -169,6 +366,31 @@ components:
             ledger:read: Read a tenant-authorized replicated event page
             ledger:ack: Acknowledge application of a pull cursor
   schemas:
+    PairingConfirmationState:
+      oneOf:
+        - $ref: '#/components/schemas/PairingConfirmationPending'
+        - $ref: '#/components/schemas/PairingConfirmationTerminal'
+    PairingConfirmationPending:
+      type: object
+      additionalProperties: false
+      required: [status, expires_at, short_authentication_code]
+      properties:
+        status: { type: string, const: pending_confirmation }
+        expires_at:
+          type: string
+          format: date-time
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+        short_authentication_code: { type: string, pattern: '^[0-9]{6}$' }
+    PairingConfirmationTerminal:
+      type: object
+      additionalProperties: false
+      required: [status, expires_at]
+      properties:
+        status: { type: string, enum: [active, revoked, expired] }
+        expires_at:
+          type: string
+          format: date-time
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
     PushResult:
       type: object
       additionalProperties: false
@@ -203,7 +425,34 @@ components:
         migration_revision: { type: string }
         adapter: { type: string }
         implementation: { type: string }
+  headers:
+    PairingNoStore:
+      required: true
+      schema: { type: string, const: 'private, no-store' }
   responses:
+    PairingProblem:
+      description: Pairing request failed
+      headers:
+        Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PairingUnavailable:
+      description: Generic unavailable response for every unknown, expired, consumed, exhausted, malformed, invalid-proof, protector, or cleanup failure
+      headers:
+        Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [type, title, status, code, request_id]
+            properties:
+              type: { type: string, const: 'https://openpaycongo.example/problems/pairing-unavailable' }
+              title: { type: string, const: 'Pairing unavailable' }
+              status: { type: integer, const: 404 }
+              code: { type: string, const: 'pairing_unavailable' }
+              request_id: { type: string, minLength: 1, maxLength: 128 }
     Problem:
       description: RFC 9457 problem details
       content:

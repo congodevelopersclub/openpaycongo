@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "intent_id": "AAECAwQFBgcICQoLDA0ODw",
+  "client_key_agreement_public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "nonce": "AAECAwQFBgcICQoL",
+  "ciphertext": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/pairing-completion.schema.json",
+  "title": "Encrypted device enrollment completion",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "intent_id",
+    "client_key_agreement_public_key",
+    "nonce",
+    "ciphertext"
+  ],
+  "properties": {
+    "version": { "const": "1" },
+    "intent_id": { "$ref": "#/$defs/bytes16" },
+    "client_key_agreement_public_key": { "$ref": "#/$defs/bytes32" },
+    "nonce": { "$ref": "#/$defs/bytes12" },
+    "ciphertext": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,2731}$"
+    }
+  },
+  "$defs": {
+    "bytes12": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16}$"
+    },
+    "bytes16": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22}$"
+    },
+    "bytes32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    }
+  }
+}

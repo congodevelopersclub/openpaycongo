@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/pairing-qr.schema.json",
+  "title": "One-time PairingIntent QR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "endpoint",
+    "intent_id",
+    "intent_nonce",
+    "expires_at",
+    "algorithms",
+    "enrollment_signing_fingerprint",
+    "enrollment_signing_public_key",
+    "server_key_agreement_public_key",
+    "signature"
+    ,"trust_mode"
+  ],
+  "properties": {
+    "version": { "const": "1" },
+    "endpoint": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://(?=[^/:]*[a-z])[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?/v1/pairing/complete$",
+      "maxLength": 512
+    },
+    "intent_id": { "$ref": "#/$defs/bytes16" },
+    "intent_nonce": { "$ref": "#/$defs/bytes32" },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "algorithms": { "const": "X25519-HKDF-SHA256-AES-256-GCM+Ed25519" },
+    "enrollment_signing_fingerprint": { "$ref": "#/$defs/bytes32" },
+    "enrollment_signing_public_key": { "$ref": "#/$defs/bytes32" },
+    "server_key_agreement_public_key": { "$ref": "#/$defs/bytes32" },
+    "signature": { "$ref": "#/$defs/bytes64" },
+    "trust_mode": { "enum": ["first_use_requires_sas", "pinned_continuity"] }
+  },
+  "$defs": {
+    "bytes16": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22}$"
+    },
+    "bytes32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "bytes64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{86}$"
+    }
+  }
+}

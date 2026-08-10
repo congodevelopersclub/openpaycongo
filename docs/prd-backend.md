@@ -88,3 +88,55 @@ The API is a portability boundary, not an instruction to expose a database direc
 36. As an operator, I want projection rebuild and cursor invalidation/reissue after restore, so that stale cursors cannot corrupt sync.
 37. As a security reviewer, I want problems/logs/traces body-free, so that raw SMS and secrets never echo.
 38. As an implementer, I want Go chi, Node Fastify, and Laravel routes tested by one black-box harness, so that framework changes preserve meaning.
+
+## Secure device enrollment slice
+
+39. As a tenant administrator, I want a short-lived signed QR, so that physical access bootstraps exactly one device without exposing tenant claims.
+40. As a mobile user, I want the app to verify HTTPS and the pairing transcript, so that Diffie-Hellman is never mistaken for authentication.
+41. As an operator, I want one-time consumption and an exact encrypted replay result, so that a timeout cannot create a second device.
+42. As a security reviewer, I want bounded expiry/attempts and generic unavailable errors, so that screenshots, brute force, and enrollment enumeration are constrained.
+43. As an administrator, I want the same transcript-derived short code shown on my authenticated screen and phone, so that first-use substitution cannot activate a device.
+44. As an operator, I want unique completion reservations separated from completed invalid-proof attempts, so that bounded concurrent KMS outages neither exhaust the client's proof budget nor delete a recoverable intent key.
+
+The normative protocol is [ADR 004](adr-004-secure-device-enrollment.md). The active slice implements the Go typed domain/application core and deterministic ports. It deliberately has no HTTP or SQLite adapter: the legacy store cannot yet prove atomic intent consumption, unique tenant/install identity, pending administrator confirmation, cached replay response, and protected-root persistence. Node/Fastify, Laravel, shared Preact administration/confirmation, and key rotation are subsequent parity slices.
+
+The QR references the long-lived OpenPay enrollment-signing identity, never CDN/TLS SPKI, but a key delivered only inside that QR is not independent authentication. Authenticated administrator context plus mandatory short-code confirmation provides the physical trust step. The hosting edge, administrator UI delivery, and OAuth session are trusted during bootstrap; compromise of any of them can replace the QR or authorize an attacker. Device signatures and request MACs remain portable across direct container, Cloudflare, and Vercel hosting after activation, but no edge-compromise resistance is claimed.
+
+### Mobile pairing acceptance
+
+- The app rejects unknown QR fields, non-HTTPS or non-canonical endpoints, unsupported versions/suites,
+  non-UTC-second expiry, expired intents, and malformed fixed-size values before performing key agreement.
+- Before consulting continuity/trust state, the app requires
+  `SHA-256(enrollment_signing_public_key) == enrollment_signing_fingerprint`, then verifies the Ed25519
+  signature over the exact canonical QR transcript. The shared signed-QR vector and every signed-field
+  mutation must pass on Android and any future mobile implementation.
+- The signed QR carries `first_use_requires_sas` or `pinned_continuity`. Pinned mode requires an existing
+  matching fingerprint. First use is provisional physical-QR bootstrap and can never activate before the
+  mandatory independently compared SAS. Missing pins and signing-key rotation require a new authenticated
+  first-use/SAS ceremony; silent pin replacement is forbidden.
+- For each accepted intent the app generates a fresh X25519 keypair and a cryptographically random 96-bit
+  AES-GCM nonce. It never reuses a nonce with the same derived key. RNG failure aborts pairing. It separately
+  creates or loads a non-exportable long-term Ed25519 device-signing key; the ephemeral X25519 key never
+  substitutes for device authorship.
+- The app derives the labeled `c2s`, `s2c-aead`, `s2c-confirm`, `install-root`, and unbiased six-digit SAS
+  values from the canonical transcript. It verifies response AEAD and key confirmation before accepting the
+  server result. It never sends or receives the install root.
+- The install root is stored as pending only in Keystore-backed secure storage. Pending material cannot sign
+  in, MAC requests, or authorize sync. The phone must display the derived SAS and activation requires an
+  authenticated administrator to report an exact display match; mismatch revokes pairing and deletes pending
+  root material on both sides.
+- An exact completion retry reuses the exact saved request bytes, client ephemeral key, and nonce. It must not
+  re-encrypt changed plaintext under the same key/nonce. If the app crashes before durably saving that retry
+  state, it discards the pending root and requires a new QR rather than guessing recovery state.
+- If the phone is offline before completion, expiry ends the attempt and pending material is deleted. If it
+  receives `pending_confirmation` and then goes offline, it keeps the root unusable, keeps showing the SAS,
+  and reconciles authenticated state when online; `revoked` or `expired` deletes the root. After activation,
+  later server revocation likewise makes the root unusable and removes it according to platform guarantees.
+- The encrypted completion response carries a random 256-bit pairing-status bearer whose digest is persisted.
+  Over HTTPS the phone uses it, without administrator OAuth, to read pending/terminal state and idempotently
+  acknowledge only the exact terminal state. It authorizes no ledger or application operation. Wrong bearers
+  and all unavailable completion cases return one fixed 404 problem with no detail or category oracle.
+- QR, SAS, ciphertext, roots, private keys, and completion bodies never enter analytics, crash reports, logs,
+  notifications, backups, or screenshots retained by the app. Administrator issue/read/confirm responses are
+  `private, no-store`; every other pairing success and error carries the same cache directive, and the UI
+  clears pairing material when leaving the flow.

@@ -68,6 +68,7 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
     resolve(repositoryRoot, 'docs/Dockerfile'),
     'utf8',
   );
+  const dockerIgnore = await readFile(resolve(repositoryRoot, '.dockerignore'), 'utf8');
   const androidManifest = await readFile(
     resolve(repositoryRoot, 'android-client/android/app/src/main/AndroidManifest.xml'),
     'utf8',
@@ -133,7 +134,18 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
   assert.match(contractDockerfile, /COPY docs\/package\.json docs\/package-lock\.json \.\//);
   assert.match(contractDockerfile, /RUN npm ci --ignore-scripts/);
   assert.match(contractDockerfile, /WORKDIR \/workspace[\s\S]*COPY docs\/ \.\/docs\//);
+  assert.match(contractDockerfile, /COPY \.dockerignore \/workspace\/\.dockerignore/);
   assert.doesNotMatch(contractDockerfile, /COPY \. \./, 'contract image must not copy the repository wholesale');
+  for (const vector of [
+    'pairing-signed-qr.vector.json',
+    'pairing-key-schedule.vector.json',
+    'pairing-protocol.vector.json',
+  ]) {
+    const source = `wallet-plugin-go/internal/pairing/testdata/${vector}`;
+    assert.match(contractDockerfile, new RegExp(`COPY ${source.replaceAll('.', '\\.')} /workspace/${source.replaceAll('.', '\\.')}`));
+    assert.match(dockerIgnore, new RegExp(`!${source.replaceAll('.', '\\.')}`));
+  }
+  assert.doesNotMatch(contractDockerfile, /COPY wallet-plugin-go\/internal\/pairing\/testdata\/\s/, 'contract image must copy vectors individually');
   assert.match(contractDockerfile, /FROM dependencies AS test[\s\S]*RUN npm test/);
   assert.match(flutterDockerfile, /flutter analyze/);
   assert.match(flutterDockerfile, /flutter test/);

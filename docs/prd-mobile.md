@@ -103,3 +103,36 @@ See `docs/github-issue-native-sms-keystore.md`. No production role receiver, per
 34. As a merchant, I want wallet membership failures explained without tenant data leakage, so that authorization is understandable.
 35. As a tester, I want manual and merchant fallback tested on every SMS-policy state, so that distribution changes do not block accounting.
 36. As a release owner, I want actual runtime screenshots only after the journey passes, so that evidence is honest.
+
+## Normative device pairing contract
+
+This section is normative for the future Android pairing implementation; the current Flutter prototype does
+not implement it. The wire protocol is defined by `adr-004-secure-device-enrollment.md` and the checked-in
+Go/Node contract vectors.
+
+- Accept only the exact canonical completion endpoint grammar: lowercase ASCII DNS with at least two labels,
+  optional canonical decimal port 1-65535, and exact path `/v1/pairing/complete`. Reject IP literals,
+  userinfo, queries, fragments, percent-encoding, alternate paths, trailing slash, and non-UTC-second expiry.
+- Verify every bounded signed QR field, including `trust_mode`, the exact enrollment Ed25519 public key, and
+  `SHA-256(public_key) == fingerprint`, before key agreement. `pinned_continuity` additionally requires an
+  existing matching trusted pin. `first_use_requires_sas` is provisional: physical QR plus the independently
+  compared mandatory SAS is the bootstrap only when local pin state is absent and the user grants explicit
+  authenticated local recovery authorization. Both modes must inspect local pin state; an existing pin can
+  never silently downgrade to first use. The device cannot activate before the administrator confirms SAS.
+- Generate fresh X25519 and long-term non-exportable Ed25519 device-signing keys and unique 96-bit AEAD nonces.
+  Derive fixed 32-byte `c2s`, `s2c-aead`, `s2c-confirm`, and install-root values plus the unbiased six-digit
+  SAS. Verify Ed25519 proof, response AEAD, and key confirmation against the full shared protocol vector.
+- Keep the install root pending and unusable for sync or application request MACs until active. Persist exact
+  completion retry bytes before sending; after a crash without that durable state, delete pending material and
+  require a new QR. Never re-encrypt different plaintext under a saved key/nonce.
+- Read the 256-bit pairing-status bearer only from the authenticated encrypted completion response, store it in
+  Keystore-backed secure storage, and use it only over HTTPS to learn `pending_confirmation`, `active`,
+  `revoked`, or `expired` without administrator OAuth. Acknowledge only the exact terminal status; terminal ack
+  replay is idempotent. Wrong bearer and all unavailable cases have one response shape.
+- On mismatch, expiry, revocation, invalid confirmation, or unrecoverable local state, delete pending root,
+  ephemeral key, status bearer, SAS, QR, and retry ciphertext. Rotation or loss of a trusted enrollment pin is
+  not silent recovery: require an authenticated administrator to start a new first-use/SAS ceremony. Automated
+  enrollment-key rotation and multi-device recovery remain out of scope.
+- Never put QR, SAS, status bearer, ciphertext, roots, private keys, completion bodies, or raw SMS in logs,
+  analytics, crash reports, notifications, screenshots, or backups. Every pairing HTTP response is
+  `Cache-Control: private, no-store`.
