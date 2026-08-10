@@ -1,0 +1,27 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e8f2ec; background: #0d2a2f; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button { font: inherit; }
+.shell { width: min(100% - 2rem, 55rem); margin: 0 auto; padding: clamp(1.25rem, 4vw, 4rem) 0 3rem; }
+header { display: flex; align-items: center; gap: .75rem; }
+.mark { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .65rem; background: #f5c25b; color: #0d2a2f; font-weight: 900; letter-spacing: -.1em; }
+.product,.area,.eyebrow,.detail,.fine { margin: 0; }
+.product { font-weight: 750; }
+.area,.fine { color: #a7c4bd; font-size: .9rem; }
+.mode { margin-left: auto; border: 1px solid #496b68; border-radius: 99px; padding: .3rem .6rem; color: #cde0d8; font-size: .8rem; }
+.focus { margin-top: clamp(3rem, 10vw, 8rem); padding: clamp(1.5rem, 5vw, 3.5rem); border-radius: 1.25rem; background: #133a40; box-shadow: 0 1.5rem 5rem #04131580; }
+.focus--ready { border-left: .35rem solid #7ed6b0; }
+.focus--degraded,.focus--offline,.focus--stale { border-left: .35rem solid #f5c25b; }
+.eyebrow { color: #f5c25b; text-transform: uppercase; letter-spacing: .11em; font-size: .72rem; font-weight: 800; }
+h1 { max-width: 14ch; margin: .5rem 0; font-size: clamp(2.2rem, 7vw, 4.8rem); letter-spacing: -.065em; line-height: .95; }
+.detail { max-width: 42rem; color: #cde0d8; line-height: 1.55; }
+.freshness { margin: 1rem 0 0; color: #a7c4bd; font-size: .85rem; }
+button { margin-top: 1.5rem; padding: .8rem 1.1rem; border: 0; border-radius: .55rem; background: #f5c25b; color: #142e31; cursor: pointer; font-weight: 800; }
+button:focus-visible { outline: .2rem solid white; outline-offset: .2rem; }
+button:disabled { cursor: wait; opacity: .65; }
+.evidence { display: grid; gap: 1.5rem; padding: 2rem 0; border-bottom: 1px solid #31575a; }
+dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; margin: 0; }
+dt { color: #a7c4bd; font-size: .78rem; }
+dd { margin: .25rem 0 0; font-weight: 700; word-break: break-word; }
+@media (prefers-reduced-motion: no-preference) { .focus { animation: settle .3s ease-out; } }
+@keyframes settle { from { transform: translateY(.5rem); opacity: .2; } to { transform: none; opacity: 1; } }
