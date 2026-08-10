@@ -1,17 +1,9 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.opencongopay">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
    <application
         android:label="opencongopay"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-        
-            <receiver android:name="com.shounakmulay.telephony.sms.IncomingSmsReceiver"
-		    android:permission="android.permission.BROADCAST_SMS" android:exported="true">
-                <intent-filter>
-                    <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
-                </intent-filter>
-            </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -33,6 +25,14 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <receiver
+            android:name=".sms.SmsDeliverReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

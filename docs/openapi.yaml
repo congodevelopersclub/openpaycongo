@@ -1,0 +1,539 @@
+openapi: 3.1.0
+info:
+  title: OpenPay Congo Canonical Sync API
+  version: 1.0.0-draft
+  description: |
+    Planned interoperability contract only. It does not describe the current Go prototype.
+    V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
+    wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
+servers:
+  - url: https://api.example.invalid
+security:
+  - MobileOAuth: []
+  - MerchantOAuth: []
+paths:
+  /v1/pairing/intents:
+    post:
+      summary: Issue one short-lived signed enrollment QR for the authenticated tenant
+      operationId: issuePairingIntent
+      security:
+        - AdministratorOAuth: [pairing:intent:create]
+      responses:
+        '201':
+          description: Enrollment QR issued; display transiently and never retain a screenshot
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/json:
+              schema:
+                $ref: ./pairing-qr.schema.json
+        '401': { $ref: '#/components/responses/PairingProblem' }
+        '403': { $ref: '#/components/responses/PairingProblem' }
+        '429': { $ref: '#/components/responses/PairingProblem' }
+        default:
+          $ref: '#/components/responses/PairingProblem'
+  /v1/pairing/complete:
+    post:
+      summary: Atomically consume a PairingIntent and return encrypted key confirmation
+      operationId: completePairing
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./pairing-completion.schema.json
+      responses:
+        '201':
+          description: Intent consumed; device awaits administrator short-code confirmation
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+          content:
+            application/json:
+              schema:
+                $ref: ./pairing-completion-result.schema.json
+        '200':
+          description: Exact encrypted request replay; original encrypted response returned
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+          content:
+            application/json:
+              schema:
+                $ref: ./pairing-completion-result.schema.json
+        '404':
+          $ref: '#/components/responses/PairingUnavailable'
+        '429': { $ref: '#/components/responses/PairingUnavailable' }
+        default:
+          $ref: '#/components/responses/PairingUnavailable'
+  /v1/pairing/intents/{intent_id}/confirmation:
+    get:
+      summary: Read the authenticated administrator pairing display state
+      operationId: getPairingConfirmation
+      security:
+        - AdministratorOAuth: [pairing:confirm]
+      parameters:
+        - name: intent_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+      responses:
+        '200':
+          description: Pairing state; code is display-only and never sufficient authorization
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairingConfirmationState'
+        '401': { $ref: '#/components/responses/PairingProblem' }
+        '403': { $ref: '#/components/responses/PairingProblem' }
+        '404': { $ref: '#/components/responses/PairingProblem' }
+        default:
+          $ref: '#/components/responses/PairingProblem'
+    post:
+      summary: Activate on matching displays or revoke on mismatch
+      operationId: confirmPairing
+      security:
+        - AdministratorOAuth: [pairing:confirm]
+      parameters:
+        - name: intent_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, decision, reason]
+              properties:
+                request_id: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+                decision: { type: string, enum: [codes_match, codes_mismatch] }
+                reason: { type: string, enum: [codes_compared_match, codes_compared_mismatch] }
+              oneOf:
+                - properties:
+                    decision: { const: codes_match }
+                    reason: { const: codes_compared_match }
+                - properties:
+                    decision: { const: codes_mismatch }
+                    reason: { const: codes_compared_mismatch }
+      responses:
+        '200':
+          description: Terminal administrator confirmation decision
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, enum: [active, revoked, expired] }
+        '401': { $ref: '#/components/responses/PairingProblem' }
+        '403': { $ref: '#/components/responses/PairingProblem' }
+        '404': { $ref: '#/components/responses/PairingProblem' }
+        '409':
+          description: A different terminal confirmation decision or request already won
+          headers:
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, no-store' }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default:
+          $ref: '#/components/responses/PairingProblem'
+  /v1/pairing/device-status:
+    get:
+      summary: Read pairing state using the bearer delivered only inside the encrypted completion response
+      operationId: getPhonePairingStatus
+      security:
+        - PairingStatusBearer: []
+      responses:
+        '200':
+          description: Current phone pairing state; SAS is never returned on this channel
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, enum: [pending_confirmation, active, revoked, expired] }
+        '404': { $ref: '#/components/responses/PairingUnavailable' }
+        default: { $ref: '#/components/responses/PairingUnavailable' }
+    post:
+      summary: Acknowledge that the phone learned an exact terminal pairing state
+      operationId: acknowledgePhonePairingStatus
+      security:
+        - PairingStatusBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, revoked, expired] }
+      responses:
+        '204':
+          description: Exact terminal status acknowledgement recorded or idempotently replayed
+          headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+        '404': { $ref: '#/components/responses/PairingUnavailable' }
+        default: { $ref: '#/components/responses/PairingUnavailable' }
+  /v1/analytics/sales:
+    get:
+      summary: Read a bounded tenant sales projection derived from immutable ledger events
+      operationId: querySalesAnalytics
+      security:
+        - AdministratorOAuth: [analytics:read]
+        - MobileOAuth: [analytics:read]
+        - MerchantOAuth: [analytics:read]
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date-time, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date-time, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' }
+        - in: query
+          name: snapshot_at
+          required: true
+          description: Immutable receipt-time cutoff; the server rejects future values.
+          schema: { type: string, format: date-time, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' }
+        - in: query
+          name: time_zone
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - in: query
+          name: interval
+          required: true
+          schema: { type: string, enum: [hour, day] }
+        - in: query
+          name: comparison
+          required: true
+          schema: { type: boolean }
+        - in: header
+          name: If-None-Match
+          required: false
+          schema: { type: string, pattern: '^"[a-f0-9]{64}"$' }
+      responses:
+        '200':
+          description: Ready deterministic tenant sales projection
+          headers:
+            ETag:
+              required: true
+              schema: { type: string, pattern: '^"[a-f0-9]{64}"$' }
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, max-age=30, must-revalidate' }
+            Vary:
+              required: true
+              schema: { type: string, const: Authorization }
+          content:
+            application/json:
+              schema: { $ref: ./sales-analytics-response.schema.json }
+        '304':
+          description: The authorized tenant projection still matches If-None-Match
+          headers:
+            ETag:
+              required: true
+              schema: { type: string, pattern: '^"[a-f0-9]{64}"$' }
+            Cache-Control:
+              required: true
+              schema: { type: string, const: 'private, max-age=30, must-revalidate' }
+            Vary:
+              required: true
+              schema: { type: string, const: Authorization }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/sync/push:
+    post:
+      summary: Persist exactly one canonical event for replication or merchant integration
+      operationId: pushEvent
+      security:
+        - MobileOAuth: [ledger:write]
+        - MerchantOAuth: [ledger:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event]
+              properties:
+                event:
+                  $ref: ./ledger-event.schema.json
+      responses:
+        '201':
+          description: Event persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushResult'
+        '200':
+          description: Idempotent replay; returns the original result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushResult'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/sync/pull:
+    get:
+      summary: Read replicated events after an opaque cursor
+      operationId: pullEvents
+      security:
+        - MobileOAuth: [ledger:read]
+        - MerchantOAuth: [ledger:read]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 1024 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Ordered page of immutable events
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [events, next_cursor]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: ./ledger-event.schema.json }
+                  next_cursor: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/sync/ack:
+    post:
+      summary: Monotonically and idempotently acknowledge an applied cursor for the authenticated replica
+      operationId: acknowledgeCursor
+      security:
+        - MobileOAuth: [ledger:ack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cursor]
+              properties:
+                cursor: { type: string, minLength: 1, maxLength: 1024 }
+      responses:
+        '204': { description: Acknowledged; older cursor is an idempotent no-op }
+        '409': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default:
+          $ref: '#/components/responses/Problem'
+  /healthz:
+    get:
+      summary: Process liveness only
+      security: []
+      responses:
+        '200': { description: Process is alive }
+  /readyz:
+    get:
+      summary: Dependency and migration readiness
+      security: []
+      responses:
+        '200':
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+        '503':
+          description: Not ready; write admission is closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+  /version:
+    get:
+      summary: Deployed build and contract identity
+      security: []
+      responses:
+        '200':
+          description: Version metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [build, contract_version, implementation, adapter, migration_revision]
+                properties:
+                  build: { type: string }
+                  contract_version: { type: string }
+                  implementation: { type: string }
+                  adapter: { type: string }
+                  migration_revision: { type: string }
+components:
+  securitySchemes:
+    PairingStatusBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-256-bit-pairing-status-token
+      description: Token delivered only inside the authenticated s2c encrypted completion response; never an administrator OAuth token
+    AdministratorOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://identity.example.invalid/oauth/authorize
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            pairing:intent:create: Issue a short-lived PairingIntent QR for the authenticated tenant administrator
+            pairing:confirm: Confirm matching displays or revoke a pending pairing as the authenticated tenant administrator
+            analytics:read: Read the authenticated tenant's bounded ready sales projection
+    MobileOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://identity.example.invalid/oauth/authorize
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            ledger:write: Persist a tenant-authorized canonical event from an enrolled device
+            ledger:read: Read a tenant-authorized replicated event page
+            ledger:ack: Acknowledge a cursor for the enrolled replica
+            analytics:read: Read the enrolled device tenant's bounded ready sales projection
+    MerchantOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            ledger:write: Persist a tenant-authorized canonical event
+            ledger:read: Read a tenant-authorized replicated event page
+            ledger:ack: Acknowledge application of a pull cursor
+            analytics:read: Read the authenticated merchant tenant's bounded ready sales projection
+  schemas:
+    PairingConfirmationState:
+      oneOf:
+        - $ref: '#/components/schemas/PairingConfirmationPending'
+        - $ref: '#/components/schemas/PairingConfirmationTerminal'
+    PairingConfirmationPending:
+      type: object
+      additionalProperties: false
+      required: [status, expires_at, short_authentication_code]
+      properties:
+        status: { type: string, const: pending_confirmation }
+        expires_at:
+          type: string
+          format: date-time
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+        short_authentication_code: { type: string, pattern: '^[0-9]{6}$' }
+    PairingConfirmationTerminal:
+      type: object
+      additionalProperties: false
+      required: [status, expires_at]
+      properties:
+        status: { type: string, enum: [active, revoked, expired] }
+        expires_at:
+          type: string
+          format: date-time
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+    PushResult:
+      type: object
+      additionalProperties: false
+      required: [event_id, status, cursor]
+      properties:
+        event_id: { type: string }
+        status: { type: string, enum: [persisted, replayed] }
+        cursor: { type: string }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, request_id]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri-reference }
+        code: { type: string, pattern: '^[a-z0-9_]{1,64}$' }
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [datastore, migration, topology, projection, write_admission, contract_version, migration_revision, adapter, implementation]
+      properties:
+        datastore: { type: string, enum: [ok, failed] }
+        migration: { type: string, enum: [current, pending, failed] }
+        topology: { type: string, enum: [supported, unsupported] }
+        projection: { type: string, enum: [healthy, rebuilding, failed] }
+        write_admission: { type: string, enum: [open, closed] }
+        contract_version: { type: string }
+        migration_revision: { type: string }
+        adapter: { type: string }
+        implementation: { type: string }
+  headers:
+    PairingNoStore:
+      required: true
+      schema: { type: string, const: 'private, no-store' }
+  responses:
+    PairingProblem:
+      description: Pairing request failed
+      headers:
+        Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PairingUnavailable:
+      description: Generic unavailable response for every unknown, expired, consumed, exhausted, malformed, invalid-proof, protector, or cleanup failure
+      headers:
+        Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [type, title, status, code, request_id]
+            properties:
+              type: { type: string, const: 'https://openpaycongo.example/problems/pairing-unavailable' }
+              title: { type: string, const: 'Pairing unavailable' }
+              status: { type: integer, const: 404 }
+              code: { type: string, const: 'pairing_unavailable' }
+              request_id: { type: string, minLength: 1, maxLength: 128 }
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    IdempotencyConflict:
+      description: The same tenant/idempotency key was supplied with a different digest
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

@@ -1,0 +1,44 @@
+{
+  "contract_version": "sales-analytics-v1",
+  "projection_version": "4062f08d5c8cf890ed4d10acb8d3129a90d6774448ffd2db0055f696ad18a341",
+  "readiness": "ready",
+  "tenant_id": "tenant-demo",
+  "snapshot_at": "2026-11-02T12:00:00Z",
+  "observed_at": "2026-11-02T12:00:00Z",
+  "time_zone": "America/New_York",
+  "current": {
+    "from": "2026-11-01T04:00:00Z", "to": "2026-11-02T05:00:00Z",
+    "currencies": [
+      {"currency":"CDF","gross_minor":"10000","refunds_minor":"2000","net_minor":"8000","payment_count":"1","refund_count":"1","average_ticket_minor":"10000"},
+      {"currency":"USD","gross_minor":"500","refunds_minor":"0","net_minor":"500","payment_count":"1","refund_count":"0","average_ticket_minor":"500"}
+    ],
+    "providers": [
+      {"provider":"mpesa","currencies":[{"currency":"USD","gross_minor":"500","refunds_minor":"0","net_minor":"500","payment_count":"1","refund_count":"0","average_ticket_minor":"500"}]},
+      {"provider":"orange-money","currencies":[{"currency":"CDF","gross_minor":"10000","refunds_minor":"2000","net_minor":"8000","payment_count":"1","refund_count":"1","average_ticket_minor":"10000"}]}
+    ]
+  },
+  "comparison": {
+    "from": "2026-10-31T03:00:00Z", "to": "2026-11-01T04:00:00Z",
+    "currencies": [{"currency":"CDF","gross_minor":"4000","refunds_minor":"0","net_minor":"4000","payment_count":"1","refund_count":"0","average_ticket_minor":"4000"}],
+    "providers": [{"provider":"orange-money","currencies":[{"currency":"CDF","gross_minor":"4000","refunds_minor":"0","net_minor":"4000","payment_count":"1","refund_count":"0","average_ticket_minor":"4000"}]}]
+  },
+  "series": [{
+    "from": "2026-11-01T04:00:00Z", "to": "2026-11-02T05:00:00Z",
+    "currencies": [
+      {"currency":"CDF","gross_minor":"10000","refunds_minor":"2000","net_minor":"8000","payment_count":"1","refund_count":"1","average_ticket_minor":"10000"},
+      {"currency":"USD","gross_minor":"500","refunds_minor":"0","net_minor":"500","payment_count":"1","refund_count":"0","average_ticket_minor":"500"}
+    ],
+    "providers": [
+      {"provider":"mpesa","currencies":[{"currency":"USD","gross_minor":"500","refunds_minor":"0","net_minor":"500","payment_count":"1","refund_count":"0","average_ticket_minor":"500"}]},
+      {"provider":"orange-money","currencies":[{"currency":"CDF","gross_minor":"10000","refunds_minor":"2000","net_minor":"8000","payment_count":"1","refund_count":"1","average_ticket_minor":"10000"}]}
+    ]
+  }],
+  "reconciliation": {"lag_seconds_max":"99000","unreconciled_count":"1"},
+  "sync": {"status":"stale","last_received_at":"2026-11-01T08:30:00Z","freshness_seconds":"99000"},
+  "action_required": [
+    {"kind":"late_arrival","count":"1","action":"review_offline_sync"},
+    {"kind":"reconciliation_overdue","count":"1","action":"reconcile_provider"},
+    {"kind":"stale_sync","count":"1","action":"check_replica_sync"}
+  ],
+  "etag": "\"7f9e7556da0279a20179dfcff9276d8fe98355c4a54f1aaf25c7dfee2100a8d2\""
+}

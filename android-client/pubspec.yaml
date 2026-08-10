@@ -11,17 +11,14 @@ dependencies:
   flutter:
     sdk: flutter
 
-  google_ml_kit: ^0.21.0
-  another_telephony: ^0.4.1
-  http: ^1.6.0
-  sqflite: ^2.4.2+1
-  path_provider: ^2.1.5
-  local_auth: ^3.0.1
+  sqflite: ^2.4.3
+  path_provider: ^2.1.6
+  local_auth: ^3.0.2
   shared_preferences: ^2.5.5
-  provider: ^6.1.5+1
   flutter_bloc: ^9.1.1
   opentelemetry: ^0.18.11
   path: ^1.9.1
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "intent_id": "too-short",
+  "client_key_agreement_public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "nonce": "AAECAwQFBgcICQoL",
+  "ciphertext": "raw-device-secret-must-not-appear",
+  "tenant_id": "attacker-chosen-tenant"
+}

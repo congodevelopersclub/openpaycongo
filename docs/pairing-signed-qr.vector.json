@@ -1,0 +1,15 @@
+{
+  "qr": {
+    "version": "1",
+    "endpoint": "https://pairing.example.test/v1/pairing/complete",
+    "intent_id": "AAECAwQFBgcICQoLDA0ODw",
+    "intent_nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "expires_at": "2026-08-10T09:32:00Z",
+    "algorithms": "X25519-HKDF-SHA256-AES-256-GCM+Ed25519",
+    "enrollment_signing_fingerprint": "Fs81cR1vRgNPZbGmGrwneKW5Th0PkADWm8jyzB6fhI0",
+    "enrollment_signing_public_key": "Q3o0tdFSDnY9xtFPrWsm-F7fh-yGnYnPRrkJfZ99vRU",
+    "server_key_agreement_public_key": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+    "signature": "3Gd5-vj0Lyh7dKP8j3Au8_dmWa8vwXtYmG9FL7yi1gQfAqBGEYHnzAmtTeyeHoolFXszu2STWxMKBLTLKhPqBg",
+    "trust_mode": "pinned_continuity"
+  }
+}

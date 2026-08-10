@@ -1,0 +1,64 @@
+# ubuntu:24.04 verified amd64 manifest digest.
+FROM ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 AS flutter-sdk
+
+ARG FLUTTER_VERSION=3.44.9
+ARG FLUTTER_ARCHIVE_SHA256=a9120fa4a01048bdef438ddc3a2d4b7389662ea98a95db86eeaf10382bc4efcb
+ARG ANDROID_COMMAND_LINE_TOOLS=13114758
+ARG ANDROID_NDK_VERSION=28.2.13676358
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ANDROID_HOME=/opt/android-sdk \
+    FLUTTER_HOME=/opt/flutter \
+    PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:$PATH
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates curl git openjdk-17-jdk-headless unzip xz-utils zip \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p "$ANDROID_HOME/cmdline-tools"
+
+RUN curl --fail --location --retry 3 --output /tmp/flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
+    && echo "${FLUTTER_ARCHIVE_SHA256}  /tmp/flutter.tar.xz" | sha256sum --check --strict \
+    && tar --extract --xz --file /tmp/flutter.tar.xz --directory /opt \
+    && rm /tmp/flutter.tar.xz
+
+RUN curl --fail --location --retry 3 --output /tmp/android-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_COMMAND_LINE_TOOLS}_latest.zip" \
+    && unzip -q /tmp/android-tools.zip -d "$ANDROID_HOME/cmdline-tools" \
+    && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" \
+    && rm /tmp/android-tools.zip
+
+RUN yes | sdkmanager --licenses \
+    && sdkmanager "platform-tools"
+
+RUN sdkmanager "platforms;android-34" "platforms;android-35" "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+
+RUN useradd --create-home --uid 10001 flutter \
+    && chown -R flutter:flutter "$ANDROID_HOME" "$FLUTTER_HOME"
+
+USER flutter
+
+FROM flutter-sdk AS dependencies
+
+WORKDIR /workspace
+
+COPY --chown=flutter:flutter pubspec.yaml pubspec.lock ./
+RUN flutter --version | grep -F 'Flutter 3.44.9' && flutter --version | grep -F 'Dart 3.12.2'
+RUN flutter pub get
+
+FROM dependencies AS source
+COPY --chown=flutter:flutter . .
+
+FROM source AS analyze
+RUN flutter analyze
+
+FROM source AS test
+RUN flutter test
+
+FROM source AS native-test
+RUN flutter build apk --config-only --debug
+RUN cd android && ./gradlew :app:testDebugUnitTest
+
+FROM native-test AS apk
+RUN flutter build apk --debug
+
+FROM scratch AS artifact
+COPY --from=apk /workspace/build/app/outputs/flutter-apk/app-debug.apk /app-debug.apk

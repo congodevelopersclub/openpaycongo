@@ -1,0 +1,11 @@
+.dart_tool/
+.git/
+.gitignore
+build/
+android/.gradle/
+android/local.properties
+*.jks
+*.keystore
+*.pem
+*.p12
+*.key

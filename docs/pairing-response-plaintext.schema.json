@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/pairing-response-plaintext.schema.json",
+  "title": "Pairing completion encrypted response plaintext",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "status", "device_id", "key_confirmation", "pairing_status_token"],
+  "properties": {
+    "version": { "const": "1" },
+    "status": { "const": "pending_confirmation" },
+    "device_id": { "$ref": "#/$defs/bytes16" },
+    "key_confirmation": { "$ref": "#/$defs/bytes32" },
+    "pairing_status_token": { "$ref": "#/$defs/bytes32" }
+  },
+  "$defs": {
+    "bytes16": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22}$"
+    },
+    "bytes32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    }
+  }
+}

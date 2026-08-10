@@ -1,0 +1,16 @@
+{
+  "event_id": "018f4b7a-4f89-7a6b-8d62-8dd79031d536",
+  "wallet_id": "wallet-243810000111",
+  "kind": "credit",
+  "amount_minor": "687000",
+  "currency": "CDF",
+  "provider": "orange-money",
+  "reference": "PP221226.1651.B30320",
+  "occurred_at": "2026-08-10T09:30:00Z",
+  "received_at": "2026-08-10T09:30:04Z",
+  "parser_version": "orange-cd-v1",
+  "source": "sms",
+  "device_sequence": "42",
+  "idempotency_key": "device-243810000111-00000042",
+  "payload_digest": "5fb6ce005c30c2ad8bedd13ce54d194db9c2e59292e0646f4cfd90c932513a42"
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/pairing-completion-result.schema.json",
+  "title": "Encrypted device enrollment result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "status", "device_id", "nonce", "ciphertext"],
+  "properties": {
+    "version": { "const": "1" },
+    "status": { "enum": ["pending_confirmation", "replayed"] },
+    "device_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22}$"
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16}$"
+    },
+    "ciphertext": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,2731}$"
+    }
+  }
+}

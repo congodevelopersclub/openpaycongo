@@ -1,27 +1,60 @@
 name: CI
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  flutter:
+  contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-      - run: flutter --version
-      - run: flutter pub get
-        working-directory: android-client
-      - run: flutter test
-        working-directory: android-client
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Validate public contract and delivery policy in Docker
+        run: docker build --target test -f docs/Dockerfile .
+
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Run Go public tests, vet, and race detector in Docker
+        run: docker build --target test -f wallet-plugin-go/Dockerfile wallet-plugin-go
+      - name: Build Go runtime image in Docker
+        run: docker build --target runtime -t openpaycongo-wallet:${{ github.sha }} -f wallet-plugin-go/Dockerfile wallet-plugin-go
+
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Analyze Flutter in Docker
+        run: docker build --target analyze -f android-client/Dockerfile.ci android-client
+      - name: Test Flutter in Docker
+        run: docker build --target test -f android-client/Dockerfile.ci android-client
+      - name: Build debug APK in Docker
+        run: >-
+          docker build --target artifact
+          --output type=local,dest=android-client/build/ci
+          -f android-client/Dockerfile.ci android-client
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          go-version: '1.22'
-      - run: go test ./...
-        working-directory: wallet-plugin-go
+          name: openpaycongo-debug-apk-${{ github.sha }}
+          path: android-client/build/ci/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  admin-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Run admin browser journey in Docker Compose
+        run: docker compose -f admin-ui/compose.test.yaml up --build --abort-on-container-exit --exit-code-from browser
+      - name: Remove admin browser journey resources
+        if: always()
+        run: docker compose -f admin-ui/compose.test.yaml down --volumes --remove-orphans

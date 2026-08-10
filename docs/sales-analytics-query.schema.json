@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/sales-analytics-query.schema.json",
+  "title": "Sales analytics query",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["from", "to", "snapshot_at", "time_zone", "interval", "comparison"],
+  "properties": {
+    "from": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "to": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "snapshot_at": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "description": "Immutable receipt-time cutoff. Events whose trusted received_at is later than this instant are excluded." },
+    "time_zone": { "type": "string", "minLength": 1, "maxLength": 64, "description": "IANA time-zone identifier." },
+    "interval": { "enum": ["hour", "day"] },
+    "comparison": { "type": "boolean" }
+  }
+}

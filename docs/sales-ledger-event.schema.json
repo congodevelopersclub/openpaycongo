@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpaycongo.example/schemas/sales-ledger-event.schema.json",
+  "title": "Immutable sales projection event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "tenant_id", "kind", "amount_minor", "currency", "provider", "payment_id", "occurred_at", "received_at", "payload_digest"],
+  "properties": {
+    "event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "tenant_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+    "kind": { "enum": ["payment_captured", "payment_refunded", "payment_voided", "payment_reconciled"] },
+    "amount_minor": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,19})$" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "Syntactically valid uppercase currency code. Each deployment must configure its supported-code and minor-unit registry." },
+    "provider": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+    "payment_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+    "related_event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "occurred_at": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "received_at": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "payload_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Lowercase SHA-256 of the RFC 8785 canonical JSON object containing every other event field; omitted optional fields are absent. Consumers must recompute it." }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "payment_captured" } } }, "then": { "not": { "properties": { "related_event_id": true }, "required": ["related_event_id"] }, "properties": { "amount_minor": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" } } }, "else": { "properties": { "related_event_id": true }, "required": ["related_event_id"] } },
+    { "if": { "properties": { "kind": { "const": "payment_reconciled" } } }, "then": { "properties": { "amount_minor": { "type": "string", "const": "0" } } }, "else": { "properties": { "amount_minor": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" } } } }
+  ]
+}
