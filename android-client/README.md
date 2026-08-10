@@ -17,16 +17,16 @@ The project currently targets Android first. A device may show SMS and biometric
 
 ## What currently exists
 
-The manifest declares SMS receipt, but the parser initializer is unwired: this prototype does not currently request SMS permission or listen for messages. Its biometric flow is an authentication prompt, not a runtime permission. Future SMS work must assess API/distribution/default-handler eligibility, request in context, handle deny/permanent-deny/settings/unsupported states, and preserve a fully tested manual/merchant fallback.
+The Android slice requests `RECEIVE_SMS` in context, blocks product access until granted, and captures only exact trusted senders through the platform broadcast receiver. Trusted rules and evidence use explicit v3 AES-GCM envelopes, separate Android Keystore keys, and separate tagged ciphertext inventories in `noBackupFilesDir`; ciphertext in one domain does not invalidate first key creation in the other, while a missing key still fails closed for its own ciphertext. Rules are atomically listed, added, revoked, or cleared only through the foreground/unlocked bridge. Decision tombstones are append-only until future server-acknowledged pruning, with bounded cursor export through encrypted index segments. Bridge deadlines are `outcome_unknown`, so mutating UI attempts authoritative native reconciliation and remains explicitly unknown if that reload also fails or times out. Every journal-ciphertext quarantine, including a decision tombstone, is preceded by a written and directory-synced persistent `journal-recovery-required` marker. Status/export/recovery remain typed recovery across calls and restarts; journal, rules, or raw-inbox corruption and key loss always publish null decision count/byte fields rather than fabricated zero/empty status. No in-app marker-clear API exists. Scheduler saturation finishes the broadcast before a best-effort overload report. Capture-miss reason/timestamp state is minimal plaintext metadata and never contains sender/body/digest. Unreleased v2 ciphertext fails closed and requires explicit Clear storage/reinstall recovery. This is implementation evidence, not Play-policy approval or real-device power-loss/Keystore proof.
 
 - A local Flutter UI prototype with parser, configuration, and biometric-gate screens.
-- One narrow Orange Money SMS parsing test.
+- A bounded trusted-SMS receiver, encrypted local inbox, deterministic manual parser and review-only model boundary.
 - Local SQLite stores used by the prototype.
 
 ## Known limitations
 
-- No canonical `/v1/sync/*` client, inbox/outbox state machine, or replicated ledger.
-- No verified server authentication, HMAC verification, secure credential storage, encrypted local database, or recovery flow.
+- No canonical `/v1/sync/*` client, replicated ledger, or server-acknowledged decision pruning.
+- No verified server authentication/HMAC, production API-credential storage, encrypted canonical ledger database, or proven recovery flow.
 - No production Android signing, Play distribution, offline delivery guarantees, or real-app screenshot test.
 - The home view is incomplete and the documented backend integration is not wired into the prototype.
 

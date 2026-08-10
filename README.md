@@ -72,7 +72,7 @@ docker compose -f admin-ui/compose.test.yaml down --volumes --remove-orphans
 
 | Area | Current state | Planned contract |
 | --- | --- | --- |
-| Mobile inbox | Prototype SMS parsing and local SQLite only | Offline inbox/outbox, explicit delivery state, recovery UX |
+| Mobile inbox | Keystore-encrypted trusted-SMS evidence and append-only local decisions; no canonical sync | Offline inbox/outbox, explicit server delivery state, proven recovery UX |
 | Backend ledger | Prototype Go/SQLite endpoints | Authenticated immutable replicated ledger and derived balance |
 | Sync | Not implemented | `POST /v1/sync/push`, `GET /v1/sync/pull`, `POST /v1/sync/ack` |
 | Merchant integration | Not implemented | One canonical event push with idempotency semantics |
@@ -94,6 +94,6 @@ The canonical API specifies OAuth-style scopes, RFC 9457 problem responses, idem
 
 ## Screenshots
 
-Android truth note: the manifest declares SMS receipt, but the current `SmsParser` initializer is unwired; the app does not currently request or listen for SMS. Biometric authentication is an authentication prompt, not an Android runtime permission. Any future SMS capability must assess API/distribution/default-handler eligibility, request only in context, handle deny/permanent-deny/settings/unsupported states, and retain fully tested manual/merchant fallback.
+Android truth note: the current slice requests `RECEIVE_SMS`, receives platform broadcasts while the process is absent, enforces an encrypted exact sender allowlist, and records trusted evidence locally for review. It does not use `READ_SMS`, claim default-handler status, guarantee zero loss, provide server reconciliation, or establish Google Play exception approval. Biometric authentication remains an authenticator result, not a runtime permission.
 
 There are no real-app screenshots in this repository. Screenshots will be added only after capture from the actual app running a documented, reproducible test journey; no mockups or fabricated product evidence will be substituted.

@@ -247,7 +247,6 @@ final class DeterministicPaymentParser {
 
 enum SmsPermissionState {
   unavailable,
-  needsDefaultRole,
   needsRuntimeGrant,
   denied,
   permanentlyDenied,

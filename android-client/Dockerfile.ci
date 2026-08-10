@@ -53,7 +53,11 @@ RUN flutter analyze
 FROM source AS test
 RUN flutter test
 
-FROM source AS apk
+FROM source AS native-test
+RUN flutter build apk --config-only --debug
+RUN cd android && ./gradlew :app:testDebugUnitTest
+
+FROM native-test AS apk
 RUN flutter build apk --debug
 
 FROM scratch AS artifact
