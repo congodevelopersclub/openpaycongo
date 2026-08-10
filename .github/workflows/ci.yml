@@ -18,13 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Validate public contract and delivery policy in Docker
-        run: >-
-          docker run --rm
-          -v "$GITHUB_WORKSPACE:/workspace:ro"
-          -v openpaycongo-contract-node-modules:/workspace/docs/node_modules
-          -w /workspace/docs
-          node:24.19.0-alpine
-          sh -lc "npm ci --ignore-scripts && npm test"
+        run: docker build --target test -f docs/Dockerfile .
 
   go:
     runs-on: ubuntu-latest

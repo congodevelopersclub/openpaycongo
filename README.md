@@ -37,16 +37,11 @@ go test ./...
 go run ./cmd/server
 
 # Canonical public-contract validation — Docker only
-cd ../docs
-docker run --rm \
-  -v "$PWD:/workspace" \
-  -v openpaycongo-contract-node-modules:/workspace/docs/node_modules \
-  -w /workspace/docs \
-  node:24.19.0-alpine \
-  sh -lc "npm ci --ignore-scripts && npm test"
+cd ..
+docker build --target test -f docs/Dockerfile .
 ```
 
-On PowerShell, replace `$PWD` with `${PWD}`. The named Docker volume is disposable validator cache, not application data. The Android prototype requests SMS/biometric capabilities; use only test messages and a test device.
+The contract build uses no bind mounts or named volumes; its dependencies are image-internal. The Android prototype requests SMS/biometric capabilities; use only test messages and a test device.
 
 ## Reproducible Docker CI commands
 
@@ -54,12 +49,7 @@ Run these commands from the repository root for reproducible CI evidence:
 
 ```bash
 # Canonical public contract and delivery-policy validation
-docker run --rm \
-  -v "$PWD:/workspace:ro" \
-  -v openpaycongo-contract-node-modules:/workspace/docs/node_modules \
-  -w /workspace/docs \
-  node:24.19.0-alpine \
-  sh -lc "npm ci --ignore-scripts && npm test"
+docker build --target test -f docs/Dockerfile .
 
 # Go public tests, vet, race detector, and runtime image
 docker build --target test -f wallet-plugin-go/Dockerfile wallet-plugin-go

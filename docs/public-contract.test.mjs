@@ -64,6 +64,10 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
     resolve(repositoryRoot, 'android-client/Dockerfile.ci'),
     'utf8',
   );
+  const contractDockerfile = await readFile(
+    resolve(repositoryRoot, 'docs/Dockerfile'),
+    'utf8',
+  );
   const androidManifest = await readFile(
     resolve(repositoryRoot, 'android-client/android/app/src/main/AndroidManifest.xml'),
     'utf8',
@@ -106,9 +110,8 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
     .map((step) => step.run)
     .filter(Boolean)
     .join('\n');
-  assert.match(runs, /docker run[\s\S]*npm (?:ci|test)/);
-  assert.match(runs, /node:24\.19\.0-alpine/);
-  assert.match(runs, /\/workspace\/docs\/node_modules/);
+  assert.match(runs, /docker build --target test -f docs\/Dockerfile \./);
+  assert.doesNotMatch(runs, /\/workspace\/docs\/node_modules/);
   assert.match(runs, /docker build[\s\S]*wallet-plugin-go/);
   assert.match(runs, /docker build[\s\S]*android-client/);
   assert.match(runs, /--target test/);
@@ -123,6 +126,15 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
   );
   assert.match(goDockerfile, /go vet \.\/\.\./);
   assert.match(goDockerfile, /go test -race \.\/\.\./);
+  assert.match(
+    contractDockerfile,
+    /FROM node:24\.19\.0-alpine@sha256:2a49bdf71e9fd965a58c1703fd9ddd205b34e5782b692a72dd1d248abb0beb43 AS dependencies/,
+  );
+  assert.match(contractDockerfile, /COPY docs\/package\.json docs\/package-lock\.json \.\//);
+  assert.match(contractDockerfile, /RUN npm ci --ignore-scripts/);
+  assert.match(contractDockerfile, /WORKDIR \/workspace[\s\S]*COPY docs\/ \.\/docs\//);
+  assert.doesNotMatch(contractDockerfile, /COPY \. \./, 'contract image must not copy the repository wholesale');
+  assert.match(contractDockerfile, /FROM dependencies AS test[\s\S]*RUN npm test/);
   assert.match(flutterDockerfile, /flutter analyze/);
   assert.match(flutterDockerfile, /flutter test/);
   assert.match(flutterDockerfile, /flutter build apk --debug/);
