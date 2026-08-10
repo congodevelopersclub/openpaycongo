@@ -151,6 +151,11 @@ test('delivery workflow is least-privilege, serialized, pinned, and Docker-only'
   assert.match(dockerIgnore, new RegExp(`!${analyticsVector.replaceAll('.', '\\.')}`));
   assert.doesNotMatch(contractDockerfile, /COPY wallet-plugin-go\/internal\/analytics\/testdata\/\s/, 'contract image must copy analytics vectors individually');
   assert.match(contractDockerfile, /FROM dependencies AS test[\s\S]*RUN npm test/);
+  const parityHarness = await readFile(resolve(repositoryRoot, 'docs/parity-harness.mjs'), 'utf8');
+  const parityHarnessTest = await readFile(resolve(repositoryRoot, 'docs/parity-harness.test.mjs'), 'utf8');
+  assert.match(parityHarness, /export async function runParity/);
+  assert.match(parityHarness, /target declares analytics unavailable/);
+  assert.match(parityHarnessTest, /controlled divergent response/);
   assert.match(flutterDockerfile, /flutter analyze/);
   assert.match(flutterDockerfile, /flutter test/);
   assert.match(flutterDockerfile, /flutter build apk --debug/);
