@@ -1,8 +1,6 @@
 module github.com/example/wallet-plugin-go
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.26.5
 
 require (
 	github.com/go-chi/chi/v5 v5.0.8

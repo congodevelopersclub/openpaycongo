@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import SwaggerParser from '@apidevtools/swagger-parser';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import canonicalize from 'canonicalize';
 import { createHash } from 'node:crypto';
+import { parse } from 'yaml';
 
 const root = new URL('./', import.meta.url);
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const asset = (relativePath) => new URL(relativePath, root);
 const readJson = async (relativePath) => JSON.parse(await readFile(asset(relativePath), 'utf8'));
 const digest = (event) => {
@@ -44,4 +48,93 @@ test('the published sync API and canonical event fixtures are interoperable', as
   assert.equal(validate({ ...positive, device_sequence: 42 }), false, 'device sequence must remain a decimal string');
   assert.equal(validate({ ...positive, kind: 'debit' }), false, 'debits require an expected wallet revision');
   assert.equal(validate({ ...positive, kind: 'debit', expected_wallet_revision: '12' }), true, 'a debit carries a decimal wallet revision');
+});
+
+test('delivery workflow is least-privilege, serialized, pinned, and Docker-only', async () => {
+  const workflowSource = await readFile(
+    resolve(repositoryRoot, '.github/workflows/ci.yml'),
+    'utf8',
+  );
+  const workflow = parse(workflowSource);
+  const goDockerfile = await readFile(
+    resolve(repositoryRoot, 'wallet-plugin-go/Dockerfile'),
+    'utf8',
+  );
+  const flutterDockerfile = await readFile(
+    resolve(repositoryRoot, 'android-client/Dockerfile.ci'),
+    'utf8',
+  );
+  const androidManifest = await readFile(
+    resolve(repositoryRoot, 'android-client/android/app/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const androidAppBuild = await readFile(
+    resolve(repositoryRoot, 'android-client/android/app/build.gradle'),
+    'utf8',
+  );
+
+  assert.deepEqual(workflow.permissions, { contents: 'read' });
+  assert.ok(workflow.concurrency?.group);
+  assert.equal(workflow.concurrency?.['cancel-in-progress'], true);
+
+  for (const jobName of ['contract', 'go', 'flutter', 'admin-browser']) {
+    assert.ok(workflow.jobs?.[jobName], `missing ${jobName} job`);
+  }
+
+  const actionSteps = Object.values(workflow.jobs)
+    .flatMap((job) => job.steps ?? [])
+    .filter((step) => step.uses);
+  assert.ok(actionSteps.length > 0);
+  for (const step of actionSteps) {
+    assert.match(
+      step.uses,
+      /^[^@]+@[a-f0-9]{40}(?:\s+# .+)?$/,
+      `${step.uses} must be pinned to a full commit SHA with a version comment`,
+    );
+  }
+  assert.match(
+    workflowSource,
+    /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6/,
+  );
+  assert.match(
+    workflowSource,
+    /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\.0\.1/,
+  );
+
+  const runs = Object.values(workflow.jobs)
+    .flatMap((job) => job.steps ?? [])
+    .map((step) => step.run)
+    .filter(Boolean)
+    .join('\n');
+  assert.match(runs, /docker run[\s\S]*npm (?:ci|test)/);
+  assert.match(runs, /node:24\.19\.0-alpine/);
+  assert.match(runs, /\/workspace\/docs\/node_modules/);
+  assert.match(runs, /docker build[\s\S]*wallet-plugin-go/);
+  assert.match(runs, /docker build[\s\S]*android-client/);
+  assert.match(runs, /--target test/);
+  assert.match(runs, /--target analyze/);
+  assert.match(runs, /--target artifact/);
+  assert.match(runs, /docker compose -f admin-ui\/compose\.test\.yaml up --build --abort-on-container-exit --exit-code-from browser/);
+  assert.match(runs, /docker compose -f admin-ui\/compose\.test\.yaml down --volumes --remove-orphans/);
+  const adminSteps = workflow.jobs['admin-browser'].steps ?? [];
+  assert.ok(
+    adminSteps.some((step) => step.if === 'always()' && /docker compose -f admin-ui\/compose\.test\.yaml down --volumes --remove-orphans/.test(step.run ?? '')),
+    'admin browser journey must tear down Compose resources even when the journey fails',
+  );
+  assert.match(goDockerfile, /go vet \.\/\.\./);
+  assert.match(goDockerfile, /go test -race \.\/\.\./);
+  assert.match(flutterDockerfile, /flutter analyze/);
+  assert.match(flutterDockerfile, /flutter test/);
+  assert.match(flutterDockerfile, /flutter build apk --debug/);
+  assert.match(
+    flutterDockerfile,
+    /FLUTTER_VERSION=3\.44\.9/,
+  );
+  assert.match(
+    flutterDockerfile,
+    /FLUTTER_ARCHIVE_SHA256=a9120fa4a01048bdef438ddc3a2d4b7389662ea98a95db86eeaf10382bc4efcb/,
+  );
+  assert.doesNotMatch(androidManifest, /\bpackage\s*=/);
+  assert.match(androidAppBuild, /namespace "com\.congodeveloperclub\.opencongopay"/);
+  assert.match(androidAppBuild, /applicationId "com\.congodeveloperclub\.opencongopay"/);
 });

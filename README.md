@@ -14,14 +14,14 @@ OpenPay Congo is being specified as a mobile local-first payment inbox and outbo
 ## Current prerequisites
 
 - Git.
-- Flutter SDK compatible with the lockfile (Flutter **3.38+**, Dart **3.12+**).
-- Android SDK, an Android device or emulator, and USB/debug permission where applicable.
-- Go **1.24.3** for the Go prototype (`go.mod` requests that toolchain).
-- Docker Desktop for the contract-validator command below. No Docker deployment image exists yet.
+- Docker Desktop for all reproducible CI checks below.
+- Flutter **3.44.9** with Dart **3.12.2** for the Android CI image.
+- Go **1.26.5** for the Go prototype (`go.mod` requests that toolchain).
+- No Docker deployment image release process exists yet.
 
-## Current developer commands
+## Optional host-only exploration
 
-The commands below exercise only the present prototypes; they do not establish production readiness.
+The commands below exercise only the present prototypes; they do not establish CI or production readiness.
 
 ```bash
 # Flutter prototype
@@ -40,13 +40,43 @@ go run ./cmd/server
 cd ../docs
 docker run --rm \
   -v "$PWD:/workspace" \
-  -v openpaycongo-contract-node-modules:/workspace/node_modules \
-  -w /workspace \
-  node:22.16.0-alpine \
+  -v openpaycongo-contract-node-modules:/workspace/docs/node_modules \
+  -w /workspace/docs \
+  node:24.19.0-alpine \
   sh -lc "npm ci --ignore-scripts && npm test"
 ```
 
 On PowerShell, replace `$PWD` with `${PWD}`. The named Docker volume is disposable validator cache, not application data. The Android prototype requests SMS/biometric capabilities; use only test messages and a test device.
+
+## Reproducible Docker CI commands
+
+Run these commands from the repository root for reproducible CI evidence:
+
+```bash
+# Canonical public contract and delivery-policy validation
+docker run --rm \
+  -v "$PWD:/workspace:ro" \
+  -v openpaycongo-contract-node-modules:/workspace/docs/node_modules \
+  -w /workspace/docs \
+  node:24.19.0-alpine \
+  sh -lc "npm ci --ignore-scripts && npm test"
+
+# Go public tests, vet, race detector, and runtime image
+docker build --target test -f wallet-plugin-go/Dockerfile wallet-plugin-go
+docker build --target runtime -t openpaycongo-wallet:local -f wallet-plugin-go/Dockerfile wallet-plugin-go
+
+# Flutter analysis, tests, and a non-production debug APK
+docker build --target analyze -f android-client/Dockerfile.ci android-client
+docker build --target test -f android-client/Dockerfile.ci android-client
+docker build --target artifact --output type=local,dest=android-client/build/ci \
+  -f android-client/Dockerfile.ci android-client
+
+# Admin UI health and browser journey against its Compose fake upstream
+docker compose -f admin-ui/compose.test.yaml up --build --abort-on-container-exit --exit-code-from browser
+docker compose -f admin-ui/compose.test.yaml down --volumes --remove-orphans
+```
+
+`android-client/build/ci/app-debug.apk` is debug-signed CI output, not a distributable release. The admin Compose journey uses a checked-in fake upstream and is browser/health evidence for the UI boundary, not live backend integration evidence. The Dockerfiles make prototype checks reproducible; they do not add deployment configuration, database configurability, signing, SBOMs, provenance, or a production image release process.
 
 ## Supported today vs planned
 
