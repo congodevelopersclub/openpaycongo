@@ -30,4 +30,14 @@ final class SqliteAnalyticsStoreTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $store->list('tenant-demo', '2026-11-02T12:00:00Z', '2; DROP TABLE sales_analytics_events');
     }
+
+    public function test_event_ingestion_budget_rejects_oversized_batches_before_writing(): void
+    {
+        $fixture = json_decode((string) file_get_contents(base_path('../docs/sales-analytics.vector.json')), true, flags: JSON_THROW_ON_ERROR);
+        $store = new SqliteAnalyticsStore(new PDO('sqlite::memory:'));
+        $events = array_fill(0, 101, $fixture['events'][0]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $store->append($events);
+    }
 }

@@ -25,6 +25,9 @@ final class SqliteAnalyticsStore
     /** @param list<array<string, mixed>> $events */
     public function append(array $events): void
     {
+        if (count($events) > 100) {
+            throw new InvalidArgumentException('event batch exceeds the configured bound');
+        }
         $statement = $this->database->prepare('INSERT INTO sales_analytics_events
             (event_id, tenant_id, kind, amount_minor, currency, provider, payment_id, related_event_id, occurred_at, received_at, payload_digest)
             VALUES (:event_id, :tenant_id, :kind, :amount_minor, :currency, :provider, :payment_id, :related_event_id, :occurred_at, :received_at, :payload_digest)');
