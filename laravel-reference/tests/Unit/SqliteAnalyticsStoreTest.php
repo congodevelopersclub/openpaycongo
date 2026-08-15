@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Analytics\CanonicalAnalyticsProjection;
 use App\Analytics\SqliteAnalyticsStore;
 use InvalidArgumentException;
 use PDO;
@@ -51,6 +52,19 @@ final class SqliteAnalyticsStoreTest extends TestCase
         self::assertSame(
             $response['current']['currencies'],
             $store->currencyTotals('tenant-demo', $response['current']['from'], $response['current']['to'], $vector['query']['snapshot_at']),
+        );
+    }
+
+    public function test_internal_projection_matches_the_complete_canonical_parity_response(): void
+    {
+        $vector = json_decode((string) file_get_contents(base_path('../docs/sales-analytics.vector.json')), true, flags: JSON_THROW_ON_ERROR);
+        $expected = json_decode((string) file_get_contents(base_path('../docs/sales-analytics-response.valid.json')), true, flags: JSON_THROW_ON_ERROR);
+        $store = new SqliteAnalyticsStore(new PDO('sqlite::memory:'));
+        $store->append($vector['events']);
+
+        self::assertSame(
+            $expected,
+            (new CanonicalAnalyticsProjection($store))->project('tenant-demo', $vector['query'], $vector['query']['snapshot_at']),
         );
     }
 }
