@@ -17,6 +17,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 
+	analyticsqlite "github.com/example/wallet-plugin-go/internal/analytics/sqlite"
 	"github.com/example/wallet-plugin-go/internal/runtimeconfig"
 	"github.com/example/wallet-plugin-go/internal/wallet"
 )
@@ -54,8 +55,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	analyticsStore, err := analyticsqlite.Open(config.SQLitePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer analyticsStore.Close()
 	r := chi.NewRouter()
-	registerOperationalRoutes(r, config)
+	registerOperationalRoutes(r, config, operationalState{MigrationRevision: analyticsStore.MigrationRevision()})
 	r.Post("/api/credits", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Phone     string    `json:"phone"`

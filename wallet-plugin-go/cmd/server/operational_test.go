@@ -15,7 +15,7 @@ func TestOperationalEndpointsAreTruthfulForLegacyRuntime(t *testing.T) {
 	t.Parallel()
 
 	router := chi.NewRouter()
-	registerOperationalRoutes(router, runtimeconfig.Config{BuildVersion: "build-123", ContractVersion: "sales-analytics-v1"})
+	registerOperationalRoutes(router, runtimeconfig.Config{BuildVersion: "build-123", ContractVersion: "sales-analytics-v1"}, operationalState{MigrationRevision: "0001"})
 
 	health := httptest.NewRecorder()
 	router.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -34,7 +34,7 @@ func TestOperationalEndpointsAreTruthfulForLegacyRuntime(t *testing.T) {
 	}
 	wantReadiness := map[string]any{
 		"datastore":          "sqlite",
-		"migration_revision": "legacy",
+		"migration_revision": "0001",
 		"topology":           "sqlite",
 		"projection":         "unimplemented",
 		"write_admission":    false,
@@ -57,7 +57,7 @@ func TestOperationalEndpointsAreTruthfulForLegacyRuntime(t *testing.T) {
 		"adapter":            "sqlite",
 		"build_version":      "build-123",
 		"contract_version":   "sales-analytics-v1",
-		"migration_revision": "legacy",
+		"migration_revision": "0001",
 	}
 	if !mapsEqual(identity, wantIdentity) {
 		t.Fatalf("version = %#v, want %#v", identity, wantIdentity)
