@@ -97,6 +97,62 @@ final class NeedsReview extends ParseDecision {
   final PaymentCandidate? candidate;
 }
 
+/// A typed, explicit outcome of a person reviewing an optional model proposal.
+///
+/// This is intentionally not a payment decision and has no persistence or
+/// transport dependency. A caller must make a separate, durable manual-review
+/// decision before any encrypted evidence can be removed.
+sealed class ProposalConfirmationOutcome {
+  const ProposalConfirmationOutcome();
+}
+
+final class ProposalConfirmationDeclined extends ProposalConfirmationOutcome {
+  const ProposalConfirmationDeclined(this.reason);
+  final String reason;
+}
+
+final class ProposalConfirmedForManualReview
+    extends ProposalConfirmationOutcome {
+  const ProposalConfirmedForManualReview({
+    required this.candidate,
+    required this.proposalReason,
+  });
+
+  final PaymentCandidate candidate;
+  final String proposalReason;
+}
+
+/// Keeps a model suggestion review-only until a person explicitly confirms it.
+///
+/// It never returns [TrustedCandidate], invokes a model, stores an artifact, or
+/// creates a payment. Model package verification, licence acceptance, runtime
+/// provisioning, and physical-device qualification stay outside this seam.
+final class ProposalConfirmationPolicy {
+  const ProposalConfirmationPolicy();
+
+  static const Set<String> _confirmableReasons = <String>{
+    'model_low_confidence',
+    'model_proposal_requires_human_review',
+  };
+
+  ProposalConfirmationOutcome decide(
+    NeedsReview proposal, {
+    required bool confirmedByUser,
+  }) {
+    final PaymentCandidate? candidate = proposal.candidate;
+    if (!_confirmableReasons.contains(proposal.reason) || candidate == null) {
+      return const ProposalConfirmationDeclined('proposal_not_confirmable');
+    }
+    if (!confirmedByUser) {
+      return const ProposalConfirmationDeclined('user_confirmation_required');
+    }
+    return ProposalConfirmedForManualReview(
+      candidate: candidate,
+      proposalReason: proposal.reason,
+    );
+  }
+}
+
 final class TrustedCandidate extends ParseDecision {
   const TrustedCandidate(this.value);
   final PaymentCandidate value;

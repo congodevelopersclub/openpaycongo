@@ -220,6 +220,63 @@ void main() {
     );
   });
 
+  test('a model proposal needs explicit confirmation and stays review-only', () {
+    const ProposalValidator validator = ProposalValidator();
+    const ProposalConfirmationPolicy confirmation = ProposalConfirmationPolicy();
+    final SmsEnvelope envelope = sms('+243990001111', 'redacted');
+    const String valid =
+        '{"amount_minor":1250,"currency":"USD","reference":"REF-1234","provider":"+243990001111","confidence":0.99}';
+    final NeedsReview proposal =
+        validator.validate(valid, envelope, rule) as NeedsReview;
+
+    final ProposalConfirmationOutcome declined = confirmation.decide(
+      proposal,
+      confirmedByUser: false,
+    );
+    expect(declined, isA<ProposalConfirmationDeclined>());
+    expect(
+      (declined as ProposalConfirmationDeclined).reason,
+      'user_confirmation_required',
+    );
+
+    final ProposalConfirmationOutcome accepted = confirmation.decide(
+      proposal,
+      confirmedByUser: true,
+    );
+    expect(accepted, isA<ProposalConfirmedForManualReview>());
+    expect(accepted, isNot(isA<TrustedCandidate>()));
+    expect(
+      (accepted as ProposalConfirmedForManualReview).candidate.reference,
+      'REF-1234',
+    );
+  });
+
+  test('only a candidate-bearing model proposal is confirmable', () {
+    const ProposalConfirmationPolicy confirmation = ProposalConfirmationPolicy();
+    for (final NeedsReview proposal in <NeedsReview>[
+      const NeedsReview('model_malformed_json'),
+      const NeedsReview(
+        'template_literal_mismatch',
+        candidate: PaymentCandidate(
+          amountMinor: 1250,
+          currency: 'USD',
+          reference: 'REF-1234',
+          provider: '+243990001111',
+        ),
+      ),
+    ]) {
+      final ProposalConfirmationOutcome outcome = confirmation.decide(
+        proposal,
+        confirmedByUser: true,
+      );
+      expect(outcome, isA<ProposalConfirmationDeclined>());
+      expect(
+        (outcome as ProposalConfirmationDeclined).reason,
+        'proposal_not_confirmable',
+      );
+    }
+  });
+
   test('timeout opens bounded circuit and manual fallback remains', () async {
     final NeverProposalPort port = NeverProposalPort();
     final BoundedProposalRunner runner = BoundedProposalRunner(
