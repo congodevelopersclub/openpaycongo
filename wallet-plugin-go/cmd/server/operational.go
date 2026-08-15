@@ -25,7 +25,9 @@ type versionResponse struct {
 	MigrationRevision string `json:"migration_revision"`
 }
 
-func registerOperationalRoutes(router chi.Router, config runtimeconfig.Config) {
+type operationalState struct{ MigrationRevision string }
+
+func registerOperationalRoutes(router chi.Router, config runtimeconfig.Config, state operationalState) {
 	router.Get("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Cache-Control", "no-store")
 		writer.WriteHeader(http.StatusOK)
@@ -33,7 +35,7 @@ func registerOperationalRoutes(router chi.Router, config runtimeconfig.Config) {
 	router.Get("/readyz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeOperationalJSON(writer, http.StatusServiceUnavailable, readinessResponse{
 			Datastore:         "sqlite",
-			MigrationRevision: "legacy",
+			MigrationRevision: state.MigrationRevision,
 			Topology:          "sqlite",
 			Projection:        "unimplemented",
 			WriteAdmission:    false,
@@ -45,7 +47,7 @@ func registerOperationalRoutes(router chi.Router, config runtimeconfig.Config) {
 			Adapter:           "sqlite",
 			BuildVersion:      config.BuildVersion,
 			ContractVersion:   config.ContractVersion,
-			MigrationRevision: "legacy",
+			MigrationRevision: state.MigrationRevision,
 		})
 	})
 }
