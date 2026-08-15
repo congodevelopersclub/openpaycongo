@@ -1,5 +1,7 @@
 *
 !.dockerignore
+!CONTRIBUTING.md
+!SECURITY.md
 !docs/
 !docs/**
 !.github/
@@ -7,6 +9,10 @@
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/ci.yml
+!.github/PULL_REQUEST_TEMPLATE.md
+!.github/ISSUE_TEMPLATE/
+!.github/ISSUE_TEMPLATE/*
+!.github/ISSUE_TEMPLATE/bug_report.md
 !android-client/
 android-client/*
 !android-client/Dockerfile.ci
