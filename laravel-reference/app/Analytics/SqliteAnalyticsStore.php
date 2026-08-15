@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Analytics;
 
+use Brick\Math\BigInteger;
 use DateTimeImmutable;
 use InvalidArgumentException;
 use PDO;
@@ -68,6 +69,47 @@ final class SqliteAnalyticsStore
         $events = array_map(static function (array $row): array { unset($row['accepted_sequence']); return $row; }, $rows);
 
         return ['events' => $events, 'next_cursor' => $next];
+    }
+
+    /** @return list<array{currency: string, gross_minor: string, refunds_minor: string, net_minor: string, payment_count: string, refund_count: string, average_ticket_minor: string}> */
+    public function currencyTotals(string $tenantId, string $from, string $to, string $snapshotAt): array
+    {
+        $this->assertUtc($from, 'from');
+        $this->assertUtc($to, 'to');
+        $this->assertUtc($snapshotAt, 'snapshot_at');
+        if ($from >= $to) throw new InvalidArgumentException('from must precede to');
+        $statement = $this->database->prepare('SELECT event_id, kind, amount_minor, currency, related_event_id
+            FROM sales_analytics_events
+            WHERE tenant_id = :tenant_id AND occurred_at >= :from AND occurred_at < :to AND received_at <= :snapshot_at
+            ORDER BY accepted_sequence ASC');
+        $statement->execute(['tenant_id' => $tenantId, 'from' => $from, 'to' => $to, 'snapshot_at' => $snapshotAt]);
+        /** @var list<array{event_id: string, kind: string, amount_minor: string, currency: string, related_event_id: string|null}> $events */
+        $events = $statement->fetchAll(PDO::FETCH_ASSOC);
+        $voided = [];
+        foreach ($events as $event) if ($event['kind'] === 'payment_voided') $voided[$event['related_event_id'] ?? ''] = true;
+        $totals = [];
+        foreach ($events as $event) {
+            if ($event['kind'] === 'payment_captured' && !isset($voided[$event['event_id']])) {
+                $totals[$event['currency']] ??= ['gross' => BigInteger::zero(), 'refunds' => BigInteger::zero(), 'payments' => 0, 'refund_count' => 0];
+                $totals[$event['currency']]['gross'] = $totals[$event['currency']]['gross']->plus($event['amount_minor']);
+                $totals[$event['currency']]['payments']++;
+            }
+            if ($event['kind'] === 'payment_refunded') {
+                $totals[$event['currency']] ??= ['gross' => BigInteger::zero(), 'refunds' => BigInteger::zero(), 'payments' => 0, 'refund_count' => 0];
+                $totals[$event['currency']]['refunds'] = $totals[$event['currency']]['refunds']->plus($event['amount_minor']);
+                $totals[$event['currency']]['refund_count']++;
+            }
+        }
+        ksort($totals);
+        return array_map(static fn (array $total, string $currency): array => [
+            'currency' => $currency,
+            'gross_minor' => (string) $total['gross'],
+            'refunds_minor' => (string) $total['refunds'],
+            'net_minor' => (string) $total['gross']->minus($total['refunds']),
+            'payment_count' => (string) $total['payments'],
+            'refund_count' => (string) $total['refund_count'],
+            'average_ticket_minor' => $total['payments'] === 0 ? '0' : (string) $total['gross']->dividedBy($total['payments']),
+        ], $totals, array_keys($totals));
     }
 
     private function assertMoney(mixed $value): void
