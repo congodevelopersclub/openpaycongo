@@ -4,6 +4,8 @@
 !SECURITY.md
 !docs/
 !docs/**
+!laravel-reference/
+!laravel-reference/**
 !.github/
 .github/*
 !.github/workflows/
