@@ -69,6 +69,9 @@ func projectionVersion(events []LedgerEvent) string {
 func (projection SalesProjection) TenantID() string   { return projection.tenantID }
 func (projection SalesProjection) Version() string    { return projection.version }
 func (projection SalesProjection) EventCount() uint32 { return uint32(len(projection.events)) }
+func (projection SalesProjection) Events() []LedgerEvent {
+	return append([]LedgerEvent(nil), projection.events...)
+}
 
 func (projection SalesProjection) dashboard(tenantID string, query DashboardQuery, observedAt time.Time) (Dashboard, error) {
 	if projection.version == "" {

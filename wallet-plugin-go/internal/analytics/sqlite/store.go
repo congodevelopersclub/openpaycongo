@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const migrationRevision = "0002"
+const migrationRevision = "0003"
 
 const migrationSQL = `
 CREATE TABLE sales_analytics_events (
@@ -39,6 +40,16 @@ CREATE TABLE sales_analytics_snapshots (
   generation INTEGER NOT NULL,
   max_accepted_sequence INTEGER NOT NULL,
   created_at TEXT NOT NULL
+);`
+
+const projectionMigrationSQL = `
+CREATE TABLE sales_analytics_projections (
+  tenant_id TEXT PRIMARY KEY,
+  generation INTEGER NOT NULL,
+  snapshot_token TEXT NOT NULL,
+  projection_version TEXT NOT NULL,
+  events_json TEXT NOT NULL,
+  replaced_at TEXT NOT NULL
 );`
 
 type Store struct{ db *sql.DB }
@@ -212,6 +223,57 @@ func (store *Store) List(ctx context.Context, tenantID string, snapshot analytic
 	return result, nil
 }
 
+// Replace atomically publishes one complete projection. Older snapshots, or a
+// different projection at an equal generation, never overwrite durable state.
+func (store *Store) Replace(ctx context.Context, tenantID string, snapshot analytics.SourceSnapshot, projection analytics.SalesProjection) error {
+	if tenantID != projection.TenantID() || snapshot.Generation == 0 || snapshot.Token == "" {
+		return analytics.ErrStaleProjection
+	}
+	payload, err := json.Marshal(projectionPayload(projection.Events()))
+	if err != nil {
+		return err
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var generation uint64
+	var version string
+	err = tx.QueryRowContext(ctx, "SELECT generation, projection_version FROM sales_analytics_projections WHERE tenant_id = ?", tenantID).Scan(&generation, &version)
+	if err == nil {
+		if snapshot.Generation < generation || (snapshot.Generation == generation && version != projection.Version()) {
+			return analytics.ErrStaleProjection
+		}
+		if snapshot.Generation == generation {
+			return tx.Commit()
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO sales_analytics_projections(tenant_id, generation, snapshot_token, projection_version, events_json, replaced_at)
+		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+		ON CONFLICT(tenant_id) DO UPDATE SET generation=excluded.generation, snapshot_token=excluded.snapshot_token, projection_version=excluded.projection_version, events_json=excluded.events_json, replaced_at=excluded.replaced_at`, tenantID, snapshot.Generation, snapshot.Token, projection.Version(), payload)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type persistedProjectionEvent struct {
+	ID, TenantID, Kind, AmountMinor, Currency, Provider, PaymentID, RelatedEventID string
+	OccurredAt, ReceivedAt                                                         time.Time
+	Digest                                                                         []byte
+}
+
+func projectionPayload(events []analytics.LedgerEvent) []persistedProjectionEvent {
+	payload := make([]persistedProjectionEvent, 0, len(events))
+	for _, event := range events {
+		payload = append(payload, persistedProjectionEvent{event.ID, event.TenantID, string(event.Kind), event.Amount.String(), event.Currency, event.Provider, event.PaymentID, event.RelatedEventID, event.OccurredAt, event.ReceivedAt, event.Digest[:]})
+	}
+	return payload
+}
+
 func applyMigration(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -221,7 +283,7 @@ func applyMigration(ctx context.Context, db *sql.DB) error {
 	if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (revision TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)"); err != nil {
 		return err
 	}
-	for _, migration := range []struct{ revision, sql string }{{"0001", migrationSQL}, {"0002", snapshotMigrationSQL}} {
+	for _, migration := range []struct{ revision, sql string }{{"0001", migrationSQL}, {"0002", snapshotMigrationSQL}, {"0003", projectionMigrationSQL}} {
 		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(migration.sql)))
 		var recorded string
 		err = tx.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE revision = ?", migration.revision).Scan(&recorded)
