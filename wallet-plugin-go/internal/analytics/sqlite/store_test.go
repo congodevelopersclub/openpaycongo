@@ -140,6 +140,10 @@ func TestReplaceUsesGenerationCAS(t *testing.T) {
 	if generation != 2 {
 		t.Fatalf("generation = %d", generation)
 	}
+	loaded, err := store.LoadProjection(context.Background(), event.TenantID)
+	if err != nil || loaded.Version() != projection.Version() {
+		t.Fatalf("loaded = %v, %q", err, loaded.Version())
+	}
 }
 
 func TestStoreExecutesRebuildFromImmutableSource(t *testing.T) {
