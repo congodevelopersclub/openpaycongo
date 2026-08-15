@@ -3,6 +3,6 @@ WORKDIR /app
 COPY node-reference/package.json node-reference/package-lock.json ./
 RUN npm ci --ignore-scripts=false
 RUN npm audit --omit=dev --audit-level=high
-COPY node-reference/server.mjs node-reference/server.test.mjs node-reference/analytics-parity.test.mjs ./
+COPY node-reference/server.mjs node-reference/server.test.mjs node-reference/analytics-parity.test.mjs node-reference/analytics-store.mjs node-reference/analytics-store.test.mjs ./
 COPY docs/parity-harness.mjs docs/sales-analytics.vector.json docs/sales-analytics-response.valid.json ./docs/
 RUN npm test

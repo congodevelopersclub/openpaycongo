@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
+import { createAnalyticsStore } from './analytics-store.mjs';
 
 export async function createOperationalServer({ databasePath, buildVersion = 'dev', contractVersion = 'unimplemented' }) {
   const database = new Database(databasePath, { readonly: false });
@@ -16,9 +17,11 @@ export async function createOperationalServer({ databasePath, buildVersion = 'de
 // This is a conformance fixture, not a production analytics implementation.
 // It proves the Node/Fastify/SQLite HTTP boundary can satisfy the shared
 // fixture when a future implementation owns authentication and projection.
-export async function createAnalyticsFixtureServer({ databasePath, buildVersion = 'fixture-build', analyticsResponse }) {
+export async function createAnalyticsFixtureServer({ databasePath, buildVersion = 'fixture-build', analyticsResponse, analyticsEvents }) {
   const database = new Database(databasePath, { readonly: false });
   database.prepare('SELECT 1').get();
+  const analytics = createAnalyticsStore(database);
+  analytics.append(analyticsEvents);
   const app = Fastify({ logger: false });
   app.addHook('onClose', () => database.close());
   const identity = { build: buildVersion, contract_version: 'sales-analytics-v1', implementation: 'node-sqlite-fixture', adapter: 'sqlite', migration_revision: 'fixture' };
@@ -31,6 +34,8 @@ export async function createAnalyticsFixtureServer({ databasePath, buildVersion 
   app.get('/v1/analytics/sales', async (request, reply) => {
     if (!request.headers.authorization) return reply.code(401).send();
     if (request.headers.authorization !== 'Bearer parity-fixture-analytics-read') return reply.code(403).send();
+    const source = analytics.list({ tenantID: analyticsResponse.tenant_id, snapshotAt: analyticsResponse.snapshot_at });
+    if (source.events.length === 0) return reply.code(503).send();
     reply.header('cache-control', 'private, max-age=30, must-revalidate').header('vary', 'Authorization').header('etag', etag);
     if (request.headers['if-none-match'] === etag) return reply.code(304).send();
     return reply.send(analyticsResponse);

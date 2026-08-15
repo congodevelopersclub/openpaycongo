@@ -6,7 +6,8 @@ import { createAnalyticsFixtureServer } from './server.mjs';
 
 test('Node SQLite analytics fixture satisfies the canonical black-box parity harness', async (t) => {
   const analyticsResponse = JSON.parse(await readFile(new URL('./docs/sales-analytics-response.valid.json', import.meta.url), 'utf8'));
-  const fixture = await createAnalyticsFixtureServer({ databasePath: ':memory:', buildVersion: 'fixture-build', analyticsResponse });
+  const analyticsVector = JSON.parse(await readFile(new URL('./docs/sales-analytics.vector.json', import.meta.url), 'utf8'));
+  const fixture = await createAnalyticsFixtureServer({ databasePath: ':memory:', buildVersion: 'fixture-build', analyticsResponse, analyticsEvents: analyticsVector.events });
   t.after(() => fixture.app.close());
 
   const report = await runParity({
