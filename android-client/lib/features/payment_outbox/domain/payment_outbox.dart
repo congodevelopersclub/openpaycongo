@@ -199,6 +199,7 @@ final class PaymentOutbox {
     PaymentOutboxItem inFlight,
     DateTime now, {
     required String reason,
+    Duration? retryAfter,
   }) async {
     _requireInFlight(inFlight);
     if (!RegExp(r'^[a-z0-9_]{3,64}$').hasMatch(reason)) {
@@ -206,10 +207,13 @@ final class PaymentOutbox {
     }
     final int attempts = inFlight.attempts + 1;
     final bool retryable = attempts < maxAttempts;
+    final Duration delay = retryAfter == null
+        ? _backoff(attempts)
+        : _boundedRetryAfter(retryAfter);
     final PaymentOutboxItem failed = inFlight.copy(
       state: PaymentOutboxState.failed,
       attempts: attempts,
-      nextAttemptAt: retryable ? now.toUtc().add(_backoff(attempts)) : null,
+      nextAttemptAt: retryable ? now.toUtc().add(delay) : null,
       clearNextAttemptAt: !retryable,
       lastFailure: reason,
     );
@@ -227,6 +231,12 @@ final class PaymentOutbox {
           !item.nextAttemptAt!.isAfter(now));
 
   Duration _backoff(int attempt) => Duration(minutes: 1 << (attempt - 1));
+
+  Duration _boundedRetryAfter(Duration retryAfter) {
+    if (retryAfter <= Duration.zero) return _backoff(1);
+    const Duration maximum = Duration(hours: 24);
+    return retryAfter > maximum ? maximum : retryAfter;
+  }
 
   void _requireInFlight(PaymentOutboxItem item) {
     if (item.state != PaymentOutboxState.inFlight) {
