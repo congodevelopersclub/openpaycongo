@@ -1,0 +1,10 @@
+{
+  "contract_version": "example-only",
+  "runtimes": [
+    {
+      "runtime": "example-runtime",
+      "datastores": ["example-datastore"],
+      "capabilities": []
+    }
+  ]
+}
