@@ -55,6 +55,7 @@ func main() {
 	}
 
 	r := chi.NewRouter()
+	registerOperationalRoutes(r, config)
 	r.Post("/api/credits", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Phone     string    `json:"phone"`
@@ -130,10 +131,6 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"balance": bal})
 	})
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
 	handler := otelhttp.NewHandler(r, "chi-server")
 	log.Printf("listening on %s", config.ListenAddress)
 	if err := http.ListenAndServe(config.ListenAddress, handler); err != nil {
