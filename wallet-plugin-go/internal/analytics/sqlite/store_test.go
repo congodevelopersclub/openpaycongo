@@ -17,7 +17,7 @@ func TestOpenAppliesChecksummedMigrationIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.MigrationRevision() != "0001" {
+	if store.MigrationRevision() != "0002" {
 		t.Fatalf("revision = %q", store.MigrationRevision())
 	}
 	if err := store.Close(); err != nil {
@@ -28,7 +28,7 @@ func TestOpenAppliesChecksummedMigrationIdempotently(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if store.MigrationRevision() != "0001" {
+	if store.MigrationRevision() != "0002" {
 		t.Fatalf("reopen revision = %q", store.MigrationRevision())
 	}
 }
@@ -83,6 +83,32 @@ func TestAppendIsImmutableAndIdempotent(t *testing.T) {
 	}
 	if count != 1 || amount != "4000" {
 		t.Fatalf("persisted rows = count %d amount %q", count, amount)
+	}
+}
+
+func TestSnapshotExcludesLaterAppendAndPagesInAcceptanceOrder(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "analytics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first := storageEvent(t, "018f0000-0000-7000-8000-000000000001", "4000")
+	if err := store.Append(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.OpenSnapshot(context.Background(), first.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(context.Background(), storageEvent(t, "018f0000-0000-7000-8000-000000000002", "5000")); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.List(context.Background(), first.TenantID, snapshot, "", analytics.ProjectionPageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Snapshot != snapshot || len(page.Events) != 1 || page.Events[0].ID != first.ID || page.Next != "" {
+		t.Fatalf("page = %#v", page)
 	}
 }
 
