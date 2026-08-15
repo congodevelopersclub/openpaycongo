@@ -1,6 +1,7 @@
 package pairing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -38,7 +39,7 @@ func TestSQLiteRepositoryPersistsPairingLifecycleAcrossRestart(t *testing.T) {
 	}
 	defer repository.Close()
 	replayed, found, err := repository.FindCompletion(ctx, pending.ID, commit.RequestDigest)
-	if err != nil || !found || replayed != commit.Result {
+	if err != nil || !found || replayed.DeviceID != commit.Result.DeviceID || replayed.Nonce != commit.Result.Nonce || replayed.Status != commit.Result.Status || !bytes.Equal(replayed.Ciphertext, commit.Result.Ciphertext) {
 		t.Fatalf("replay: %#v %v %v", replayed, found, err)
 	}
 	status, err := repository.Confirm(ctx, sqliteConfirmation(t, pending, now.Add(time.Second), ConfirmationCodesMatch))
