@@ -142,6 +142,33 @@ func TestReplaceUsesGenerationCAS(t *testing.T) {
 	}
 }
 
+func TestStoreExecutesRebuildFromImmutableSource(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "analytics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first := storageEvent(t, "018f0000-0000-7000-8000-000000000001", "4000")
+	second := storageEvent(t, "018f0000-0000-7000-8000-000000000002", "5000")
+	if err := store.Append(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	if err := analytics.NewRebuilder(store, store).Rebuild(context.Background(), first.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	var generation uint64
+	var version string
+	if err := store.db.QueryRow("SELECT generation, projection_version FROM sales_analytics_projections WHERE tenant_id = ?", first.TenantID).Scan(&generation, &version); err != nil {
+		t.Fatal(err)
+	}
+	if generation != 3 || version == "" {
+		t.Fatalf("projection = generation %d version %q", generation, version)
+	}
+}
+
 func storageEvent(t *testing.T, id, amount string) analytics.LedgerEvent {
 	t.Helper()
 	input := analytics.EventInput{
