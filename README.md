@@ -68,6 +68,8 @@ docker compose -f admin-ui/compose.test.yaml down --volumes --remove-orphans
 
 `android-client/build/ci/app-debug.apk` is debug-signed CI output, not a distributable release. The admin Compose journey uses a checked-in fake upstream and is browser/health evidence for the UI boundary, not live backend integration evidence. The Dockerfiles make prototype checks reproducible; they do not add deployment configuration, database configurability, signing, SBOMs, provenance, or a production image release process.
 
+`docs/parity-harness.mjs` is issue #11 harness foundation. It sends canonical analytics HTTP requests to named targets and emits explicit skips for unavailable capabilities. Docker tests prove fixture reference pass plus controlled divergent response failure. This is not evidence legacy Go, Node, or Laravel implementations satisfy parity; adapters must add their target configuration after identity and HTTP slices land.
+
 ## Supported today vs planned
 
 | Area | Current state | Planned contract |

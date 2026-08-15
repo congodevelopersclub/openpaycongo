@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const root = new URL('./', import.meta.url);
+const readJSON = async (path) => JSON.parse(await readFile(new URL(path, root), 'utf8'));
+
+export class ParityFailure extends Error {
+  constructor(target, caseID, invariant, detail) {
+    super(`${target}: ${caseID}: ${invariant}: ${detail}`);
+    this.name = 'ParityFailure';
+  }
+}
+
+const request = async (target, path, headers = {}) => {
+  const response = await fetch(new URL(path, target.baseURL), { headers });
+  const body = await response.text();
+  return { response, body };
+};
+
+const expect = (target, caseID, invariant, actual, expected) => {
+  try {
+    assert.deepEqual(actual, expected);
+  } catch {
+    throw new ParityFailure(target.name, caseID, invariant, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+};
+
+export async function runParity(target) {
+  const vector = await readJSON('sales-analytics.vector.json');
+  const expected = await readJSON('sales-analytics-response.valid.json');
+  const query = new URLSearchParams({ ...vector.query, comparison: String(vector.query.comparison) });
+  const analyticsPath = `/v1/analytics/sales?${query}`;
+  const report = { target: target.name, datastore: target.datastore, passed: [], skipped: [] };
+
+  const health = await request(target, '/healthz');
+  expect(target, 'operational-healthz', 'liveness status', health.response.status, 200);
+  report.passed.push('operational-healthz');
+  if (!target.capabilities.includes('analytics')) {
+    report.skipped.push({ case: 'analytics-vector', reason: 'target declares analytics unavailable' });
+    return report;
+  }
+
+  const headers = { Authorization: 'Bearer parity-fixture-analytics-read' };
+  const analytics = await request(target, analyticsPath, headers);
+  expect(target, 'analytics-vector', 'status', analytics.response.status, 200);
+  expect(target, 'analytics-vector', 'cache-control', analytics.response.headers.get('cache-control'), 'private, max-age=30, must-revalidate');
+  expect(target, 'analytics-vector', 'vary', analytics.response.headers.get('vary'), 'Authorization');
+  expect(target, 'analytics-vector', 'etag', analytics.response.headers.get('etag'), expected.etag);
+  let body;
+  try { body = JSON.parse(analytics.body); } catch { throw new ParityFailure(target.name, 'analytics-vector', 'JSON response', 'invalid JSON'); }
+  expect(target, 'analytics-vector', 'canonical response', body, expected);
+  report.passed.push('analytics-vector');
+
+  const conditional = await request(target, analyticsPath, { ...headers, 'If-None-Match': expected.etag });
+  expect(target, 'analytics-conditional', 'status', conditional.response.status, 304);
+  expect(target, 'analytics-conditional', 'body', conditional.body, '');
+  expect(target, 'analytics-conditional', 'etag', conditional.response.headers.get('etag'), expected.etag);
+  report.passed.push('analytics-conditional');
+  for (const [caseID, authHeaders, status] of [
+    ['analytics-missing-token', {}, 401],
+    ['analytics-wrong-scope', { Authorization: 'Bearer parity-fixture-wrong-scope' }, 403],
+  ]) {
+    const result = await request(target, analyticsPath, authHeaders);
+    expect(target, caseID, 'status', result.response.status, status);
+    report.passed.push(caseID);
+  }
+  return report;
+}
