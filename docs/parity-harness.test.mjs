@@ -24,7 +24,7 @@ async function fixtureTarget({ divergent = false, divergentVersion = false } = {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   return {
-    target: { name: divergent ? 'controlled-divergence' : 'fixture-reference', datastore: 'fixture', baseURL: `http://127.0.0.1:${port}`, capabilities: ['analytics'], identity, readiness },
+    target: { name: divergent ? 'controlled-divergence' : 'fixture-reference', runtime: 'fixture-node', datastore: 'fixture', baseURL: `http://127.0.0.1:${port}`, capabilities: ['analytics'], identity, readiness },
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }
@@ -33,6 +33,7 @@ test('harness accepts canonical fixture reference over HTTP', async (t) => {
   const fixture = await fixtureTarget();
   t.after(fixture.close);
   const report = await runParity(fixture.target);
+  assert.equal(report.runtime, 'fixture-node');
   assert.deepEqual(report.passed, ['operational-healthz', 'operational-readyz', 'operational-version', 'analytics-vector', 'analytics-conditional', 'analytics-missing-token', 'analytics-wrong-scope']);
   assert.deepEqual(report.skipped, []);
 });
@@ -40,7 +41,7 @@ test('harness accepts canonical fixture reference over HTTP', async (t) => {
 test('harness identifies controlled divergent response with case and invariant', async (t) => {
   const fixture = await fixtureTarget({ divergent: true });
   t.after(fixture.close);
-  await assert.rejects(() => runParity(fixture.target), (error) => error instanceof ParityFailure && error.message.includes('analytics-vector: canonical response'));
+  await assert.rejects(() => runParity(fixture.target), (error) => error instanceof ParityFailure && error.message.includes('runtime=fixture-node') && error.message.includes('datastore=fixture') && error.message.includes('request=/v1/analytics/sales?') && error.message.includes('analytics-vector: canonical response'));
 });
 
 test('harness identifies a divergent operational version identity', async (t) => {
@@ -57,9 +58,10 @@ test('targets without capability produce explicit non-parity skip', async (t) =>
 });
 
 test('harness rejects a malformed target manifest before making a request', async () => {
-  const valid = { name: 'fixture-reference', datastore: 'fixture', baseURL: 'http://127.0.0.1:1', capabilities: ['analytics'] };
+  const valid = { name: 'fixture-reference', runtime: 'fixture-node', datastore: 'fixture', baseURL: 'http://127.0.0.1:1', capabilities: ['analytics'] };
   for (const [target, invariant] of [
     [{ ...valid, name: '' }, 'target name'],
+    [{ ...valid, runtime: '' }, 'runtime'],
     [{ ...valid, datastore: '' }, 'datastore'],
     [{ ...valid, baseURL: 'not a URL' }, 'base URL'],
     [{ ...valid, capabilities: ['unknown'] }, 'capabilities'],

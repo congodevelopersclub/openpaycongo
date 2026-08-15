@@ -6,12 +6,16 @@ const readJSON = async (path) => JSON.parse(await readFile(new URL(path, root), 
 
 export class ParityFailure extends Error {
   constructor(target, caseID, invariant, detail) {
-    super(`${target}: ${caseID}: ${invariant}: ${detail}`);
+    const evidence = typeof target === 'object'
+      ? `target=${target.name ?? 'unnamed-target'} runtime=${target.runtime ?? 'unknown'} datastore=${target.datastore ?? 'unknown'} request=${target.requestPath ?? 'unknown'}`
+      : target;
+    super(`${evidence}: ${caseID}: ${invariant}: ${detail}`);
     this.name = 'ParityFailure';
   }
 }
 
 const request = async (target, path, headers = {}) => {
+  target.requestPath = path;
   const response = await fetch(new URL(path, target.baseURL), { headers });
   const body = await response.text();
   return { response, body };
@@ -21,7 +25,7 @@ const expect = (target, caseID, invariant, actual, expected) => {
   try {
     assert.deepEqual(actual, expected);
   } catch {
-    throw new ParityFailure(target.name, caseID, invariant, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    throw new ParityFailure(target, caseID, invariant, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
 };
 
@@ -29,7 +33,7 @@ const json = (target, caseID, body) => {
   try {
     return JSON.parse(body);
   } catch {
-    throw new ParityFailure(target.name, caseID, 'JSON response', 'invalid JSON');
+    throw new ParityFailure(target, caseID, 'JSON response', 'invalid JSON');
   }
 };
 
@@ -38,6 +42,9 @@ const validateTarget = (target) => {
     throw new ParityFailure('unnamed-target', 'target-manifest', 'target name', 'must be a non-empty string');
   }
   const name = target.name;
+  if (typeof target?.runtime !== 'string' || target.runtime.length === 0) {
+    throw new ParityFailure({ ...target, name }, 'target-manifest', 'runtime', 'must be a non-empty string');
+  }
   if (typeof target?.datastore !== 'string' || target.datastore.length === 0) {
     throw new ParityFailure(name, 'target-manifest', 'datastore', 'must be a non-empty string');
   }
@@ -62,7 +69,7 @@ export async function runParity(target) {
   const expected = await readJSON('sales-analytics-response.valid.json');
   const query = new URLSearchParams({ ...vector.query, comparison: String(vector.query.comparison) });
   const analyticsPath = `/v1/analytics/sales?${query}`;
-  const report = { target: target.name, datastore: target.datastore, passed: [], skipped: [] };
+  const report = { target: target.name, runtime: target.runtime, datastore: target.datastore, passed: [], skipped: [] };
 
   const health = await request(target, '/healthz');
   expect(target, 'operational-healthz', 'liveness status', health.response.status, 200);
