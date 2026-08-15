@@ -260,6 +260,39 @@ func (store *Store) Replace(ctx context.Context, tenantID string, snapshot analy
 	return tx.Commit()
 }
 
+// LoadProjection returns a previously published projection for internal readers only.
+func (store *Store) LoadProjection(ctx context.Context, tenantID string) (analytics.SalesProjection, error) {
+	var encoded, version string
+	if err := store.db.QueryRowContext(ctx, "SELECT events_json, projection_version FROM sales_analytics_projections WHERE tenant_id = ?", tenantID).Scan(&encoded, &version); err != nil {
+		return analytics.SalesProjection{}, err
+	}
+	var payload []persistedProjectionEvent
+	if err := json.Unmarshal([]byte(encoded), &payload); err != nil {
+		return analytics.SalesProjection{}, err
+	}
+	events := make([]analytics.LedgerEvent, 0, len(payload))
+	for _, item := range payload {
+		if len(item.Digest) != 32 {
+			return analytics.SalesProjection{}, analytics.ErrProjectionUnavailable
+		}
+		input := analytics.EventInput{ID: item.ID, TenantID: item.TenantID, Kind: analytics.EventKind(item.Kind), Amount: item.AmountMinor, Currency: item.Currency, Provider: item.Provider, PaymentID: item.PaymentID, RelatedEventID: item.RelatedEventID, OccurredAt: item.OccurredAt, ReceivedAt: item.ReceivedAt}
+		copy(input.Digest[:], item.Digest)
+		event, err := analytics.NewLedgerEvent(input)
+		if err != nil {
+			return analytics.SalesProjection{}, err
+		}
+		events = append(events, event)
+	}
+	projection, err := analytics.Rebuild(tenantID, events)
+	if err != nil {
+		return analytics.SalesProjection{}, err
+	}
+	if projection.Version() != version {
+		return analytics.SalesProjection{}, analytics.ErrProjectionUnavailable
+	}
+	return projection, nil
+}
+
 type persistedProjectionEvent struct {
 	ID, TenantID, Kind, AmountMinor, Currency, Provider, PaymentID, RelatedEventID string
 	OccurredAt, ReceivedAt                                                         time.Time
