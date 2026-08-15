@@ -14,7 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const migrationRevision = "0003"
+const migrationRevision = "0004"
 
 const migrationSQL = `
 CREATE TABLE sales_analytics_events (
@@ -50,6 +50,15 @@ CREATE TABLE sales_analytics_projections (
   projection_version TEXT NOT NULL,
   events_json TEXT NOT NULL,
   replaced_at TEXT NOT NULL
+);`
+
+const acknowledgementMigrationSQL = `
+CREATE TABLE sales_analytics_acknowledgements (
+  tenant_id TEXT NOT NULL,
+  replica_id TEXT NOT NULL,
+  accepted_sequence INTEGER NOT NULL,
+  acknowledged_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, replica_id)
 );`
 
 type Store struct{ db *sql.DB }
@@ -112,6 +121,42 @@ func (store *Store) Append(ctx context.Context, event analytics.LedgerEvent) err
 		return analytics.ErrEventConflict
 	}
 	return err
+}
+
+// Acknowledge advances one internal replica cursor only to its next accepted
+// event. Repeating the current cursor is idempotent; gaps and foreign-tenant
+// cursors are rejected without changing durable acknowledgement state.
+func (store *Store) Acknowledge(ctx context.Context, tenantID, replicaID string, cursor uint64) error {
+	if tenantID == "" || replicaID == "" || cursor == 0 {
+		return analytics.ErrEventConflict
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var current uint64
+	err = tx.QueryRowContext(ctx, "SELECT accepted_sequence FROM sales_analytics_acknowledgements WHERE tenant_id=? AND replica_id=?", tenantID, replicaID).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		current = 0
+	} else if err != nil {
+		return err
+	}
+	if cursor == current {
+		return tx.Commit()
+	}
+	var next uint64
+	err = tx.QueryRowContext(ctx, "SELECT accepted_sequence FROM sales_analytics_events WHERE tenant_id=? AND accepted_sequence>? ORDER BY accepted_sequence LIMIT 1", tenantID, current).Scan(&next)
+	if err != nil || cursor != next {
+		return analytics.ErrEventConflict
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO sales_analytics_acknowledgements(tenant_id,replica_id,accepted_sequence,acknowledged_at)
+		VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+		ON CONFLICT(tenant_id,replica_id) DO UPDATE SET accepted_sequence=excluded.accepted_sequence, acknowledged_at=excluded.acknowledged_at`, tenantID, replicaID, cursor)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type storedEvent struct {
@@ -316,7 +361,7 @@ func applyMigration(ctx context.Context, db *sql.DB) error {
 	if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (revision TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)"); err != nil {
 		return err
 	}
-	for _, migration := range []struct{ revision, sql string }{{"0001", migrationSQL}, {"0002", snapshotMigrationSQL}, {"0003", projectionMigrationSQL}} {
+	for _, migration := range []struct{ revision, sql string }{{"0001", migrationSQL}, {"0002", snapshotMigrationSQL}, {"0003", projectionMigrationSQL}, {"0004", acknowledgementMigrationSQL}} {
 		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(migration.sql)))
 		var recorded string
 		err = tx.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE revision = ?", migration.revision).Scan(&recorded)
