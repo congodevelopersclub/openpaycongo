@@ -1,0 +1,2 @@
+*.sh text eol=lf
+admin-ui/test/openpay_admin.htpasswd text eol=lf
