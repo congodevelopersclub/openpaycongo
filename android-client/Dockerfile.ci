@@ -14,7 +14,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl git openjdk-17-jdk-headless unzip xz-utils zip \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p "$ANDROID_HOME/cmdline-tools"
+    && useradd --create-home --uid 10001 flutter \
+    && mkdir -p "$ANDROID_HOME/cmdline-tools" "$FLUTTER_HOME" \
+    && chown flutter:flutter "$ANDROID_HOME" "$ANDROID_HOME/cmdline-tools" "$FLUTTER_HOME"
+
+USER flutter
 
 RUN curl --fail --location --retry 3 --output /tmp/flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
     && echo "${FLUTTER_ARCHIVE_SHA256}  /tmp/flutter.tar.xz" | sha256sum --check --strict \
@@ -30,11 +34,6 @@ RUN yes | sdkmanager --licenses \
     && sdkmanager "platform-tools"
 
 RUN sdkmanager "platforms;android-34" "platforms;android-35" "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
-
-RUN useradd --create-home --uid 10001 flutter \
-    && chown -R flutter:flutter "$ANDROID_HOME" "$FLUTTER_HOME"
-
-USER flutter
 
 FROM flutter-sdk AS dependencies
 
