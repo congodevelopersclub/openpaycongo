@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/example/wallet-plugin-go/internal/analytics"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -52,6 +55,71 @@ func Open(path string) (*Store, error) {
 
 func (store *Store) Close() error              { return store.db.Close() }
 func (store *Store) MigrationRevision() string { return migrationRevision }
+
+// Append persists a validated analytics event exactly once. It never changes
+// an existing event: an exact replay succeeds and a changed replay conflicts.
+func (store *Store) Append(ctx context.Context, event analytics.LedgerEvent) error {
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	existing, found, err := store.find(ctx, event.ID)
+	if err != nil {
+		return err
+	}
+	if found {
+		if existing.matches(event) {
+			return nil
+		}
+		return analytics.ErrEventConflict
+	}
+	_, err = store.db.ExecContext(ctx, `INSERT INTO sales_analytics_events
+		(event_id, tenant_id, kind, amount_minor, currency, provider, payment_id, related_event_id, occurred_at, received_at, payload_digest)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
+		event.ID, event.TenantID, event.Kind, event.Amount.String(), event.Currency, event.Provider, event.PaymentID, event.RelatedEventID,
+		event.OccurredAt.Format(time.RFC3339), event.ReceivedAt.Format(time.RFC3339), event.Digest[:])
+	if err == nil {
+		return nil
+	}
+	existing, found, lookupErr := store.find(ctx, event.ID)
+	if lookupErr != nil {
+		return err
+	}
+	if found {
+		if existing.matches(event) {
+			return nil
+		}
+		return analytics.ErrEventConflict
+	}
+	return err
+}
+
+type storedEvent struct {
+	tenantID, kind, amount, currency, provider, paymentID, relatedID, occurredAt, receivedAt string
+	digest                                                                                   []byte
+}
+
+func (store *Store) find(ctx context.Context, id string) (storedEvent, bool, error) {
+	var event storedEvent
+	var related sql.NullString
+	err := store.db.QueryRowContext(ctx, `SELECT tenant_id, kind, amount_minor, currency, provider, payment_id, related_event_id, occurred_at, received_at, payload_digest
+		FROM sales_analytics_events WHERE event_id = ?`, id).Scan(
+		&event.tenantID, &event.kind, &event.amount, &event.currency, &event.provider, &event.paymentID, &related, &event.occurredAt, &event.receivedAt, &event.digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storedEvent{}, false, nil
+	}
+	if err != nil {
+		return storedEvent{}, false, err
+	}
+	event.relatedID = related.String
+	return event, true, nil
+}
+
+func (stored storedEvent) matches(event analytics.LedgerEvent) bool {
+	return stored.tenantID == event.TenantID && stored.kind == string(event.Kind) && stored.amount == event.Amount.String() &&
+		stored.currency == event.Currency && stored.provider == event.Provider && stored.paymentID == event.PaymentID &&
+		stored.relatedID == event.RelatedEventID && stored.occurredAt == event.OccurredAt.Format(time.RFC3339) &&
+		stored.receivedAt == event.ReceivedAt.Format(time.RFC3339) && string(stored.digest) == string(event.Digest[:])
+}
 
 func applyMigration(ctx context.Context, db *sql.DB) error {
 	checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(migrationSQL)))

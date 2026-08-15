@@ -1,9 +1,14 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/example/wallet-plugin-go/internal/analytics"
 )
 
 func TestOpenAppliesChecksummedMigrationIdempotently(t *testing.T) {
@@ -50,4 +55,58 @@ func TestOpenFailsClosedOnMigrationChecksumDrift(t *testing.T) {
 	if _, err := Open(path); err == nil {
 		t.Fatal("Open() accepted checksum drift")
 	}
+}
+
+func TestAppendIsImmutableAndIdempotent(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "analytics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	event := storageEvent(t, "018f0000-0000-7000-8000-000000000001", "4000")
+	if err := store.Append(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(context.Background(), event); err != nil {
+		t.Fatalf("exact replay = %v", err)
+	}
+	changed := storageEvent(t, event.ID, "5000")
+	if err := store.Append(context.Background(), changed); !errors.Is(err, analytics.ErrEventConflict) {
+		t.Fatalf("changed replay error = %v, want conflict", err)
+	}
+
+	var count int
+	var amount string
+	if err := store.db.QueryRow("SELECT count(*), max(amount_minor) FROM sales_analytics_events").Scan(&count, &amount); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || amount != "4000" {
+		t.Fatalf("persisted rows = count %d amount %q", count, amount)
+	}
+}
+
+func storageEvent(t *testing.T, id, amount string) analytics.LedgerEvent {
+	t.Helper()
+	input := analytics.EventInput{
+		ID:         id,
+		TenantID:   "tenant-demo",
+		Kind:       analytics.KindCapture,
+		Amount:     amount,
+		Currency:   "CDF",
+		Provider:   "orange-money",
+		PaymentID:  "payment-demo",
+		OccurredAt: time.Date(2026, time.November, 1, 12, 0, 0, 0, time.UTC),
+		ReceivedAt: time.Date(2026, time.November, 1, 12, 0, 1, 0, time.UTC),
+	}
+	digest, err := analytics.CanonicalEventDigest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Digest = digest
+	event, err := analytics.NewLedgerEvent(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
 }
