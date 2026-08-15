@@ -33,7 +33,31 @@ const json = (target, caseID, body) => {
   }
 };
 
+const validateTarget = (target) => {
+  if (typeof target?.name !== 'string' || target.name.length === 0) {
+    throw new ParityFailure('unnamed-target', 'target-manifest', 'target name', 'must be a non-empty string');
+  }
+  const name = target.name;
+  if (typeof target?.datastore !== 'string' || target.datastore.length === 0) {
+    throw new ParityFailure(name, 'target-manifest', 'datastore', 'must be a non-empty string');
+  }
+  if (!Array.isArray(target.capabilities) || target.capabilities.some((capability) => capability !== 'analytics')) {
+    throw new ParityFailure(name, 'target-manifest', 'capabilities', 'must contain only known capabilities');
+  }
+  let baseURL;
+  try {
+    baseURL = new URL(target.baseURL);
+  } catch {
+    throw new ParityFailure(name, 'target-manifest', 'base URL', 'must be an absolute HTTP URL');
+  }
+  if (!['http:', 'https:'].includes(baseURL.protocol)) {
+    throw new ParityFailure(name, 'target-manifest', 'base URL', 'must be an absolute HTTP URL');
+  }
+  return { ...target, name, baseURL: baseURL.href };
+};
+
 export async function runParity(target) {
+  target = validateTarget(target);
   const vector = await readJSON('sales-analytics.vector.json');
   const expected = await readJSON('sales-analytics-response.valid.json');
   const query = new URLSearchParams({ ...vector.query, comparison: String(vector.query.comparison) });
