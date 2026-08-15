@@ -17,6 +17,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 
+	"github.com/example/wallet-plugin-go/internal/runtimeconfig"
 	"github.com/example/wallet-plugin-go/internal/wallet"
 )
 
@@ -38,13 +39,17 @@ func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 
 func main() {
 	ctx := context.Background()
+	config, err := runtimeconfig.Load(operatingSystemEnvironment{})
+	if err != nil {
+		log.Fatal(err)
+	}
 	tp, err := initTracer(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() { _ = tp.Shutdown(ctx) }()
 
-	store, err := wallet.NewStore("wallet.db")
+	store, err := wallet.NewStore(config.SQLitePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -130,6 +135,14 @@ func main() {
 	})
 
 	handler := otelhttp.NewHandler(r, "chi-server")
-	log.Println("listening on :8080")
-	http.ListenAndServe(":8080", handler)
+	log.Printf("listening on %s", config.ListenAddress)
+	if err := http.ListenAndServe(config.ListenAddress, handler); err != nil {
+		log.Fatal(err)
+	}
+}
+
+type operatingSystemEnvironment struct{}
+
+func (operatingSystemEnvironment) LookupEnv(key string) (string, bool) {
+	return os.LookupEnv(key)
 }
