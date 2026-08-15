@@ -173,6 +173,9 @@ func NewLedgerEvent(input EventInput) (LedgerEvent, error) {
 	return event, nil
 }
 
+// Validate confirms that an event was constructed with the canonical analytics rules.
+func (event LedgerEvent) Validate() error { return validateLedgerEvent(event) }
+
 func CanonicalEventDigest(input EventInput) (EventDigest, error) {
 	amount, err := ParseMinorAmount(input.Amount)
 	if err != nil {
