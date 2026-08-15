@@ -45,3 +45,18 @@ test('targets without capability produce explicit non-parity skip', async (t) =>
   const report = await runParity({ ...fixture.target, name: 'legacy-go', capabilities: [] });
   assert.deepEqual(report.skipped, [{ case: 'analytics-vector', reason: 'target declares analytics unavailable' }]);
 });
+
+test('harness rejects a malformed target manifest before making a request', async () => {
+  const valid = { name: 'fixture-reference', datastore: 'fixture', baseURL: 'http://127.0.0.1:1', capabilities: ['analytics'] };
+  for (const [target, invariant] of [
+    [{ ...valid, name: '' }, 'target name'],
+    [{ ...valid, datastore: '' }, 'datastore'],
+    [{ ...valid, baseURL: 'not a URL' }, 'base URL'],
+    [{ ...valid, capabilities: ['unknown'] }, 'capabilities'],
+  ]) {
+    await assert.rejects(
+      () => runParity(target),
+      (error) => error instanceof ParityFailure && error.message.includes(`target-manifest: ${invariant}`),
+    );
+  }
+});
