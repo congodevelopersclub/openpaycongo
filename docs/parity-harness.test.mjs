@@ -6,10 +6,14 @@ import { ParityFailure, runParity } from './parity-harness.mjs';
 
 const root = new URL('./', import.meta.url);
 const expected = JSON.parse(await readFile(new URL('sales-analytics-response.valid.json', root), 'utf8'));
+const identity = { build: 'fixture-build', contract_version: '1.0.0-draft', implementation: 'fixture', adapter: 'fixture', migration_revision: '0001' };
+const readiness = { datastore: 'ok', migration: 'current', topology: 'supported', projection: 'healthy', write_admission: 'open', contract_version: identity.contract_version, migration_revision: identity.migration_revision, adapter: identity.adapter, implementation: identity.implementation };
 
-async function fixtureTarget({ divergent = false } = {}) {
+async function fixtureTarget({ divergent = false, divergentVersion = false } = {}) {
   const server = createServer((req, res) => {
     if (req.url === '/healthz') return res.end();
+    if (req.url === '/readyz') return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(readiness));
+    if (req.url === '/version') return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(divergentVersion ? { ...identity, adapter: 'wrong' } : identity));
     if (!req.url.startsWith('/v1/analytics/sales?')) return res.writeHead(404).end();
     if (!req.headers.authorization) return res.writeHead(401).end();
     if (req.headers.authorization !== 'Bearer parity-fixture-analytics-read') return res.writeHead(403).end();
@@ -20,7 +24,7 @@ async function fixtureTarget({ divergent = false } = {}) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   return {
-    target: { name: divergent ? 'controlled-divergence' : 'fixture-reference', datastore: 'fixture', baseURL: `http://127.0.0.1:${port}`, capabilities: ['analytics'] },
+    target: { name: divergent ? 'controlled-divergence' : 'fixture-reference', datastore: 'fixture', baseURL: `http://127.0.0.1:${port}`, capabilities: ['analytics'], identity, readiness },
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }
@@ -29,7 +33,7 @@ test('harness accepts canonical fixture reference over HTTP', async (t) => {
   const fixture = await fixtureTarget();
   t.after(fixture.close);
   const report = await runParity(fixture.target);
-  assert.deepEqual(report.passed, ['operational-healthz', 'analytics-vector', 'analytics-conditional', 'analytics-missing-token', 'analytics-wrong-scope']);
+  assert.deepEqual(report.passed, ['operational-healthz', 'operational-readyz', 'operational-version', 'analytics-vector', 'analytics-conditional', 'analytics-missing-token', 'analytics-wrong-scope']);
   assert.deepEqual(report.skipped, []);
 });
 
@@ -37,6 +41,12 @@ test('harness identifies controlled divergent response with case and invariant',
   const fixture = await fixtureTarget({ divergent: true });
   t.after(fixture.close);
   await assert.rejects(() => runParity(fixture.target), (error) => error instanceof ParityFailure && error.message.includes('analytics-vector: canonical response'));
+});
+
+test('harness identifies a divergent operational version identity', async (t) => {
+  const fixture = await fixtureTarget({ divergentVersion: true });
+  t.after(fixture.close);
+  await assert.rejects(() => runParity(fixture.target), (error) => error instanceof ParityFailure && error.message.includes('operational-version: canonical response'));
 });
 
 test('targets without capability produce explicit non-parity skip', async (t) => {

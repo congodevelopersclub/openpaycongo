@@ -25,6 +25,14 @@ const expect = (target, caseID, invariant, actual, expected) => {
   }
 };
 
+const json = (target, caseID, body) => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new ParityFailure(target.name, caseID, 'JSON response', 'invalid JSON');
+  }
+};
+
 export async function runParity(target) {
   const vector = await readJSON('sales-analytics.vector.json');
   const expected = await readJSON('sales-analytics-response.valid.json');
@@ -35,6 +43,19 @@ export async function runParity(target) {
   const health = await request(target, '/healthz');
   expect(target, 'operational-healthz', 'liveness status', health.response.status, 200);
   report.passed.push('operational-healthz');
+
+  const readiness = await request(target, '/readyz');
+  expect(target, 'operational-readyz', 'status', readiness.response.status, 200);
+  expect(target, 'operational-readyz', 'cache-control', readiness.response.headers.get('cache-control'), 'no-store');
+  expect(target, 'operational-readyz', 'canonical response', json(target, 'operational-readyz', readiness.body), target.readiness);
+  report.passed.push('operational-readyz');
+
+  const version = await request(target, '/version');
+  expect(target, 'operational-version', 'status', version.response.status, 200);
+  expect(target, 'operational-version', 'cache-control', version.response.headers.get('cache-control'), 'no-store');
+  expect(target, 'operational-version', 'canonical response', json(target, 'operational-version', version.body), target.identity);
+  report.passed.push('operational-version');
+
   if (!target.capabilities.includes('analytics')) {
     report.skipped.push({ case: 'analytics-vector', reason: 'target declares analytics unavailable' });
     return report;
@@ -46,8 +67,7 @@ export async function runParity(target) {
   expect(target, 'analytics-vector', 'cache-control', analytics.response.headers.get('cache-control'), 'private, max-age=30, must-revalidate');
   expect(target, 'analytics-vector', 'vary', analytics.response.headers.get('vary'), 'Authorization');
   expect(target, 'analytics-vector', 'etag', analytics.response.headers.get('etag'), expected.etag);
-  let body;
-  try { body = JSON.parse(analytics.body); } catch { throw new ParityFailure(target.name, 'analytics-vector', 'JSON response', 'invalid JSON'); }
+  const body = json(target, 'analytics-vector', analytics.body);
   expect(target, 'analytics-vector', 'canonical response', body, expected);
   report.passed.push('analytics-vector');
 
