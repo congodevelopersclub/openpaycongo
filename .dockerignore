@@ -4,6 +4,8 @@
 !SECURITY.md
 !docs/
 !docs/**
+!node-reference/
+!node-reference/**
 !laravel-reference/
 !laravel-reference/**
 !.github/
