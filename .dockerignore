@@ -4,6 +4,13 @@
 !SECURITY.md
 !docs/
 !docs/**
+!node-reference/
+!node-reference/Dockerfile
+!node-reference/package.json
+!node-reference/package-lock.json
+!node-reference/server.mjs
+!node-reference/server.test.mjs
+!node-reference/analytics-parity.test.mjs
 !.github/
 .github/*
 !.github/workflows/
