@@ -17,7 +17,7 @@ func TestOpenAppliesChecksummedMigrationIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.MigrationRevision() != "0002" {
+	if store.MigrationRevision() != "0003" {
 		t.Fatalf("revision = %q", store.MigrationRevision())
 	}
 	if err := store.Close(); err != nil {
@@ -28,7 +28,7 @@ func TestOpenAppliesChecksummedMigrationIdempotently(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if store.MigrationRevision() != "0002" {
+	if store.MigrationRevision() != "0003" {
 		t.Fatalf("reopen revision = %q", store.MigrationRevision())
 	}
 }
@@ -109,6 +109,36 @@ func TestSnapshotExcludesLaterAppendAndPagesInAcceptanceOrder(t *testing.T) {
 	}
 	if page.Snapshot != snapshot || len(page.Events) != 1 || page.Events[0].ID != first.ID || page.Next != "" {
 		t.Fatalf("page = %#v", page)
+	}
+}
+
+func TestReplaceUsesGenerationCAS(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "analytics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	event := storageEvent(t, "018f0000-0000-7000-8000-000000000001", "4000")
+	projection, err := analytics.Rebuild(event.TenantID, []analytics.LedgerEvent{event})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := analytics.SourceSnapshot{Generation: 2, Token: "snapshot-tenant-demo-2"}
+	if err := store.Replace(context.Background(), event.TenantID, newer, projection); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(context.Background(), event.TenantID, newer, projection); err != nil {
+		t.Fatalf("exact replay = %v", err)
+	}
+	if err := store.Replace(context.Background(), event.TenantID, analytics.SourceSnapshot{Generation: 1, Token: "snapshot-tenant-demo-1"}, projection); !errors.Is(err, analytics.ErrStaleProjection) {
+		t.Fatalf("older replace = %v", err)
+	}
+	var generation uint64
+	if err := store.db.QueryRow("SELECT generation FROM sales_analytics_projections WHERE tenant_id = ?", event.TenantID).Scan(&generation); err != nil {
+		t.Fatal(err)
+	}
+	if generation != 2 {
+		t.Fatalf("generation = %d", generation)
 	}
 }
 
