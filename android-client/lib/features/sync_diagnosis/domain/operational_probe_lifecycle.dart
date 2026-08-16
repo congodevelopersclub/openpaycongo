@@ -1,9 +1,5 @@
 import 'operational_transport.dart';
 
-abstract interface class OperationalProbe {
-  Future<OperationalProbeResult> probe();
-}
-
 enum OperationalProbeState { checking, healthy, stale, offline, contractFailure, circuitOpen, halfOpen }
 
 final class OperationalProbeSnapshot {
@@ -73,6 +69,7 @@ final class OperationalProbeLifecycle {
       return;
     }
     if (result.failure == OperationalProbeFailure.schema || result.failure == OperationalProbeFailure.identity) {
+      _openedAt = null;
       _transientFailures = 0;
       _latest = const OperationalProbeSnapshot._(OperationalProbeState.contractFailure);
       return;

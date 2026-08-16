@@ -2,15 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 
 abstract interface class OperationalHttpPort { Future<OperationalHttpResponse> get(Uri uri, {required Map<String, String> headers}); }
+abstract interface class OperationalProbe { Future<OperationalProbeResult> probe(); }
 final class OperationalHttpResponse { const OperationalHttpResponse({required this.status, required this.headers, required this.body}); final int status; final Map<String, String> headers; final List<int> body; }
 final class ExpectedServiceIdentity { const ExpectedServiceIdentity({required this.contractVersion, required this.migrationRevision, required this.adapter, required this.implementation}); final String contractVersion, migrationRevision, adapter, implementation; }
 enum OperationalProbeFailure { http, timeout, schema, identity, superseded }
 final class OperationalProbeResult { const OperationalProbeResult._({this.ready = false, this.build, this.failure}); final bool ready; final String? build; final OperationalProbeFailure? failure; factory OperationalProbeResult.ready(String build) => OperationalProbeResult._(ready: true, build: build); factory OperationalProbeResult.failure(OperationalProbeFailure value) => OperationalProbeResult._(failure: value); }
 
-final class OperationalTransport {
+final class OperationalTransport implements OperationalProbe {
   OperationalTransport(OperationalHttpPort http, Uri base, ExpectedServiceIdentity identity, {Duration timeout = const Duration(seconds: 3)}) : this._(http, base, identity, timeout);
   OperationalTransport._(this._http, this._base, this._identity, this._timeout);
   final OperationalHttpPort _http; final Uri _base; final ExpectedServiceIdentity _identity; final Duration _timeout; int _generation = 0;
+  @override
   Future<OperationalProbeResult> probe() {
     final int generation = ++_generation;
     return _probe(generation).timeout(_timeout, onTimeout: () => OperationalProbeResult.failure(OperationalProbeFailure.timeout));

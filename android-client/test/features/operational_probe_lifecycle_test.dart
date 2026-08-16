@@ -14,7 +14,23 @@ final class ProbeFake implements OperationalProbe {
   Future<OperationalProbeResult> probe() => results[calls++];
 }
 
+final class NoopHttpPort implements OperationalHttpPort {
+  @override
+  Future<OperationalHttpResponse> get(Uri uri, {required Map<String, String> headers}) =>
+      throw UnimplementedError();
+}
+
 void main() {
+  test('operational transport is directly usable as a lifecycle probe', () {
+    final OperationalProbe probe = OperationalTransport(
+      NoopHttpPort(),
+      Uri.parse('https://backend.example'),
+      const ExpectedServiceIdentity(contractVersion: 'v1', migrationRevision: 'm1', adapter: 'sqlite', implementation: 'go'),
+    );
+
+    expect(probe, isA<OperationalTransport>());
+  });
+
   test('visible entry probes automatically and healthy evidence expires', () async {
     var clock = DateTime.utc(2026, 8, 16);
     final lifecycle = OperationalProbeLifecycle(
@@ -71,5 +87,26 @@ void main() {
     halfOpen.complete(OperationalProbeResult.failure(OperationalProbeFailure.http));
     await Future.wait([one, two]);
     expect(probe.calls, 4);
+  });
+
+  test('a contract failure from half-open clears the old circuit schedule', () async {
+    var clock = DateTime.utc(2026, 8, 16);
+    final probe = ProbeFake([
+      ...List.generate(3, (_) => Future.value(OperationalProbeResult.failure(OperationalProbeFailure.http))),
+      Future.value(OperationalProbeResult.failure(OperationalProbeFailure.identity)),
+      Future.value(OperationalProbeResult.failure(OperationalProbeFailure.schema)),
+    ]);
+    final lifecycle = OperationalProbeLifecycle(probe, now: () => clock);
+
+    await lifecycle.onForegroundChanged(true);
+    await lifecycle.refresh();
+    await lifecycle.refresh();
+    clock = clock.add(const Duration(seconds: 30));
+    await lifecycle.refresh();
+    expect(lifecycle.snapshot.state, OperationalProbeState.contractFailure);
+    expect(lifecycle.nextAttemptAt, isNull);
+
+    await lifecycle.refresh();
+    expect(probe.calls, 5);
   });
 }
