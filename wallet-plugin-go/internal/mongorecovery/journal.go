@@ -4,6 +4,7 @@ package mongorecovery
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"time"
 
@@ -41,7 +42,7 @@ func (j *Journal) EnsureIndexes(ctx context.Context) error {
 // Prepare records one immutable recovery plan. An exact prepared replay is
 // idempotent; applied and aborted plans remain terminal across process restart.
 func (j *Journal) Prepare(ctx context.Context, plan recovery.RestorePlan) (string, error) {
-	if j == nil || j.entries == nil || plan.TenantID == "" || plan.ProjectionRevision == "" {
+	if j == nil || j.entries == nil || !validPlan(plan) {
 		return "", ErrTransition
 	}
 	digest := recovery.PlanDigest(plan)
@@ -68,6 +69,10 @@ func (j *Journal) Prepare(ctx context.Context, plan recovery.RestorePlan) (strin
 		return digest, nil
 	}
 	return "", ErrTransition
+}
+
+func validPlan(plan recovery.RestorePlan) bool {
+	return plan.TenantID != "" && plan.ProjectionRevision != "" && plan.PayloadDigest != ([sha256.Size]byte{})
 }
 
 // Transition changes a prepared plan once. It never reopens a terminal plan.

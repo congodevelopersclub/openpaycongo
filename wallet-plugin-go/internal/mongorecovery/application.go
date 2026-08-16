@@ -3,6 +3,7 @@ package mongorecovery
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/example/wallet-plugin-go/internal/recovery"
 )
@@ -42,7 +43,10 @@ type Result struct {
 type Application struct {
 	Journal  durableJournal
 	Mutation ApplyOncePort
+	Timeout  time.Duration
 }
+
+const defaultExecutionTimeout = 5 * time.Second
 
 func (a Application) Execute(ctx context.Context, plan recovery.RestorePlan, source, target recovery.Snapshot) (Result, error) {
 	if a.Journal == nil || a.Mutation == nil {
@@ -59,7 +63,13 @@ func (a Application) Execute(ctx context.Context, plan recovery.RestorePlan, sou
 		}
 		return Result{}, err
 	}
-	if err := a.Mutation.ApplyOnce(ctx, plan, digest); err != nil {
+	timeout := a.Timeout
+	if timeout <= 0 {
+		timeout = defaultExecutionTimeout
+	}
+	execution, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := a.Mutation.ApplyOnce(execution, plan, digest); err != nil {
 		var abort AbortError
 		if errors.As(err, &abort) {
 			if transitionErr := a.Journal.Transition(ctx, plan.TenantID, digest, recovery.JournalAborted); transitionErr != nil {

@@ -26,6 +26,12 @@ func TestJournalRejectsInvalidInputsWithoutDatabase(t *testing.T) {
 	}
 }
 
+func TestJournalRejectsZeroPayloadDigest(t *testing.T) {
+	if validPlan(recovery.RestorePlan{TenantID: "tenant-a", ProjectionRevision: "projection-v1"}) {
+		t.Fatal("zero payload digest accepted")
+	}
+}
+
 func TestMongoRecoveryJournalRuntime(t *testing.T) {
 	uri := os.Getenv("MONGO_RECOVERY_URI")
 	if uri == "" {

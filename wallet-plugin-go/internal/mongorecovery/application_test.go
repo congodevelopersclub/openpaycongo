@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/example/wallet-plugin-go/internal/recovery"
 )
@@ -25,6 +26,7 @@ func (f *journalFake) Prepare(_ context.Context, plan recovery.RestorePlan) (str
 	if f.state == recovery.JournalApplied || f.state == recovery.JournalAborted {
 		return "", ErrTransition
 	}
+	f.state = recovery.JournalPrepared
 	return f.digest, nil
 }
 func (f *journalFake) Transition(_ context.Context, _ string, _ string, state recovery.JournalState) error {
@@ -114,5 +116,27 @@ func TestApplicationLeavesTransientFailurePreparedAndAbortsExplicitRefusal(t *te
 	}
 	if journal.state != recovery.JournalAborted {
 		t.Fatalf("state=%q", journal.state)
+	}
+}
+
+type blockingMutation struct{ called int }
+
+func (f *blockingMutation) ApplyOnce(ctx context.Context, _ recovery.RestorePlan, _ string) error {
+	f.called++
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestApplicationBoundsExecutorAndLeavesTimeoutResumable(t *testing.T) {
+	plan := applicationPlan()
+	snapshot := applicationSnapshot(plan)
+	journal := &journalFake{}
+	mutation := &blockingMutation{}
+	_, err := (Application{Journal: journal, Mutation: mutation, Timeout: time.Millisecond}).Execute(context.Background(), plan, snapshot, snapshot)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout=%v", err)
+	}
+	if mutation.called != 1 || journal.state != recovery.JournalPrepared {
+		t.Fatalf("calls=%d state=%q", mutation.called, journal.state)
 	}
 }
