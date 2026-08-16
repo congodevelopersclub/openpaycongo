@@ -5,7 +5,7 @@ abstract interface class OperationalHttpPort { Future<OperationalHttpResponse> g
 final class OperationalHttpResponse { const OperationalHttpResponse({required this.status, required this.headers, required this.body}); final int status; final Map<String, String> headers; final List<int> body; }
 final class ExpectedServiceIdentity { const ExpectedServiceIdentity({required this.contractVersion, required this.migrationRevision, required this.adapter, required this.implementation}); final String contractVersion, migrationRevision, adapter, implementation; }
 enum OperationalProbeFailure { http, timeout, schema, identity, superseded }
-final class OperationalProbeResult { const OperationalProbeResult._({this.ready = false, this.build, this.failure}); final bool ready; final String? build; final OperationalProbeFailure? failure; factory OperationalProbeResult.failure(OperationalProbeFailure value) => OperationalProbeResult._(failure: value); }
+final class OperationalProbeResult { const OperationalProbeResult._({this.ready = false, this.build, this.failure}); final bool ready; final String? build; final OperationalProbeFailure? failure; factory OperationalProbeResult.ready(String build) => OperationalProbeResult._(ready: true, build: build); factory OperationalProbeResult.failure(OperationalProbeFailure value) => OperationalProbeResult._(failure: value); }
 
 final class OperationalTransport {
   OperationalTransport(OperationalHttpPort http, Uri base, ExpectedServiceIdentity identity, {Duration timeout = const Duration(seconds: 3)}) : this._(http, base, identity, timeout);
