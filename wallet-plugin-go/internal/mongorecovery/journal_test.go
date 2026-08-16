@@ -57,6 +57,13 @@ func TestMongoRecoveryJournalRuntime(t *testing.T) {
 		if _, err := journal.Prepare(ctx, plan); !errors.Is(err, ErrTransition) {
 			t.Fatalf("restart replay=%v", err)
 		}
+		coordinatorPlan := recovery.RestorePlan{TenantID: plan.TenantID, ProjectionRevision: plan.ProjectionRevision, PayloadDigest: sha256.Sum256([]byte("coordinator-runtime-events"))}
+		snapshot := applicationSnapshot(coordinatorPlan)
+		mutation := &mutationFake{}
+		replay, err := (Application{Journal: journal, Mutation: mutation}).Execute(ctx, coordinatorPlan, snapshot, snapshot)
+		if err != nil || !replay.Replayed || mutation.credits != 0 {
+			t.Fatalf("restart application replay=%+v credits=%d err=%v", replay, mutation.credits, err)
+		}
 		return
 	}
 	digest, err := journal.Prepare(ctx, plan)
@@ -91,5 +98,17 @@ func TestMongoRecoveryJournalRuntime(t *testing.T) {
 	}
 	if len(indexes) < 2 {
 		t.Fatalf("indexes=%d", len(indexes))
+	}
+	coordinatorPlan := recovery.RestorePlan{TenantID: plan.TenantID, ProjectionRevision: plan.ProjectionRevision, PayloadDigest: sha256.Sum256([]byte("coordinator-runtime-events"))}
+	snapshot := applicationSnapshot(coordinatorPlan)
+	mutation := &mutationFake{}
+	application := Application{Journal: journal, Mutation: mutation}
+	result, err := application.Execute(ctx, coordinatorPlan, snapshot, snapshot)
+	if err != nil || result.Replayed || mutation.credits != 1 {
+		t.Fatalf("application result=%+v credits=%d err=%v", result, mutation.credits, err)
+	}
+	replay, err := application.Execute(ctx, coordinatorPlan, snapshot, snapshot)
+	if err != nil || !replay.Replayed || replay.OperationID != result.OperationID || mutation.credits != 1 {
+		t.Fatalf("application replay=%+v credits=%d err=%v", replay, mutation.credits, err)
 	}
 }
