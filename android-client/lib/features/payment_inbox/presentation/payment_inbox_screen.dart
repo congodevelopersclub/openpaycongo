@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 
 import '../../sms_gateway/domain/sms_gateway.dart';
+import '../../payment_outbox/presentation/payment_lifecycle_bloc.dart';
+import '../../payment_outbox/presentation/payment_lifecycle_status_card.dart';
 import '../domain/payment_ingestion.dart';
 
 final class PaymentInboxScreen extends StatefulWidget {
@@ -9,10 +12,12 @@ final class PaymentInboxScreen extends StatefulWidget {
     super.key,
     this.smsPermissionState = SmsPermissionState.ready,
     this.gemmaCapability = const GemmaRuntimePending(),
+    this.paymentLifecycle,
     required this.gateway,
   });
   final SmsPermissionState smsPermissionState;
   final GemmaCapabilityEvidence gemmaCapability;
+  final PaymentLifecycleBloc? paymentLifecycle;
   final SmsGatewayPort gateway;
   @override
   State<PaymentInboxScreen> createState() => _PaymentInboxScreenState();
@@ -218,6 +223,13 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
             ),
             const SizedBox(height: 24),
             _CaptureStatusCard(state: widget.smsPermissionState),
+            if (widget.paymentLifecycle case final PaymentLifecycleBloc lifecycle) ...<Widget>[
+              const SizedBox(height: 12),
+              BlocProvider<PaymentLifecycleBloc>.value(
+                value: lifecycle,
+                child: const PaymentLifecycleStatusCard(),
+              ),
+            ],
             if (_nativeHealth?.fault != null) ...<Widget>[
               const SizedBox(height: 12),
               _CaptureFaultCard(
