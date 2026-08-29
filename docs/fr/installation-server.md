@@ -1,12 +1,15 @@
 # Installation du serveur
 
-Le binaire `walletd` fonctionne avec SQLite par défaut. Exemple d'exécution via Docker :
+Le serveur canonique est l'application Laravel native dans `server/`.
+
+L'image de production, Compose PostgreSQL, le worker de file, le planificateur,
+les sauvegardes et la restauration restent des travaux distincts. Aucun binaire
+historique, image publiee, ni serveur de production n'est fourni actuellement.
+
+Pour verifier le point d'entree Laravel avec Docker depuis la racine du depot :
 
 ```bash
-docker run -p 8080:8080 -v $(pwd)/data:/data ghcr.io/example/walletd:1.0
+docker build --target test -f server/Dockerfile .
 ```
 
-L'API expose des routes `/api/credits`, `/wallet/{phone}/debit` ainsi que la gestion des parsers (`/parsers`).
-# Installation historique: avertissement
-
-> **Avertissement :** l'image `ghcr.io/example/walletd:1.0` ci-dessous est un exemple fictif et il n'existe pas actuellement d'image Docker publiee, de serveur de production, ni de contrat `/v1/sync/*` implemente. Consulter `../openapi.yaml` et `../prd-backend.md` pour la specification planifiee.
+Consulter `../openapi.yaml` et `../prd-backend.md` pour les contrats planifies.

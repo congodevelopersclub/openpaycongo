@@ -52,7 +52,7 @@ SMS.
 
 ## Adapter and migration boundary
 
-SQLite, PostgreSQL, MySQL, and Mongo may differ physically only after preserving
+SQLite, PostgreSQL, and MySQL may differ physically only after preserving
 the approved logical mapping and one-winner invariants. Existing SQLite code is
 legacy/prototype evidence, not confirmation of the canonical revision. Migrations
 must be additive and checksummed; drifted or missing constraints/indexes close

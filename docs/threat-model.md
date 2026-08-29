@@ -12,21 +12,21 @@ No examples in this document contain personal data, usable credentials, private 
 
 ## Verified repository facts
 
-- The root README says the Android and Go applications are incomplete prototypes and must not process real payments or real SMS data ([README](../README.md)).
+- The root README says the Android application and canonical Laravel server are incomplete prototypes and must not process real payments or real SMS data ([README](../README.md)).
 - Canonical public events exclude raw SMS. The event schema rejects fields outside the published shape, and the architecture says `tenant_id` is derived from authenticated server state rather than accepted from request JSON ([ledger event schema](ledger-event.schema.json), [architecture](architecture.md)).
 - The Android prototype stores trusted local evidence under Android Keystore-backed encryption and treats key invalidation or journal corruption as recovery-required rather than silently continuing ([mobile PRD](prd-mobile.md), [EncryptedSmsVault](../android-client/android/app/src/main/kotlin/com/example/opencongopay/sms/EncryptedSmsVault.kt)).
 - The pairing protocol binds an authenticated administrator ceremony to a bounded QR, uses protected ephemeral/private material, and requires `private, no-store` pairing responses. It explicitly does not protect a compromised hosting edge, administrator UI, or OAuth session ([ADR 004](adr-004-secure-device-enrollment.md)).
-- The Go implementation and Android client are not evidence of the canonical backend contract, release signing, deployable server image, or completed authentication lifecycle ([README](../README.md)).
-- **Legacy Go prototype warning:** the checked-in legacy server accepts unauthenticated routes and persists plaintext phone and raw-SMS fields in SQLite. This is unsafe for real data and must not be treated as the canonical backend or a supported deployment ([server](../wallet-plugin-go/cmd/server/main.go), [store](../wallet-plugin-go/internal/wallet/store.go)).
+- The canonical Laravel implementation and Android client are not evidence of release signing, deployable server image, or completed authentication lifecycle ([README](../README.md)).
+- **Prototype warning:** the canonical Laravel server does not yet establish production authentication, secret storage, telemetry retention, or deployment readiness. It must not process real data.
 - **Legacy Flutter prototype warning:** a separate legacy Flutter data path stores sender, amount, balance, and reference in its application database; its checked-in data-encryption file is empty. Its relationship to the newer Keystore-backed SMS slice is not established by a completed migration or removal plan ([data access](../android-client/lib/services/DataAccess/dataaccess.dart), [data encryption](../android-client/lib/services/DataAccess/dataencrypter.dart)).
-- The Go stdout tracing exporter and Flutter console exporter are checked in, but no repository evidence proves a production telemetry redaction/sink/retention policy ([Go server](../wallet-plugin-go/cmd/server/main.go), [Flutter telemetry](../android-client/lib/services/Telemetry/telemetry.dart)).
-- CI builds checked-in contract, Go, Android, and admin-browser test paths in Docker; the Android debug artifact is retained for seven days and is not a release artifact ([CI workflow](../.github/workflows/ci.yml), [README](../README.md)).
+- Flutter console telemetry is checked in, but no repository evidence proves a production telemetry redaction/sink/retention policy ([Flutter telemetry](../android-client/lib/services/Telemetry/telemetry.dart)).
+- CI builds checked-in contract, Laravel, and Android paths in Docker; the Android debug artifact is retained for seven days and is not a release artifact ([CI workflow](../.github/workflows/ci.yml), [README](../README.md)).
 
 ## Assets, actors, and trust boundaries
 
 | Asset or boundary | Actors | Current evidence and boundary |
 | --- | --- | --- |
-| Raw trusted SMS evidence | Device owner; Android OS; malicious sender/app | The newer mobile slice describes a Keystore-backed inbox where raw SMS remains local and is excluded from canonical public events. A separate legacy Go prototype persists raw-SMS fields and is not safe for real data. |
+| Raw trusted SMS evidence | Device owner; Android OS; malicious sender/app | The newer mobile slice describes a Keystore-backed inbox where raw SMS remains local and is excluded from canonical public events. |
 | Canonical immutable event | Enrolled device, merchant integration, backend | Public input must not choose tenant or replica identity; tenant_id is derived from authenticated claims or enrolled-device state before authorization and idempotency checks. |
 | Local encryption keys and recovery markers | Device owner; Android Keystore; device attacker | The newer Android SMS vault implements Keystore-backed domains and recovery-required state. A legacy Flutter storage path has no proven encryption/migration boundary. Device loss, key invalidation, and storage corruption remain recovery boundaries, not silent success paths. |
 | Pairing QR and derived device material | Authenticated administrator; phone; backend; attacker with physical/edge/UI access | QR is temporary bearer material. The short-authentication-code ceremony detects mismatch only when the administrator display and phone display are authentic and compared. |
@@ -43,14 +43,14 @@ No examples in this document contain personal data, usable credentials, private 
 | Pairing QR interception, UI compromise, or key-material disclosure | ADR 004 constrains QR fields, cryptographic transcript, key destruction, no-store response policy, and administrator comparison. | Compromised edge, administrator UI, or OAuth session is explicitly outside the current guarantee; rotation and multi-device recovery are future work. |
 | Lost/invalidate device key or corrupt journal is mistaken for healthy state | The mobile storage design uses recovery-required markers and reports recovery instead of a false record count. | Real-device power-loss and recovery rehearsal are still required. |
 | Secrets or raw SMS leak through public evidence | Repository documentation forbids raw SMS, credentials, and wallet databases; canonical events omit raw SMS. | Telemetry retention, exporter configuration, and incident-log access policy are not yet approved. |
-| Legacy endpoint or local database is used with real data | README prohibits real payments and SMS. Legacy Go has unauthenticated raw-SMS/phone persistence; legacy Flutter has no proven encrypted data path. | Maintainers must remove, migrate, or demonstrably disable these prototype paths before any supported release claim. |
+| Legacy endpoint or local database is used with real data | README prohibits real payments and SMS. A legacy Flutter path has no proven encrypted data path. | Maintainers must remove, migrate, or demonstrably disable unsafe prototype paths before any supported release claim. |
 | Vulnerable dependency or mutable build input reaches a release | CI pins actions and toolchains. | Blocking thresholds, exception expiry, advisory sources, SBOM/provenance, signing, and emergency revocation are not yet approved. |
 
 ## Privacy lifecycle
 
 | Data category | Collection and storage fact | Sharing/export fact | Retention, deletion, backup, and access authority |
 | --- | --- | --- | --- |
-| Raw SMS | The newer mobile design keeps trusted raw content in an encrypted on-device inbox and rejects untrusted content before persistence. The legacy Go prototype separately persists raw-SMS fields and is unsafe for real data. | Canonical event design excludes raw SMS; legacy prototype persistence is not a permitted sharing model. | Pending maintainer authority. The prototype does not establish an approved retention or deletion schedule or a legacy-path removal/migration decision. |
+| Raw SMS | The newer mobile design keeps trusted raw content in an encrypted on-device inbox and rejects untrusted content before persistence. | Canonical event design excludes raw SMS; plaintext prototype persistence is not a permitted sharing model. | Pending maintainer authority. The prototype does not establish an approved retention or deletion schedule or a legacy-path removal/migration decision. |
 | Local review decisions and recovery state | The newer vault stores encrypted state and recovery-required blocks normal mutation/export claims; a separate legacy Flutter database lacks a proven encryption/migration boundary. | Current exports are diagnostic/prototype behavior, not a production data-rights implementation. | Pending maintainer authority for retention, deletion, support access, backups, recovery assistance, and legacy-path removal/migration. |
 | Canonical ledger event and projections | The planned backend stores immutable events and derives projections; tenant identity is server-injected. | Planned recovery exports include ordered digest/count information and exclude keys, bearers, QR, short code, and raw SMS ([reliability](reliability.md)). | Pending maintainer authority for retention, lawful basis, deletion limits for immutable records, backups, restore access, and audit access. |
 | Operational telemetry and CI evidence | Current workflow retains a debug APK for seven days. Repository sources describe no approved telemetry service or production logging policy. | Public issues and PRs must use synthetic, redacted evidence. | Pending maintainer authority for telemetry fields, sampling, retention, access, incident export, and deletion. |
@@ -69,7 +69,7 @@ The following are **not yet approved** and must be decided by maintainers before
 4. Private vulnerability reporting route, acknowledgement target, coordinated disclosure process, and emergency rebuild/revocation authority.
 5. Vulnerability severity/exploitability thresholds, advisory sources, exception evidence/expiry, dependency cadence, SBOM/provenance/signing, and scanner-outage behavior.
 6. Production hosting, deployment, artifact, and release approval authority.
-7. Canonical mobile storage ownership and the removal, migration, or hard disablement of legacy plaintext Go/Flutter prototype paths before release.
+7. Canonical mobile storage ownership and the removal, migration, or hard disablement of legacy plaintext prototype paths before release.
 
 Until those choices exist, contributors must use synthetic fixtures, avoid sensitive data, and treat absent policy as a release blocker rather than permission to choose a default.
 

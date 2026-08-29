@@ -1,6 +1,6 @@
 # Canonical architecture
 
-Status: planned architecture, not implemented by either current prototype.
+Status: planned architecture, not fully implemented by the canonical server.
 
 The mobile client is the local-first authority for the payment inbox/outbox it has durably recorded. The backend is the authoritative replicated immutable ledger for acknowledged events and derives balances from that ledger. Neither a displayed balance nor a parsed SMS is an independently mutable source of truth.
 
@@ -24,4 +24,4 @@ See [interoperability](interoperability.md), [reliability](reliability.md), and 
 
 ## Enrollment boundary
 
-Device enrollment follows [ADR 004](adr-004-secure-device-enrollment.md). The onion boundary is a typed pairing domain and application service surrounded by clock, randomness, identity signer, `KeyProtector`, and atomic repository ports. Go chi, Node Fastify, and Laravel adapters must remain interchangeable behind the public schemas and black-box tests. A later shared Preact/TypeScript administration UI may request and display a QR, revoke an enrollment, and show audit state; it does not perform server cryptography or receive persisted secrets.
+Device enrollment follows [ADR 004](adr-004-secure-device-enrollment.md). The canonical Laravel application owns pairing through Eloquent models, migrations, Form Requests, Policies, Actions, Events, and queued listeners where needed. The pairing Action performs atomic database work; controllers and Livewire components delegate without business logic. Any future administration experience belongs inside the Laravel application and must not perform server cryptography or receive persisted secrets.

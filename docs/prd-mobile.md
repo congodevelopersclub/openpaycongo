@@ -124,7 +124,7 @@ The minimal receiver, runtime-permission bridge, exact trusted-sender vault, gen
 
 This section is normative for the future Android pairing implementation; the current Flutter prototype does
 not implement it. The wire protocol is defined by `adr-004-secure-device-enrollment.md` and the checked-in
-Go/Node contract vectors.
+Runtime-neutral contract vectors.
 
 - Accept only the exact canonical completion endpoint grammar: lowercase ASCII DNS with at least two labels,
   optional canonical decimal port 1-65535, and exact path `/v1/pairing/complete`. Reject IP literals,

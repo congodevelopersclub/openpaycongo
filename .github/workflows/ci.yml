@@ -17,17 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Validate public contract and delivery policy in Docker
+      - name: Validate public contract and runtime-neutral fixtures in Docker
         run: docker build --target test -f docs/Dockerfile .
 
-  go:
+  laravel:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Run Go public tests, vet, and race detector in Docker
-        run: docker build --target test -f wallet-plugin-go/Dockerfile wallet-plugin-go
-      - name: Build Go runtime image in Docker
-        run: docker build --target runtime -t openpaycongo-wallet:${{ github.sha }} -f wallet-plugin-go/Dockerfile wallet-plugin-go
+      - name: Run canonical Laravel server tests in Docker
+        run: docker build --target test -f server/Dockerfile .
 
   flutter:
     runs-on: ubuntu-latest
@@ -48,13 +46,3 @@ jobs:
           path: android-client/build/ci/app-debug.apk
           if-no-files-found: error
           retention-days: 7
-
-  admin-browser:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Run admin browser journey in Docker Compose
-        run: docker compose -f admin-ui/compose.test.yaml up --build --abort-on-container-exit --exit-code-from browser
-      - name: Remove admin browser journey resources
-        if: always()
-        run: docker compose -f admin-ui/compose.test.yaml down --volumes --remove-orphans

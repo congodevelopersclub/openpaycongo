@@ -12,7 +12,7 @@ any GitHub configuration or select those values.
 
 - The current CI workflow grants `contents: read`, uses a single concurrency
   group, and pins the checkout action to an immutable commit.
-- Current named CI jobs are `contract`, `go`, `flutter`, and `admin-browser`.
+- Current named CI jobs are `contract`, `laravel`, and `flutter`.
   They run Docker-based checks; the Android artifact is explicitly debug-signed
   evidence, not a distributable release.
 - Repository documentation says signing, SBOM, provenance, scans, rollback
@@ -43,7 +43,7 @@ status, and bypass actors. The audit record must identify the repository and
 time observed without exposing credentials or private contact data.
 
 The same audit should record which expected jobs do not exist yet (for example,
-Node, Laravel, database parity, or supply-chain jobs) rather than implying they
+database compatibility or supply-chain jobs) rather than implying they
 are required today. Screenshots alone are not evidence.
 
 ## Immutable-release gate

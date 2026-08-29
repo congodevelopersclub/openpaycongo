@@ -1,3 +1,0 @@
-package paymenttrace
-import("context";"os";"testing";"time")
-func TestPostgresPortScopesAndOrders(t *testing.T){dsn:=os.Getenv("PAYMENT_TRACE_POSTGRES_DSN");if dsn==""{t.Skip("set PAYMENT_TRACE_POSTGRES_DSN for task-owned PostgreSQL integration")};p,err:=OpenPostgres(context.Background(),dsn);if err!=nil{t.Fatal(err)};defer p.Close();s:=Service{Port:p};rows,err:=s.Trace(context.Background(),Query{TenantID:"tenant-a",Limit:2,Timeout:time.Second});if err!=nil||len(rows)!=2||rows[0].EventID!="event-a"{t.Fatalf("rows=%#v err=%v",rows,err)};if _,err:=s.Trace(context.Background(),Query{TenantID:"tenant-b",Limit:2,Timeout:time.Second});err!=nil{t.Fatal(err)}}

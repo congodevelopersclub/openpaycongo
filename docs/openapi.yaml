@@ -3,7 +3,7 @@ info:
   title: OpenPay Congo Canonical Sync API
   version: 1.0.0-draft
   description: |
-    Planned interoperability contract only. It does not describe the current Go prototype.
+    Planned Laravel contract only. It does not claim every endpoint is implemented.
     V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
     wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
 servers:

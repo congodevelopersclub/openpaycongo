@@ -13,8 +13,6 @@ const sha256 = (value) => createHash('sha256').update(canonicalize(value), 'utf8
 
 test('sales analytics vector is portable, bounded, decimal-string only, and DST explicit', async () => {
   const vector = await readJson('sales-analytics.vector.json');
-  const goVector = JSON.parse(await readFile(new URL('../wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json', root), 'utf8'));
-  assert.deepEqual(goVector, vector, 'Go analytics vector drifted from the public contract');
   const ajv = new Ajv({ allErrors: true, strict: true });
   addFormats(ajv);
   const querySchema = await readJson('sales-analytics-query.schema.json');

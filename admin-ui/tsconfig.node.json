@@ -1,7 +1,0 @@
-{
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo", "target": "ES2023", "lib": ["ES2023"],
-    "module": "ESNext", "moduleResolution": "bundler", "strict": true, "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true, "useUnknownInCatchVariables": true, "noEmit": true, "skipLibCheck": true
-  }, "include": ["vite.config.ts"]
-}
