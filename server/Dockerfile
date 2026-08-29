@@ -34,6 +34,7 @@ FROM dependencies AS quality
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+COPY compose.yaml /compose.yaml
 RUN composer dump-autoload --no-interaction --optimize \
     && composer run lint \
     && composer run analyse
@@ -42,3 +43,41 @@ FROM quality AS test
 
 COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
 RUN composer test
+
+FROM composer:2.8 AS production-dependencies
+
+WORKDIR /app
+
+COPY server/composer.json server/composer.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist --no-scripts
+
+COPY server/ ./
+RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
+
+FROM dunglas/frankenphp:1.12.7-php8.3-alpine AS production
+
+RUN install-php-extensions pdo_pgsql \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
+    && addgroup -S -g 10001 openpay \
+    && adduser -S -D -H -u 10001 -G openpay openpay
+
+WORKDIR /var/www/html
+
+COPY --chown=openpay:openpay --from=production-dependencies /app ./
+COPY server/docker/Caddyfile /etc/frankenphp/Caddyfile
+
+RUN mkdir -p /config/caddy /data/caddy bootstrap/cache storage/app storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/home/.config/psysh \
+    && chown -R openpay:openpay /config/caddy /data/caddy bootstrap/cache storage
+
+ENV APP_ENV=production \
+    APP_DEBUG=false \
+    HOME=/var/www/html/storage/home \
+    SERVER_NAME=:8080 \
+    LOG_CHANNEL=stderr \
+    LOG_LEVEL=warning
+
+USER openpay
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD php -r '$headers = @get_headers("http://127.0.0.1:8080/healthz"); exit(($headers[0] ?? "") === "HTTP/1.1 200 OK" ? 0 : 1);'

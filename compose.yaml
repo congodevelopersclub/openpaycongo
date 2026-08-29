@@ -1,0 +1,92 @@
+name: congo-openpay
+
+x-application-environment: &application-environment
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_KEY: ${OPENPAY_APP_KEY:-}
+  APP_URL: ${OPENPAY_APP_URL:-https://localhost}
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: warning
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_DATABASE: ${OPENPAY_DB_DATABASE:-openpay}
+  DB_USERNAME: ${OPENPAY_DB_USERNAME:-openpay}
+  DB_PASSWORD: ${OPENPAY_DB_PASSWORD:?Set OPENPAY_DB_PASSWORD outside the repository}
+  DB_SSLMODE: ${OPENPAY_DB_SSLMODE:-prefer}
+  CACHE_STORE: database
+  SESSION_DRIVER: database
+  QUEUE_CONNECTION: database
+
+x-application: &application
+  image: ${OPENPAY_IMAGE:-congo-openpay:local}
+  environment: *application-environment
+  volumes:
+    - app-storage:/var/www/html/storage
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${OPENPAY_DB_DATABASE:-openpay}
+      POSTGRES_USER: ${OPENPAY_DB_USERNAME:-openpay}
+      POSTGRES_PASSWORD: ${OPENPAY_DB_PASSWORD:?Set OPENPAY_DB_PASSWORD outside the repository}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  migrate:
+    <<: *application
+    command: ["php", "artisan", "migrate", "--force"]
+    restart: "no"
+
+  app:
+    <<: *application
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: production
+    ports:
+      - "${OPENPAY_HTTP_BIND_ADDRESS:-127.0.0.1}:${OPENPAY_HTTP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  queue:
+    <<: *application
+    command: ["php", "artisan", "queue:work", "database", "--sleep=3", "--tries=3", "--max-time=3600"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  scheduler:
+    <<: *application
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  app-storage:
+  postgres-data:
