@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../pairing/presentation/pairing_session_bloc.dart';
+import '../../pairing/presentation/pairing_session_status_card.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 
 import '../../sms_gateway/domain/sms_gateway.dart';
@@ -12,11 +16,13 @@ final class PaymentInboxScreen extends StatefulWidget {
     super.key,
     this.smsPermissionState = SmsPermissionState.ready,
     this.gemmaCapability = const GemmaRuntimePending(),
+    this.pairingSession,
     this.paymentLifecycle,
     required this.gateway,
   });
   final SmsPermissionState smsPermissionState;
   final GemmaCapabilityEvidence gemmaCapability;
+  final PairingSessionBloc? pairingSession;
   final PaymentLifecycleBloc? paymentLifecycle;
   final SmsGatewayPort gateway;
   @override
@@ -24,6 +30,7 @@ final class PaymentInboxScreen extends StatefulWidget {
 }
 
 enum _ReloadResult { authoritative, unknown }
+
 enum _TrustedRulesState { loading, authoritative, unknown }
 
 final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
@@ -77,10 +84,9 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       final _ReloadResult reload = await _loadNativeInbox();
       if (mounted) {
         setState(
-          () => _setupError =
-              reload == _ReloadResult.authoritative
-                  ? 'Rule outcome is unknown. Authoritative device rules were reloaded.'
-                  : 'Rule outcome is unknown. Authoritative reload also failed.',
+          () => _setupError = reload == _ReloadResult.authoritative
+              ? 'Rule outcome is unknown. Authoritative device rules were reloaded.'
+              : 'Rule outcome is unknown. Authoritative reload also failed.',
         );
       }
       return;
@@ -131,12 +137,10 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       return _ReloadResult.authoritative;
     } on Object catch (error) {
       if (mounted) {
-        setState(
-          () {
-            _trustedRulesState = _TrustedRulesState.unknown;
-            _nativeError = _nativeFailureMessage(error);
-          },
-        );
+        setState(() {
+          _trustedRulesState = _TrustedRulesState.unknown;
+          _nativeError = _nativeFailureMessage(error);
+        });
       }
       return _ReloadResult.unknown;
     }
@@ -167,15 +171,12 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
     } on Object {
       final _ReloadResult reload = await _loadNativeInbox();
       if (mounted) {
-        setState(
-          () {
-            _nativeError =
-                reload == _ReloadResult.authoritative
-                    ? 'Decision outcome is unknown. Authoritative encrypted inbox was reloaded.'
-                    : 'Decision outcome is unknown. Authoritative reload also failed.';
-            _busyNativeIds.remove(record.id);
-          },
-        );
+        setState(() {
+          _nativeError = reload == _ReloadResult.authoritative
+              ? 'Decision outcome is unknown. Authoritative encrypted inbox was reloaded.'
+              : 'Decision outcome is unknown. Authoritative reload also failed.';
+          _busyNativeIds.remove(record.id);
+        });
       }
       return;
     }
@@ -223,7 +224,16 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
             ),
             const SizedBox(height: 24),
             _CaptureStatusCard(state: widget.smsPermissionState),
-            if (widget.paymentLifecycle case final PaymentLifecycleBloc lifecycle) ...<Widget>[
+            if (widget.pairingSession
+                case final PairingSessionBloc pairing) ...<Widget>[
+              const SizedBox(height: 12),
+              BlocProvider<PairingSessionBloc>.value(
+                value: pairing,
+                child: const PairingSessionStatusCard(),
+              ),
+            ],
+            if (widget.paymentLifecycle
+                case final PaymentLifecycleBloc lifecycle) ...<Widget>[
               const SizedBox(height: 12),
               BlocProvider<PaymentLifecycleBloc>.value(
                 value: lifecycle,
@@ -331,10 +341,9 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       final _ReloadResult reload = await _loadNativeInbox();
       if (mounted) {
         setState(
-          () => _nativeError =
-              reload == _ReloadResult.authoritative
-                  ? 'Storage probe outcome is unknown. Authoritative capture health was reloaded.'
-                  : 'Storage probe outcome is unknown. Authoritative reload also failed.',
+          () => _nativeError = reload == _ReloadResult.authoritative
+              ? 'Storage probe outcome is unknown. Authoritative capture health was reloaded.'
+              : 'Storage probe outcome is unknown. Authoritative reload also failed.',
         );
       }
       return;
@@ -356,10 +365,9 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       final _ReloadResult reload = await _loadNativeInbox();
       if (mounted) {
         setState(
-          () => _nativeError =
-              reload == _ReloadResult.authoritative
-                  ? 'Rule revoke outcome is unknown. Authoritative rules were reloaded.'
-                  : 'Rule revoke outcome is unknown. Authoritative reload also failed.',
+          () => _nativeError = reload == _ReloadResult.authoritative
+              ? 'Rule revoke outcome is unknown. Authoritative rules were reloaded.'
+              : 'Rule revoke outcome is unknown. Authoritative reload also failed.',
         );
       }
     }
@@ -379,10 +387,9 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       final _ReloadResult reload = await _loadNativeInbox();
       if (mounted) {
         setState(
-          () => _nativeError =
-              reload == _ReloadResult.authoritative
-                  ? 'Rule clear outcome is unknown. Authoritative rules were reloaded.'
-                  : 'Rule clear outcome is unknown. Authoritative reload also failed.',
+          () => _nativeError = reload == _ReloadResult.authoritative
+              ? 'Rule clear outcome is unknown. Authoritative rules were reloaded.'
+              : 'Rule clear outcome is unknown. Authoritative reload also failed.',
         );
       }
     }
@@ -408,7 +415,8 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
   }
 
   Future<void> _confirmReject(NativeSmsRecord record) async {
-    final bool confirmed = await showDialog<bool>(
+    final bool confirmed =
+        await showDialog<bool>(
           context: context,
           builder: (BuildContext context) => AlertDialog(
             title: const Text('Reject and remove raw SMS?'),
@@ -539,10 +547,7 @@ final class _TrustedRulesStateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(
     color: Theme.of(context).colorScheme.tertiaryContainer,
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Text(message),
-    ),
+    child: Padding(padding: const EdgeInsets.all(16), child: Text(message)),
   );
 }
 
