@@ -12,7 +12,7 @@ test('threat model separates verified repository facts from pending maintainer a
   }
   assert.match(model, /Raw SMS remains local/i);
   assert.match(model, /tenant_id.*derived from authenticated/i);
-  assert.match(model, /Legacy Go.*plaintext/i);
+  assert.match(model, /Prototype warning.*Laravel server/i);
   assert.match(model, /legacy Flutter.*encryption/i);
   assert.match(model, /simultaneous device and server loss/i);
   assert.match(model, /not production-ready/i);

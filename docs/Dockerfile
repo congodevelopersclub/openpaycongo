@@ -15,13 +15,10 @@ COPY .dockerignore /workspace/.dockerignore
 COPY .github/workflows/ci.yml /workspace/.github/workflows/ci.yml
 COPY .github/PULL_REQUEST_TEMPLATE.md /workspace/.github/PULL_REQUEST_TEMPLATE.md
 COPY .github/ISSUE_TEMPLATE/bug_report.md /workspace/.github/ISSUE_TEMPLATE/bug_report.md
+COPY README.md /workspace/README.md
+COPY server/Dockerfile /workspace/server/Dockerfile
 COPY android-client/Dockerfile.ci /workspace/android-client/Dockerfile.ci
 COPY android-client/android/app/build.gradle /workspace/android-client/android/app/build.gradle
 COPY android-client/android/app/src/main/AndroidManifest.xml /workspace/android-client/android/app/src/main/AndroidManifest.xml
-COPY wallet-plugin-go/Dockerfile /workspace/wallet-plugin-go/Dockerfile
-COPY wallet-plugin-go/internal/pairing/testdata/pairing-signed-qr.vector.json /workspace/wallet-plugin-go/internal/pairing/testdata/pairing-signed-qr.vector.json
-COPY wallet-plugin-go/internal/pairing/testdata/pairing-key-schedule.vector.json /workspace/wallet-plugin-go/internal/pairing/testdata/pairing-key-schedule.vector.json
-COPY wallet-plugin-go/internal/pairing/testdata/pairing-protocol.vector.json /workspace/wallet-plugin-go/internal/pairing/testdata/pairing-protocol.vector.json
-COPY wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json /workspace/wallet-plugin-go/internal/analytics/testdata/sales-analytics.vector.json
 WORKDIR /workspace/docs
 RUN npm test

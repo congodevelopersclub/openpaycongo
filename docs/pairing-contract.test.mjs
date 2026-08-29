@@ -38,11 +38,6 @@ test('pairing contract makes key destruction and protector failure semantics nor
 
 test('signed QR vector binds the public key, fingerprint, canonical timestamp, and every field', async () => {
   const publicVector = await readJson('pairing-signed-qr.vector.json');
-  const goVector = JSON.parse(await readFile(
-    new URL('../wallet-plugin-go/internal/pairing/testdata/pairing-signed-qr.vector.json', root),
-    'utf8',
-  ));
-  assert.deepEqual(goVector, publicVector, 'Go signed-QR testdata drifted from the public vector');
   const { qr } = publicVector;
   assert.deepEqual(await readJson('pairing-qr.valid.json'), qr, 'positive QR fixture is not the signed vector');
   const decode = (value) => Buffer.from(value, 'base64url');
@@ -144,11 +139,6 @@ test('canonical completion endpoint grammar is identical at the public schema bo
 
 test('pairing key schedule and unbiased short code match the portable vector', async () => {
   const vector = await readJson('pairing-key-schedule.vector.json');
-  const goVector = JSON.parse(await readFile(
-    new URL('../wallet-plugin-go/internal/pairing/testdata/pairing-key-schedule.vector.json', root),
-    'utf8',
-  ));
-  assert.deepEqual(goVector, vector, 'Go testdata drifted from the public pairing vector');
   const fromHex = (value) => Buffer.from(value, 'hex');
   const field = (value) => {
     const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
@@ -203,10 +193,6 @@ test('pairing key schedule and unbiased short code match the portable vector', a
 
 test('full protocol vector independently verifies X25519, HKDF, Ed25519 proof, both AEADs, and confirmation', async () => {
   const vector = await readJson('pairing-protocol.vector.json');
-  const goVector = JSON.parse(await readFile(
-    new URL('../wallet-plugin-go/internal/pairing/testdata/pairing-protocol.vector.json', root), 'utf8',
-  ));
-  assert.deepEqual(goVector, vector, 'Go full protocol vector drifted');
   const d = (value) => Buffer.from(value, 'base64url');
   const h = (value) => Buffer.from(value, 'hex');
   const field = (value) => {

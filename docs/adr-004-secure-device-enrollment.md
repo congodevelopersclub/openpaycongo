@@ -45,7 +45,7 @@ where supported). Its outer completion contains the app X25519 public key and AE
 bounded ciphertext contains install ID, device signing public key, and an Ed25519 proof over the normative
 device-proof transcript below. Tenant claims are server-bound to the intent and never accepted from QR or completion.
 Tenant and install IDs use only bounded ASCII letters, digits, hyphen, underscore, period, and colon so
-SQL and Mongo adapters do not reinterpret control characters, Unicode normalization, or separators.
+Supported SQL adapters do not reinterpret control characters, Unicode normalization, or separators.
 The completion URL grammar is exact: lowercase ASCII DNS with at least two labels, optional canonical decimal
 port 1-65535, and path `/v1/pairing/complete`; IP literals, userinfo, query, fragment, percent-encoding,
 alternate paths, and trailing slash are rejected identically by schema and application core.
@@ -178,7 +178,7 @@ symmetric install root must not be able to masquerade as device authorship.
 ## Architecture and persistence boundary
 
 The portable onion is typed pairing domain -> application service -> repository, `KeyProtector`, clock,
-randomness, and enrollment signer ports -> Go/Node/Laravel and storage adapters. The current SQLite store
+randomness, and enrollment signer ports -> Laravel services and supported SQL adapters. The current SQLite store
 cannot yet prove compare-and-set consumption, unique install identity, pending confirmation, protected
 root, and exact replay in one transaction. This slice therefore stops at the tested core contract.
 

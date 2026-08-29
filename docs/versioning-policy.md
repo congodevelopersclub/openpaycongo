@@ -31,7 +31,7 @@ Before a compatibility claim, the relevant Docker contract suite must prove both
 1. A backward-compatibility case showing the approved older input/output/fixture behavior still succeeds where support is claimed.
 2. An intentional-breaking-change case showing the newer/unknown version, revision, field, or fixture is rejected before a write or unsafe interpretation.
 
-The black-box harness must report target name, datastore, declared capabilities, case identifier, request, and failed invariant. Its current analytics and operational fixtures are foundation evidence only; they do not establish a supported Go, Node, Laravel, PostgreSQL, MySQL, or MongoDB matrix.
+Laravel contract tests must report datastore, declared capabilities, case identifier, request, and failed invariant. The current analytics and operational fixtures are foundation evidence only; they do not establish a supported database matrix.
 
 Migration and export compatibility must preserve canonical encodings, ordered event count/digests, and recovery truth. A newer or unknown schema/migration revision must not be accepted for writes until the approved negotiation behavior exists.
 

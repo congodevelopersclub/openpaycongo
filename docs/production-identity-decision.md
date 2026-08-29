@@ -64,9 +64,9 @@ document.
 
 After approval, a versioned public fixture suite must cover valid tokens plus
 missing scope, wrong audience, wrong issuer, expired/not-yet-valid token, revoked
-token, rotated key, tenant confusion, and clock skew. Go, Node, and Laravel
-adapters must consume the same fixtures and emit the same public problem
-responses. Development static-token adapters must fail startup in production mode.
+token, rotated key, tenant confusion, and clock skew. Laravel must consume the
+fixtures and emit the documented public problem responses. Development
+static-token adapters must fail startup in production mode.
 
 Browser clients must never receive a backend bearer or signing material. Logs,
 errors, telemetry, and CI artifacts must redact secrets, tokens, and verified

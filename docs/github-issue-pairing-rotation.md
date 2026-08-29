@@ -18,8 +18,8 @@ one-time QR or silently changing tenant/wallet authority.
 
 ## Acceptance criteria
 
-- Go, Node/Fastify, and Laravel implementations pass the same black-box rotation fixtures.
-- SQLite, MySQL, PostgreSQL, and Mongo replica-set adapters pass concurrent rotate/replay/crash tests.
+- Laravel passes the runtime-neutral black-box rotation fixtures.
+- SQLite, MySQL, and PostgreSQL adapters pass concurrent rotate/replay/crash tests when declared supported.
 - Old credentials fail after the documented overlap; cross-tenant and wrong-install rotation fail without
   enumeration.
 - Rotation secrets are protected through `KeyProtector`; plaintext never appears in logs or problems.
