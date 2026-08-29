@@ -11,22 +11,22 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     public function test_operational_routes_are_no_store_and_write_admission_stays_closed(): void
     {
-        $this->getJson('/api/healthz')->assertOk()->assertExactJson(['status' => 'ok']);
-        $this->getJson('/api/readyz')
+        $this->getJson('/healthz')->assertOk()->assertExactJson(['status' => 'ok']);
+        $this->getJson('/readyz')
             ->assertStatus(503)
             ->assertHeader('cache-control', 'no-store, private')
             ->assertExactJson([
                 'datastore' => 'ok',
                 'migration' => 'pending',
                 'topology' => 'unsupported',
-                'projection' => 'unimplemented',
+                'projection' => 'failed',
                 'write_admission' => 'closed',
                 'contract_version' => 'unimplemented',
                 'migration_revision' => 'unimplemented',
                 'adapter' => 'sqlite',
                 'implementation' => 'congo-openpay-server',
             ]);
-        $this->getJson('/api/version')
+        $this->getJson('/version')
             ->assertOk()
             ->assertHeader('cache-control', 'no-store, private');
     }
