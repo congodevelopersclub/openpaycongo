@@ -2,18 +2,42 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
+import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
+import 'package:opencongopay/features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
 
 void main() {
   Widget app({
     SmsGatewayPort? gateway,
     GemmaCapabilityEvidence capability = const GemmaRuntimePending(),
+    PaymentLifecycleBloc? paymentLifecycle,
   }) => MaterialApp(
     home: PaymentInboxScreen(
       gateway: gateway ?? _FakeGateway(),
       gemmaCapability: capability,
+      paymentLifecycle: paymentLifecycle,
     ),
   );
+
+  testWidgets('composes the payment lifecycle status into the production inbox', (
+    WidgetTester tester,
+  ) async {
+    final PaymentLifecycleBloc lifecycle = PaymentLifecycleBloc(
+      lifecycle: _OfflinePaymentLifecycle(),
+      now: () => DateTime.utc(2026, 8, 30, 10),
+    );
+    addTearDown(lifecycle.close);
+
+    await tester.pumpWidget(app(paymentLifecycle: lifecycle));
+    lifecycle.add(const PaymentLifecycleSyncRequested(OutboxScope(
+      tenantId: 'tenant-001',
+      deviceId: 'device-001',
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Payment sync is offline'), findsOneWidget);
+    expect(find.text('Retry sync'), findsOneWidget);
+  });
 
   testWidgets(
     'native trusted record leaves inbox only after durable decision',
@@ -476,4 +500,12 @@ final class _FakeGateway implements SmsGatewayPort {
 
   @override
   Future<void> setUnlocked(bool unlocked, {int? generation}) async {}
+}
+
+final class _OfflinePaymentLifecycle implements PaymentLifecycle {
+  @override
+  Future<PaymentLifecycleResult> sync(
+    OutboxScope scope,
+    DateTime now,
+  ) async => const PaymentLifecycleResult.offline();
 }

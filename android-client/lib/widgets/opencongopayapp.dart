@@ -9,11 +9,14 @@ import '../bloc/parser_bloc.dart';
 import '../services/Config/config_service.dart';
 import '../services/Parsers/parser_store.dart';
 import '../features/payment_inbox/presentation/payment_inbox_screen.dart';
+import '../features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import '../features/sms_gateway/infrastructure/platform_sms_gateway.dart';
 import '../features/sms_gateway/presentation/sms_permission_gate.dart';
 
 class OpenCongoPayApp extends StatefulWidget {
-  const OpenCongoPayApp({super.key});
+  const OpenCongoPayApp({super.key, this.paymentLifecycle});
+
+  final PaymentLifecycle? paymentLifecycle;
 
   @override
   State<OpenCongoPayApp> createState() => _OpenCongoPayAppState();
@@ -22,10 +25,25 @@ class OpenCongoPayApp extends StatefulWidget {
 class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
   int _index = 0;
   final PlatformSmsGateway _smsGateway = const PlatformSmsGateway();
+  PaymentLifecycleBloc? _paymentLifecycleBloc;
+
+  @override
+  void initState() {
+    super.initState();
+    final PaymentLifecycle? lifecycle = widget.paymentLifecycle;
+    if (lifecycle != null) _paymentLifecycleBloc = PaymentLifecycleBloc(lifecycle: lifecycle);
+  }
+
+  @override
+  void dispose() {
+    _paymentLifecycleBloc?.close();
+    super.dispose();
+  }
 
   List<Widget> get _pages => <Widget>[
     PaymentInboxScreen(
       gateway: _smsGateway,
+      paymentLifecycle: _paymentLifecycleBloc,
     ),
     const ParsersScreen(),
     const RegexBuilderScreen(),
