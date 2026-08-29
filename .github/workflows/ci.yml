@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Run canonical Laravel server tests in Docker
+      - name: Run canonical Laravel quality gates and tests in Docker
         run: docker build --target test -f server/Dockerfile .
 
   flutter:

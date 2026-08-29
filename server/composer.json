@@ -12,6 +12,8 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.10",
+        "laravel/boost": "^2.7",
         "laravel/pail": "^1.2.5",
         "laravel/pao": "^1.0.6",
         "laravel/pint": "^1.27",
@@ -48,6 +50,12 @@
             "@php artisan config:clear --ansi @no_additional_args",
             "@php artisan test"
         ],
+        "lint": "pint --test",
+        "analyse": "phpstan analyse --configuration=phpstan.neon",
+        "quality": [
+            "@lint",
+            "@analyse"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"
@@ -74,6 +82,9 @@
     },
     "config": {
         "optimize-autoloader": true,
+        "platform": {
+            "php": "8.3.0"
+        },
         "preferred-install": "dist",
         "sort-packages": true,
         "allow-plugins": {
