@@ -1,6 +1,6 @@
 # ADR 004: Authenticated Diffie-Hellman device pairing
 
-Status: accepted protocol contract; Go application core implemented without HTTP or database adapters.
+Status: accepted protocol contract; Laravel implementation remains pending beyond the documented contract fixtures.
 
 ## Trust and public protocol
 
@@ -71,7 +71,7 @@ offset. A complete transcript may not exceed 4096 bytes. Field order is normativ
   enrollment-signing public key, enrollment-signing fingerprint, server X25519 public key, trust mode. Before any
   trust-store lookup, the verifier must require `SHA-256(enrollment-signing public key)` to equal the
   fingerprint, then verify the signature using that exact public key.
-  [The shared signed-QR vector](pairing-signed-qr.vector.json) is verified by Go and Node; mutations of every
+  [The shared signed-QR vector](pairing-signed-qr.vector.json) is verified by the contract test suite; mutations of every
   signed field must fail.
 - Completion AEAD AAD: `openpaycongo/pairing/completion-aad`, version, suite, intent ID, intent nonce,
   enrollment-signing fingerprint, server X25519 public key, client X25519 public key.
@@ -85,10 +85,9 @@ offset. A complete transcript may not exceed 4096 bytes. Field order is normativ
 The encrypted proof and response plaintexts are constrained by
 [pairing-proof.schema.json](pairing-proof.schema.json) and
 [pairing-response-plaintext.schema.json](pairing-response-plaintext.schema.json). The shared
-[key-schedule vector](pairing-key-schedule.vector.json) is checked independently by Go and Node tests.
+[key-schedule vector](pairing-key-schedule.vector.json) is checked by the contract test suite.
 The [full protocol vector](pairing-protocol.vector.json) additionally fixes both X25519 keypairs, all HKDF
-outputs, Ed25519 device proof, c2s AES-GCM ciphertext, s2c AES-GCM ciphertext, and key confirmation; Node
-independently recomputes every operation and the Go package carries the identical mirror.
+outputs, Ed25519 device proof, c2s AES-GCM ciphertext, s2c AES-GCM ciphertext, and key confirmation.
 
 The short code is exactly six decimal digits including leading zeroes. To avoid modulo bias, the
 reference expands four bounded 32-bit candidates under the `short-authentication-code` label, accepts the
@@ -105,7 +104,7 @@ protects its copy behind the deployment-master-key `KeyProtector` port before pe
 is independently derived by the phone and shown by an authenticated administrator UI. It is display-only:
 the server never accepts the code itself as authentication or in the confirmation request. Completion creates only a
 `pending_confirmation` device; it must not authorize sync or request MACs until the administrator confirms
-that both displays match. The Go core implements the authenticated match/mismatch/timeout state transition.
+that both displays match. The Laravel pairing Action implements the authenticated match/mismatch/timeout state transition.
 The HTTP handler and administrator UI remain the next vertical slice, so no deployed activation claim is made.
 
 The confirmation application API accepts only a typed verified administrator principal produced after OAuth
@@ -132,7 +131,7 @@ conformance fake; it is not a production protector.
 
 - Intent lifetime is 30 seconds to 5 minutes; completed invalid-proof attempts are configured from 1 to 5.
   In-flight proof work is independently capped at eight opaque reservations per intent.
-- The repository atomically consumes one intent, creates at most one pending device, protects the install
+- One Laravel database transaction atomically consumes one intent, creates at most one pending device, protects the install
   root, caches one encrypted result, and clears the protected ephemeral X25519 private key while preserving
   non-secret replay metadata. It uniquely constrains intent ID and `(tenant_id, install_id)`.
 - Intent creation is insert-only: a random-ID collision leaves the original record unchanged and fails.
@@ -140,11 +139,11 @@ conformance fake; it is not a production protector.
   cleanup using a non-cancelled child context, atomically marks the uncommitted intent terminal, and clears its
   protected ephemeral private key. Cleanup failure is internally observable while the public response remains
   the fixed generic unavailable problem. Completion at or after expiry cannot commit.
-- Repository commit returns `committed`, `not_committed`, or `unknown`. `not_committed` may abort safely;
+- The pairing Action reports `committed`, `not_committed`, or `unknown`. `not_committed` may abort safely;
   `unknown` must reconcile by intent ID plus exact request digest and return the cached idempotent result when
   present. It never blindly aborts an outcome that may already have committed.
 - KeyProtector dependency failures from either unsealing the intent key or sealing the install root are typed
-  retryable. The repository atomically and idempotently releases that operation's unique 16-byte reservation,
+  retryable. The pairing Action atomically and idempotently releases that operation's unique 16-byte reservation,
   so an infrastructure outage does not spend the client's bounded invalid-proof budget; the intent remains
   subject to its original absolute expiry. Integrity, malformed-envelope, unknown-key, wrong-AAD, and tamper
   failures are permanent and terminally clear the protected ephemeral key.
@@ -177,14 +176,12 @@ symmetric install root must not be able to masquerade as device authorship.
 
 ## Architecture and persistence boundary
 
-The portable onion is typed pairing domain -> application service -> repository, `KeyProtector`, clock,
-randomness, and enrollment signer ports -> Laravel services and supported SQL adapters. The current SQLite store
-cannot yet prove compare-and-set consumption, unique install identity, pending confirmation, protected
-root, and exact replay in one transaction. This slice therefore stops at the tested core contract.
-
-The Go reference applies the relevant rules from
-[TigerBeetle TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md): explicit
-bounds, simple control flow, fixed-width crypto values, paired checks, and no unbounded attempts or loops.
-Malformed external input remains a handled error, not an assertion.
+Laravel owns pairing through Eloquent models, database migrations, Form Requests, Policies, Actions, Events,
+and queued listeners where asynchronous work is needed. The pairing Action owns transactional intent
+consumption, install creation, protected-root persistence, replay state, and terminal confirmation; controllers
+and Livewire components only delegate to it. SQLite support cannot yet prove the complete production transaction
+boundary, so this slice stops at the documented contract fixtures. Implementations must retain explicit bounds,
+simple control flow, fixed-size cryptographic values, paired checks, and no unbounded attempts or loops.
+Malformed external input remains a handled validation error, not an assertion.
 
 Rotation remains deferred to [the ready follow-up issue](github-issue-pairing-rotation.md).

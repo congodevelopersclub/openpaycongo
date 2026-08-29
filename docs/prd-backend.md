@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Mobile devices need a portable, safe backend that can accept retries, replicate across devices, preserve auditability, and be implemented in more than one language/database without changing financial meaning. The current Go server is a legacy prototype and does not provide this contract.
+Mobile devices need a safe Laravel backend that can accept retries, replicate across devices, and preserve auditability without changing financial meaning.
 
 ## Solution
 
@@ -58,7 +58,7 @@ Provide an authenticated canonical Laravel event API with immutable persistence,
 
 - Reconstructing a ledger after both backend and all client copies are lost without an independent third authority.
 - Provider-specific settlement guarantees, fraud scoring, and automatic parser approval.
-- Claiming production compatibility from the existing Go/SQLite prototype.
+- Claiming production compatibility from the current prototype implementation.
 
 ## Further Notes
 
@@ -98,7 +98,7 @@ The API is a portability boundary, not an instruction to expose a database direc
 43. As an administrator, I want the same transcript-derived short code shown on my authenticated screen and phone, so that first-use substitution cannot activate a device.
 44. As an operator, I want unique completion reservations separated from completed invalid-proof attempts, so that bounded concurrent KMS outages neither exhaust the client's proof budget nor delete a recoverable intent key.
 
-The normative protocol is [ADR 004](adr-004-secure-device-enrollment.md). The active slice implements the Go typed domain/application core and deterministic ports. It deliberately has no HTTP or SQLite adapter: the legacy store cannot yet prove atomic intent consumption, unique tenant/install identity, pending administrator confirmation, cached replay response, and protected-root persistence. Node/Fastify, Laravel, shared Preact administration/confirmation, and key rotation are subsequent parity slices.
+The normative protocol is [ADR 004](adr-004-secure-device-enrollment.md). Laravel will implement pairing through Eloquent models, migrations, Form Requests, Policies, and transactional Actions. It deliberately has no completed HTTP or SQLite implementation: the current store cannot yet prove atomic intent consumption, unique tenant/install identity, pending administrator confirmation, cached replay response, and protected-root persistence. Filament/Livewire administration and key rotation are subsequent Laravel slices.
 
 The QR references the long-lived OpenPay enrollment-signing identity, never CDN/TLS SPKI, but a key delivered only inside that QR is not independent authentication. Authenticated administrator context plus mandatory short-code confirmation provides the physical trust step. The hosting edge, administrator UI delivery, and OAuth session are trusted during bootstrap; compromise of any of them can replace the QR or authorize an attacker. Device signatures and request MACs remain portable across direct container, Cloudflare, and Vercel hosting after activation, but no edge-compromise resistance is claimed.
 
@@ -148,7 +148,7 @@ immutable canonical ledger/payment facts after tenant authorization and durable 
 projection-specific event vocabulary is `payment_captured`, `payment_refunded`, `payment_voided`, and
 `payment_reconciled`; Laravel migrations and models must map the same persisted facts without
 provider-name inference or database-specific aggregation. Raw SMS, parser candidates, and mutable provider
-payloads are excluded. This slice provides the portable contract and Go domain/application reference only;
+payloads are excluded. This slice provides the runtime-neutral contract fixtures only;
 HTTP and SQLite/MySQL/PostgreSQL support remain later Laravel slices.
 
 Acceptance criteria:
@@ -204,7 +204,7 @@ Acceptance criteria:
   return 304. Missing/rebuilding/failed projections return 503 and must not present stale state as ready.
   A valid empty projection reports sync status `no_events` and omits watermark/freshness instead of inventing
   a timestamp or claiming that an unobserved replica is fresh.
-- Contract tests validate JSON Schemas, the shared event/query/result vector, OpenAPI scopes/cache headers, Go
+- Contract tests validate JSON Schemas, the shared event/query/result vector, OpenAPI scopes/cache headers,
   race behavior, reversed/out-of-order rebuild, exact replay/conflict, crash-before-replace, offline delay,
   refunds/voids, predating corrections, refund-before-void conflicts, arrival-order-only correction-before-capture,
-  DST, and cardinality bounds. Node and Laravel must consume the same vector before release.
+  DST, and cardinality bounds. Laravel must consume the same vector before release.

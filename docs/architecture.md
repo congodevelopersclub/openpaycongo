@@ -24,4 +24,4 @@ See [interoperability](interoperability.md), [reliability](reliability.md), and 
 
 ## Enrollment boundary
 
-Device enrollment follows [ADR 004](adr-004-secure-device-enrollment.md). The canonical Laravel application owns the typed pairing domain and application service, with clock, randomness, identity signer, `KeyProtector`, and atomic repository ports. Any future administration experience belongs inside the Laravel application and must not perform server cryptography or receive persisted secrets.
+Device enrollment follows [ADR 004](adr-004-secure-device-enrollment.md). The canonical Laravel application owns pairing through Eloquent models, migrations, Form Requests, Policies, Actions, Events, and queued listeners where needed. The pairing Action performs atomic database work; controllers and Livewire components delegate without business logic. Any future administration experience belongs inside the Laravel application and must not perform server cryptography or receive persisted secrets.
