@@ -1,9 +1,154 @@
 <?php
-declare(strict_types=1); namespace App\Pairing;
-use PDO;use RuntimeException;
+
+declare(strict_types=1);
+
+namespace App\Pairing;
+
+use PDO;
+use RuntimeException;
+
 /** Internal lifecycle seam; it exposes neither HTTP nor identity authority. */
-final class SqlitePairingRepository { public function __construct(private PDO $db){$db->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);$db->exec('CREATE TABLE IF NOT EXISTS pairing_migrations (revision TEXT PRIMARY KEY, checksum TEXT NOT NULL)');$sum=hash('sha256','pairing-v1');$old=$db->query("SELECT checksum FROM pairing_migrations WHERE revision='0001'")->fetchColumn();if($old===false)$db->prepare('INSERT INTO pairing_migrations VALUES(?,?)')->execute(['0001',$sum]);elseif($old!==$sum)throw new RuntimeException('pairing migration checksum drift');$db->exec("CREATE TABLE IF NOT EXISTS pairing_intents (intent_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, state TEXT NOT NULL, digest TEXT, device_id TEXT, activation_id TEXT, UNIQUE(tenant_id,device_id))");}
-public function issue(string $tenant,string $intent):void{$this->db->prepare("INSERT INTO pairing_intents(intent_id,tenant_id,state) VALUES(?,?,'pending')")->execute([$intent,$tenant]);}
-public function complete(string $tenant,string $intent,string $digest,string $device):array{$this->db->beginTransaction();try{$q=$this->db->prepare('SELECT * FROM pairing_intents WHERE intent_id=? AND tenant_id=?');$q->execute([$intent,$tenant]);$r=$q->fetch(PDO::FETCH_ASSOC);if(!$r)throw new RuntimeException('pairing unavailable');if($r['state']==='completed'){if(!hash_equals($r['digest'],$digest))throw new RuntimeException('completion conflict');$this->db->commit();return['device_id'=>$r['device_id'],'replayed'=>true];}$this->db->prepare("UPDATE pairing_intents SET state='completed',digest=?,device_id=? WHERE intent_id=? AND tenant_id=? AND state='pending'")->execute([$digest,$device,$intent,$tenant]);if($this->db->query('SELECT changes()')->fetchColumn()!==1)throw new RuntimeException('pairing unavailable');$this->db->commit();return['device_id'=>$device,'replayed'=>false];}catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();throw $e;}}
-public function activate(string $tenant,string $intent,string $admin):string{$this->db->beginTransaction();try{$q=$this->db->prepare('SELECT * FROM pairing_intents WHERE intent_id=? AND tenant_id=?');$q->execute([$intent,$tenant]);$r=$q->fetch(PDO::FETCH_ASSOC);if(!$r||$r['state']!=='completed')throw new RuntimeException('pairing unavailable');if($r['activation_id']!==null&&!hash_equals($r['activation_id'],$admin))throw new RuntimeException('activation conflict');if($r['activation_id']===null)$this->db->prepare('UPDATE pairing_intents SET activation_id=? WHERE intent_id=?')->execute([$admin,$intent]);$this->db->commit();return'active';}catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();throw $e;}}
-public function sync(string $tenant,string $device,string $key,array $events):array{$this->db->exec('CREATE TABLE IF NOT EXISTS sync_batches (tenant TEXT,device TEXT,key TEXT,digest TEXT,ack INTEGER,PRIMARY KEY(tenant,device,key))');$this->db->exec('CREATE TABLE IF NOT EXISTS sync_events (tenant TEXT,device TEXT,sequence INTEGER,event_id TEXT,payload TEXT,PRIMARY KEY(tenant,device,sequence))');$digest=hash('sha256',json_encode($events));$this->db->beginTransaction();try{$q=$this->db->prepare('SELECT 1 FROM pairing_intents WHERE tenant_id=? AND device_id=? AND activation_id IS NOT NULL');$q->execute([$tenant,$device]);if(!$q->fetchColumn())throw new RuntimeException('device unavailable');$q=$this->db->prepare('SELECT digest,ack FROM sync_batches WHERE tenant=? AND device=? AND key=?');$q->execute([$tenant,$device,$key]);if($r=$q->fetch(PDO::FETCH_ASSOC)){if(!hash_equals($r['digest'],$digest))throw new RuntimeException('sync conflict');$this->db->commit();return['ack'=>(int)$r['ack'],'replayed'=>true];}foreach($events as $e)$this->db->prepare('INSERT INTO sync_events VALUES(?,?,?,?,?)')->execute([$tenant,$device,$e['sequence'],$e['event_id'],$e['payload']]);$ack=0;$q=$this->db->prepare('SELECT sequence FROM sync_events WHERE tenant=? AND device=? ORDER BY sequence');$q->execute([$tenant,$device]);foreach($q->fetchAll(PDO::FETCH_COLUMN)as$s){if((int)$s!==$ack+1)break;$ack=(int)$s;}$this->db->prepare('INSERT INTO sync_batches VALUES(?,?,?,?,?)')->execute([$tenant,$device,$key,$digest,$ack]);$this->db->commit();return['ack'=>$ack,'replayed'=>false];}catch(\Throwable$e){if($this->db->inTransaction())$this->db->rollBack();throw$e;}}}
+final class SqlitePairingRepository
+{
+    public function __construct(private PDO $db)
+    {
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $db->exec('CREATE TABLE IF NOT EXISTS pairing_migrations (revision TEXT PRIMARY KEY, checksum TEXT NOT NULL)');
+        $sum = hash('sha256', 'pairing-v1');
+        $old = $db->query("SELECT checksum FROM pairing_migrations WHERE revision='0001'")->fetchColumn();
+        if ($old === false) {
+            $db->prepare('INSERT INTO pairing_migrations VALUES(?,?)')->execute(['0001', $sum]);
+        } elseif ($old !== $sum) {
+            throw new RuntimeException('pairing migration checksum drift');
+        }
+
+        $db->exec('CREATE TABLE IF NOT EXISTS pairing_intents (intent_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, state TEXT NOT NULL, digest TEXT, device_id TEXT, activation_id TEXT, UNIQUE(tenant_id,device_id))');
+    }
+
+    public function issue(string $tenant, string $intent): void
+    {
+        $this->db->prepare("INSERT INTO pairing_intents(intent_id,tenant_id,state) VALUES(?,?,'pending')")->execute([$intent, $tenant]);
+    }
+
+    public function complete(string $tenant, string $intent, string $digest, string $device): array
+    {
+        $this->db->beginTransaction();
+        try {
+            $q = $this->db->prepare('SELECT * FROM pairing_intents WHERE intent_id=? AND tenant_id=?');
+            $q->execute([$intent, $tenant]);
+            $r = $q->fetch(PDO::FETCH_ASSOC);
+            if (! $r) {
+                throw new RuntimeException('pairing unavailable');
+            }
+
+            if ($r['state'] === 'completed') {
+                if (! hash_equals($r['digest'], $digest)) {
+                    throw new RuntimeException('completion conflict');
+                }
+
+                $this->db->commit();
+
+                return ['device_id' => $r['device_id'], 'replayed' => true];
+            }
+
+            $this->db->prepare("UPDATE pairing_intents SET state='completed',digest=?,device_id=? WHERE intent_id=? AND tenant_id=? AND state='pending'")->execute([$digest, $device, $intent, $tenant]);
+            if ($this->db->query('SELECT changes()')->fetchColumn() !== 1) {
+                throw new RuntimeException('pairing unavailable');
+            }
+
+            $this->db->commit();
+
+            return ['device_id' => $device, 'replayed' => false];
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    public function activate(string $tenant, string $intent, string $admin): string
+    {
+        $this->db->beginTransaction();
+        try {
+            $q = $this->db->prepare('SELECT * FROM pairing_intents WHERE intent_id=? AND tenant_id=?');
+            $q->execute([$intent, $tenant]);
+            $r = $q->fetch(PDO::FETCH_ASSOC);
+            if (! $r || $r['state'] !== 'completed') {
+                throw new RuntimeException('pairing unavailable');
+            }
+
+            if ($r['activation_id'] !== null && ! hash_equals($r['activation_id'], $admin)) {
+                throw new RuntimeException('activation conflict');
+            }
+
+            if ($r['activation_id'] === null) {
+                $this->db->prepare('UPDATE pairing_intents SET activation_id=? WHERE intent_id=?')->execute([$admin, $intent]);
+            }
+
+            $this->db->commit();
+
+            return 'active';
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
+    public function sync(string $tenant, string $device, string $key, array $events): array
+    {
+        $this->db->exec('CREATE TABLE IF NOT EXISTS sync_batches (tenant TEXT,device TEXT,key TEXT,digest TEXT,ack INTEGER,PRIMARY KEY(tenant,device,key))');
+        $this->db->exec('CREATE TABLE IF NOT EXISTS sync_events (tenant TEXT,device TEXT,sequence INTEGER,event_id TEXT,payload TEXT,PRIMARY KEY(tenant,device,sequence))');
+        $digest = hash('sha256', json_encode($events));
+        $this->db->beginTransaction();
+        try {
+            $q = $this->db->prepare('SELECT 1 FROM pairing_intents WHERE tenant_id=? AND device_id=? AND activation_id IS NOT NULL');
+            $q->execute([$tenant, $device]);
+            if (! $q->fetchColumn()) {
+                throw new RuntimeException('device unavailable');
+            }
+
+            $q = $this->db->prepare('SELECT digest,ack FROM sync_batches WHERE tenant=? AND device=? AND key=?');
+            $q->execute([$tenant, $device, $key]);
+            if ($r = $q->fetch(PDO::FETCH_ASSOC)) {
+                if (! hash_equals($r['digest'], $digest)) {
+                    throw new RuntimeException('sync conflict');
+                }
+
+                $this->db->commit();
+
+                return ['ack' => (int) $r['ack'], 'replayed' => true];
+            }
+
+            foreach ($events as $e) {
+                $this->db->prepare('INSERT INTO sync_events VALUES(?,?,?,?,?)')->execute([$tenant, $device, $e['sequence'], $e['event_id'], $e['payload']]);
+            }
+
+            $ack = 0;
+            $q = $this->db->prepare('SELECT sequence FROM sync_events WHERE tenant=? AND device=? ORDER BY sequence');
+            $q->execute([$tenant, $device]);
+            foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $s) {
+                if ((int) $s !== $ack + 1) {
+                    break;
+                }
+
+                $ack = (int) $s;
+            }
+
+            $this->db->prepare('INSERT INTO sync_batches VALUES(?,?,?,?,?)')->execute([$tenant, $device, $key, $digest, $ack]);
+            $this->db->commit();
+
+            return ['ack' => $ack, 'replayed' => false];
+        } catch (\Throwable$e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+}
