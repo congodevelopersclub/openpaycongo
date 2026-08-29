@@ -53,6 +53,46 @@ void main() {
     await states;
     await bloc.close();
   });
+
+  test('maps a typed lifecycle failure to the failure state', () async {
+    final PaymentLifecycleBloc bloc = PaymentLifecycleBloc(
+      lifecycle: _TypedFailureLifecycle(),
+      now: () => now,
+    );
+    final Future<void> states = expectLater(
+      bloc.stream,
+      emitsInOrder(<Matcher>[
+        isA<PaymentLifecycleLoading>(),
+        isA<PaymentLifecycleFailure>(),
+      ]),
+    );
+
+    bloc.add(const PaymentLifecycleSyncRequested(scope));
+    await states;
+    await bloc.close();
+  });
+
+  test('reports unexpected errors without converting them to failure state', () async {
+    final Completer<Object> reported = Completer<Object>();
+    late PaymentLifecycleBloc bloc;
+
+    await runZonedGuarded(() async {
+      bloc = PaymentLifecycleBloc(lifecycle: _UnexpectedFailureLifecycle(), now: () => now);
+      final Future<void> states = expectLater(
+        bloc.stream,
+        emits(isA<PaymentLifecycleLoading>()),
+      );
+      bloc.add(const PaymentLifecycleSyncRequested(scope));
+      await states;
+      await reported.future;
+    }, (Object error, StackTrace stackTrace) {
+      if (!reported.isCompleted) reported.complete(error);
+    });
+
+    expect(await reported.future, isA<StateError>());
+    expect(bloc.state, isA<PaymentLifecycleLoading>());
+    await bloc.close();
+  });
 }
 
 final class _OfflineLifecycle implements PaymentLifecycle {
@@ -77,4 +117,16 @@ final class _DeferredLifecycle implements PaymentLifecycle {
     calls++;
     return response.future;
   }
+}
+
+final class _TypedFailureLifecycle implements PaymentLifecycle {
+  @override
+  Future<PaymentLifecycleResult> sync(PaymentLifecycleScope scope, DateTime now) =>
+      Future<PaymentLifecycleResult>.error(const PaymentLifecycleException());
+}
+
+final class _UnexpectedFailureLifecycle implements PaymentLifecycle {
+  @override
+  Future<PaymentLifecycleResult> sync(PaymentLifecycleScope scope, DateTime now) =>
+      Future<PaymentLifecycleResult>.error(StateError('unexpected'));
 }
