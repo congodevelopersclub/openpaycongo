@@ -360,7 +360,7 @@ void main() {
     bloc.add(const PairingEnrollmentCancelled());
     await offline;
     expect(transport.discardCalls, 0);
-    expect(store.value, isNotNull);
+    expect(store.value, isNull);
 
     final Future<PairingEnrollmentState> idle = bloc.stream.firstWhere(
       (PairingEnrollmentState state) => state is PairingEnrollmentIdle,
@@ -370,6 +370,33 @@ void main() {
     expect(transport.discardCalls, 1);
     expect(store.value, isNull);
     await bloc.close();
+  });
+
+  test('failed cleanup marker fails closed across process restart', () async {
+    final _FailOnceCleanupStore store = _FailOnceCleanupStore()
+      ..value = _pending();
+    final PairingEnrollmentBloc first = PairingEnrollmentBloc(
+      store: store,
+      transport: _CountingTransport(),
+      telemetry: _Telemetry(),
+    );
+    final Future<PairingEnrollmentState> offline = first.stream.firstWhere(
+      (PairingEnrollmentState state) => state is PairingEnrollmentOffline,
+    );
+    first.add(const PairingEnrollmentCancelled());
+    await offline;
+    expect(store.value, isNull);
+    await first.close();
+
+    final PairingEnrollmentBloc restarted = PairingEnrollmentBloc(
+      store: store,
+      transport: _CountingTransport(),
+      telemetry: _Telemetry(),
+    );
+    restarted.add(const PairingEnrollmentRecovered());
+    await Future<void>.delayed(Duration.zero);
+    expect(restarted.state, isA<PairingEnrollmentIdle>());
+    await restarted.close();
   });
 
   test(

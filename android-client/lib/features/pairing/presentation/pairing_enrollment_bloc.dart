@@ -376,6 +376,11 @@ final class PairingEnrollmentBloc
       return true;
     } on PairingEnrollmentPersistenceException {
       _unsavedCleanup = target;
+      try {
+        await _clear();
+      } on PairingEnrollmentPersistenceException {
+        // Storage remains unavailable; do not claim cleanup completed.
+      }
       _offlineIfCurrent(generation, emit);
       return false;
     }
@@ -464,37 +469,40 @@ final class PairingEnrollmentBloc
   Future<void> close() async {
     final int generation = ++_generation;
     final Future<void>? activeWork = _activeWork;
-    if (activeWork != null) {
-      try {
-        await _queue(
-          () => store.saveCleanup(PairingEnrollmentCleanup.cancelled),
-        );
-        await activeWork;
-        if (generation != _generation) {
-          await super.close();
-          return;
+    try {
+      if (activeWork != null) {
+        try {
+          await _queue(
+            () => store.saveCleanup(PairingEnrollmentCleanup.cancelled),
+          );
+          await activeWork;
+          if (generation != _generation) {
+            await super.close();
+            return;
+          }
+          await transport.discardTerminal();
+          if (generation != _generation) {
+            await super.close();
+            return;
+          }
+          await _clear();
+          if (generation != _generation) {
+            await super.close();
+            return;
+          }
+          await _queue(store.clearCleanup);
+        } on TimeoutException {
+          // The durable marker remains for restart reconciliation.
+        } on PairingEnrollmentUnavailableException {
+          // The durable marker remains for restart reconciliation.
+        } on PairingEnrollmentPersistenceException {
+          // The durable marker remains for restart reconciliation.
         }
-        await transport.discardTerminal();
-        if (generation != _generation) {
-          await super.close();
-          return;
-        }
-        await _clear();
-        if (generation != _generation) {
-          await super.close();
-          return;
-        }
-        await _queue(store.clearCleanup);
-      } on TimeoutException {
-        // The durable marker remains for restart reconciliation.
-      } on PairingEnrollmentUnavailableException {
-        // The durable marker remains for restart reconciliation.
-      } on PairingEnrollmentPersistenceException {
-        // The durable marker remains for restart reconciliation.
       }
+    } finally {
+      _activeOperation = null;
+      await super.close();
     }
-    _activeOperation = null;
-    await super.close();
   }
 }
 
