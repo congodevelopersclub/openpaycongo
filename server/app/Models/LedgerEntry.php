@@ -13,7 +13,7 @@ class LedgerEntry extends ImmutableFinancialModel
 
     protected $keyType = 'string';
 
-    protected $fillable = ['deposit_id', 'organization_id', 'account', 'debit_minor', 'credit_minor', 'currency', 'recorded_at'];
+    protected $fillable = ['deposit_id', 'organization_id', 'reverses_ledger_entry_id', 'account', 'debit_minor', 'credit_minor', 'currency', 'recorded_at'];
 
     protected function casts(): array
     {
@@ -24,5 +24,11 @@ class LedgerEntry extends ImmutableFinancialModel
     public function deposit(): BelongsTo
     {
         return $this->belongsTo(Deposit::class);
+    }
+
+    /** @return BelongsTo<LedgerEntry, $this> */
+    public function reversesLedgerEntry(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reverses_ledger_entry_id');
     }
 }

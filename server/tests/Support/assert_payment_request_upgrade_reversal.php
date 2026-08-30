@@ -11,7 +11,7 @@ $app = require __DIR__.'/../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
 Artisan::call('migrate:fresh', ['--force' => true]);
-Artisan::call('migrate:rollback', ['--step' => 1]);
+Artisan::call('migrate:rollback', ['--step' => 2]);
 
 $organizationId = '00000000-0000-4000-8000-000000000166';
 $customerId = (string) Str::uuid();

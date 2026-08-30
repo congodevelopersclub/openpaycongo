@@ -1,8 +1,10 @@
 <?php
 
-use App\Deposits\RecordProviderDeposit;
 use App\Events\CustomerCreditCreationPending;
 use App\Models\Deposit;
+use App\Models\User;
+use App\Reconciliation\ReverseDeposit;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Event;
 
@@ -10,6 +12,10 @@ require __DIR__.'/../../vendor/autoload.php';
 
 $app = require __DIR__.'/../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
+$app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
+{
+    public function assertVerified(User $user): void {}
+});
 
 $barrier = (string) getenv('PAYMENT_REQUEST_TEST_BARRIER_DIRECTORY');
 $worker = (string) getenv('PAYMENT_REQUEST_TEST_WORKER');
@@ -34,7 +40,8 @@ Event::listen(CustomerCreditCreationPending::class, function () use ($barrier, $
     }
 });
 
-$result = app(RecordProviderDeposit::class)->reverse(
-    Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID')),
-);
+$actor = User::query()->create(['name' => 'Test operator', 'email' => 'test-operator-'.$worker.'@example.test', 'password' => 'unused']);
+$actor->is_financial_operator = true;
+$actor->save();
+$result = app(ReverseDeposit::class)->reverse($actor, Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID')), 'provider_correction');
 echo $result->outcome->value.PHP_EOL;

@@ -138,9 +138,6 @@ done
 for _ in $(seq 1 300); do docker run --rm --volume "$reversal_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.ready') && file_exists('/barrier/second.ready') ? 0 : 1);" && break; sleep 0.1; done
 docker run --rm --volume "$reversal_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.ready') && file_exists('/barrier/second.ready') ? 0 : 1);"
 docker run --rm --volume "$reversal_volume:/barrier" "$image" php -r "touch('/barrier/release');"
-for _ in $(seq 1 300); do docker run --rm --volume "$reversal_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.transaction-ready') && file_exists('/barrier/second.transaction-ready') ? 0 : 1);" && break; sleep 0.1; done
-docker run --rm --volume "$reversal_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.transaction-ready') && file_exists('/barrier/second.transaction-ready') ? 0 : 1);"
-docker run --rm --volume "$reversal_volume:/barrier" "$image" php -r "touch('/barrier/transaction-release');"
 wait "$reversal_first_pid"; wait "$reversal_second_pid"
 grep -Fx reversed "$barrier_root/race/reversal-first.out"; grep -Fx reversed "$barrier_root/race/reversal-second.out"
 docker run "${base_args[@]}" "$image" php tests/Support/assert_payment_request_reversal_race.php

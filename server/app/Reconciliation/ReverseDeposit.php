@@ -1,0 +1,106 @@
+<?php
+
+namespace App\Reconciliation;
+
+use App\Deposits\DepositKind;
+use App\Deposits\ReversalResult;
+use App\Deposits\ReverseProviderDepositResult;
+use App\Events\CustomerCreditCreationPending;
+use App\Models\CustomerCredit;
+use App\Models\CustomerCreditPosting;
+use App\Models\Deposit;
+use App\Models\FinancialCorrectionAudit;
+use App\Models\LedgerEntry;
+use App\Models\User;
+use App\Security\FinancialOperatorMfaSession;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
+
+final class ReverseDeposit
+{
+    public function __construct(
+        private readonly ReconcileDeposit $reconciliation,
+        private readonly FinancialOperatorMfaSession $mfa,
+    ) {}
+
+    public function reverse(User $actor, Deposit $deposit, string $reasonCode, ?string $detail = null): ReverseProviderDepositResult
+    {
+        Gate::forUser($actor)->authorize('correct', $deposit);
+        $this->mfa->assertVerified($actor);
+        if (! preg_match('/^[a-z][a-z0-9_]{0,63}$/', $reasonCode) || ($detail !== null && mb_strlen($detail) > 1000)) {
+            throw ValidationException::withMessages(['reason_code' => 'A bounded correction reason code is required.']);
+        }
+
+        return DB::transaction(function () use ($actor, $deposit, $reasonCode, $detail): ReverseProviderDepositResult {
+            $original = Deposit::query()->lockForUpdate()->findOrFail($deposit->id);
+            if ($original->kind !== DepositKind::ProviderCredit->value) {
+                throw ValidationException::withMessages(['deposit' => 'Deposit cannot be reversed.']);
+            }
+            if (! $this->reconciliation->report($original)->isReconciled) {
+                throw ValidationException::withMessages(['deposit' => 'Deposit must reconcile before reversal.']);
+            }
+            $reversal = Deposit::query()->where('reverses_deposit_id', $original->id)->lockForUpdate()->first();
+            if ($reversal === null) {
+                $recordedAt = CarbonImmutable::now();
+                $reversal = Deposit::query()->create([
+                    'organization_id' => $original->organization_id, 'customer_id' => $original->customer_id, 'source_installation_id' => $original->source_installation_id,
+                    'reverses_deposit_id' => $original->id, 'reversal_reason_code' => $reasonCode, 'reversal_detail' => $detail,
+                    'reversed_by_user_id' => $actor->id, 'kind' => DepositKind::ProviderReversal->value, 'amount_minor' => $original->amount_minor,
+                    'currency' => $original->currency, 'received_at' => $recordedAt,
+                    'idempotency_digest' => hash('sha256', 'reversal:'.$original->organization_id.':'.$original->id), 'idempotency_key_version' => 'reconciliation',
+                ]);
+                $originalEntries = $original->ledgerEntries()->get()->keyBy('account');
+                foreach ([['customer_credit', $reversal->amount_minor, 0], ['provider_receivable', 0, $reversal->amount_minor]] as [$account, $debit, $credit]) {
+                    LedgerEntry::query()->create(['deposit_id' => $reversal->id, 'organization_id' => $reversal->organization_id, 'currency' => $reversal->currency, 'recorded_at' => $recordedAt, 'reverses_ledger_entry_id' => $originalEntries->get($account)?->id, 'account' => $account, 'debit_minor' => $debit, 'credit_minor' => $credit]);
+                }
+                $customerCredit = CustomerCredit::query()->where('customer_id', $reversal->customer_id)->where('currency', $reversal->currency)->lockForUpdate()->first();
+                if ($customerCredit === null) {
+                    event(new CustomerCreditCreationPending($reversal->customer_id, $reversal->currency));
+                    $customerCredit = CustomerCredit::query()->createOrFirst(
+                        ['customer_id' => $reversal->customer_id, 'currency' => $reversal->currency],
+                        ['available_minor' => 0],
+                    );
+                    $customerCredit = CustomerCredit::query()->whereKey($customerCredit->id)->lockForUpdate()->firstOrFail();
+                }
+                $customerCredit->available_minor = (int) $customerCredit->available_minor - (int) $reversal->amount_minor;
+                $customerCredit->save();
+                CustomerCreditPosting::query()->create(['deposit_id' => $reversal->id, 'customer_credit_id' => $customerCredit->id, 'amount_minor' => -(int) $reversal->amount_minor]);
+                FinancialCorrectionAudit::query()->create([
+                    'deposit_id' => $reversal->id,
+                    'organization_id' => $reversal->organization_id,
+                    'actor_user_id' => $actor->id,
+                    'correction' => 'reverse_deposit',
+                    'reason_code' => $reasonCode,
+                    'detail' => $detail,
+                    'recorded_at' => $recordedAt,
+                ]);
+            } elseif (! $this->hasMatchingReplayIntent($reversal, $actor, $reasonCode, $detail)
+                || ! $this->reconciliation->report($reversal)->isReconciled) {
+                throw ValidationException::withMessages(['deposit' => 'Existing reversal does not match a reconciled correction intent.']);
+            }
+            $result = new ReverseProviderDepositResult($reversal->wasRecentlyCreated ? ReversalResult::Reversed : ReversalResult::Replayed, $reversal);
+
+            return $result;
+        }, attempts: 3);
+    }
+
+    private function hasMatchingReplayIntent(Deposit $reversal, User $actor, string $reasonCode, ?string $detail): bool
+    {
+        $audits = FinancialCorrectionAudit::query()
+            ->where('deposit_id', $reversal->id)
+            ->where('correction', 'reverse_deposit')
+            ->get();
+        $audit = $audits->first();
+
+        return $audit !== null
+            && $audits->count() === 1
+            && (int) $reversal->reversed_by_user_id === (int) $actor->id
+            && $reversal->reversal_reason_code === $reasonCode
+            && $reversal->reversal_detail === $detail
+            && (int) $audit->actor_user_id === (int) $actor->id
+            && $audit->reason_code === $reasonCode
+            && $audit->detail === $detail;
+    }
+}

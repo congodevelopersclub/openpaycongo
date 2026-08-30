@@ -26,7 +26,7 @@ final class LookupKeyVersionMigrationTest extends TestCase
         $installationId = (string) Str::uuid();
         $depositId = (string) Str::uuid();
 
-        $this->artisan('migrate:rollback', ['--step' => 2])->assertExitCode(0);
+        $this->artisan('migrate:rollback', ['--step' => 3])->assertExitCode(0);
 
         DB::table('customers')->insert([
             'id' => $customerId,

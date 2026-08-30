@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\Customer;
+use App\Models\CustomerCredit;
+use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\SourceInstallation;
@@ -29,6 +31,11 @@ $installation = SourceInstallation::query()->forceCreate([
 ]);
 
 $ids = [];
+$credit = CustomerCredit::query()->forceCreate([
+    'customer_id' => $customer->id,
+    'currency' => 'CDF',
+    'available_minor' => 200,
+]);
 foreach (['00000000-0000-4000-8000-000000000321', '00000000-0000-4000-8000-000000000322'] as $id) {
     $deposit = Deposit::query()->forceCreate([
         'id' => $id,
@@ -45,17 +52,22 @@ foreach (['00000000-0000-4000-8000-000000000321', '00000000-0000-4000-8000-00000
     foreach ([
         ['provider_receivable', 100, 0],
         ['customer_credit', 0, 100],
-    ] as [$account, $debit, $credit]) {
+    ] as [$account, $debit, $creditMinor]) {
         LedgerEntry::query()->create([
             'deposit_id' => $deposit->id,
             'organization_id' => $customer->organization_id,
             'account' => $account,
             'debit_minor' => $debit,
-            'credit_minor' => $credit,
+            'credit_minor' => $creditMinor,
             'currency' => 'CDF',
             'recorded_at' => $now,
         ]);
     }
+    CustomerCreditPosting::query()->create([
+        'deposit_id' => $deposit->id,
+        'customer_credit_id' => $credit->id,
+        'amount_minor' => 100,
+    ]);
     $ids[] = $deposit->id;
 }
 

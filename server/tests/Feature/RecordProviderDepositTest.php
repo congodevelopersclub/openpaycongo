@@ -13,6 +13,9 @@ use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
+use App\Models\User;
+use App\Reconciliation\ReverseDeposit;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +28,16 @@ use Tests\TestCase;
 final class RecordProviderDepositTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
+        {
+            public function assertVerified(User $user): void {}
+        });
+    }
 
     public function test_it_records_a_provider_transfer_once_with_encrypted_pii_and_balanced_ledger_entries(): void
     {
@@ -214,8 +227,12 @@ final class RecordProviderDepositTest extends TestCase
         $action = app(RecordProviderDeposit::class);
         $deposit = $action->record($this->transfer())->deposit;
 
-        $first = $action->reverse($deposit);
-        $replay = $action->reverse($deposit);
+        $reversal = app(ReverseDeposit::class);
+        $operator = User::factory()->create();
+        $operator->is_financial_operator = true;
+        $operator->save();
+        $first = $reversal->reverse($operator, $deposit, 'provider_correction');
+        $replay = $reversal->reverse($operator, $deposit, 'provider_correction');
 
         self::assertSame(ReversalResult::Reversed, $first->outcome);
         self::assertSame(ReversalResult::Replayed, $replay->outcome);
@@ -235,7 +252,10 @@ final class RecordProviderDepositTest extends TestCase
         $deposit->customer_id = Str::uuid()->toString();
         $deposit->source_installation_id = Str::uuid()->toString();
 
-        $reversal = $action->reverse($deposit)->deposit;
+        $operator = User::factory()->create();
+        $operator->is_financial_operator = true;
+        $operator->save();
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
 
         self::assertSame(12500, $reversal->amount_minor);
         self::assertSame('CDF', $reversal->currency);
