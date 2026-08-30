@@ -31,6 +31,9 @@ abstract interface class PairingEnrollmentTransport {
   Future<PairingEnrollment> begin();
   Future<PairingEnrollment> retry(PairingEnrollment enrollment);
   Future<PairingEnrollment> recover(PairingEnrollment enrollment);
+
+  /// Idempotently destroys locally retained protocol material (including on
+  /// user cancellation) before the BLoC confirms durable cleanup.
   Future<void> discardTerminal();
 }
 
@@ -139,16 +142,29 @@ final class PairingEnrollmentBloc
   int _generation = 0;
   int? _activeOperation;
   Future<void> _persistence = Future<void>.value();
+  _CleanupTarget? _pendingCleanup;
 
   Future<void> _start(
     PairingEnrollmentStarted event,
     Emitter<PairingEnrollmentState> emit,
-  ) => _run(emit, transport.begin, started: true);
+  ) async {
+    if (_activeOperation != null) {
+      telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
+      return;
+    }
+    final int generation = _generation;
+    if (!await _resumeCleanupIfNeeded(generation, emit)) return;
+    if (generation != _generation) return;
+    await _run(emit, transport.begin, started: true);
+  }
 
   Future<void> _retry(
     PairingEnrollmentRetryRequested event,
     Emitter<PairingEnrollmentState> emit,
   ) async {
+    final int cleanupGeneration = _generation;
+    if (!await _resumeCleanupIfNeeded(cleanupGeneration, emit)) return;
+    if (cleanupGeneration != _generation) return;
     if (_activeOperation != null) {
       telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
       return;
@@ -169,6 +185,9 @@ final class PairingEnrollmentBloc
     PairingEnrollmentRecovered event,
     Emitter<PairingEnrollmentState> emit,
   ) async {
+    final int cleanupGeneration = _generation;
+    if (!await _resumeCleanupIfNeeded(cleanupGeneration, emit)) return;
+    if (cleanupGeneration != _generation) return;
     if (_activeOperation != null) {
       telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
       return;
@@ -246,15 +265,8 @@ final class PairingEnrollmentBloc
     final int generation = ++_generation;
     _activeOperation = null;
     telemetry.record(PairingEnrollmentTelemetry.cancelled);
-    try {
-      await _clear();
-      if (generation == _generation) emit(const PairingEnrollmentIdle());
-    } on PairingEnrollmentPersistenceException {
-      if (generation == _generation) {
-        emit(const PairingEnrollmentOffline());
-        telemetry.record(PairingEnrollmentTelemetry.offline);
-      }
-    }
+    _pendingCleanup = _CleanupTarget.cancelled;
+    await _completeCleanup(generation, emit);
   }
 
   void _offlineIfCurrent(int generation, Emitter<PairingEnrollmentState> emit) {
@@ -268,13 +280,39 @@ final class PairingEnrollmentBloc
     int generation,
     Emitter<PairingEnrollmentState> emit,
   ) async {
+    _pendingCleanup = _CleanupTarget.terminalError;
+    await _completeCleanup(generation, emit);
+  }
+
+  Future<bool> _resumeCleanupIfNeeded(
+    int generation,
+    Emitter<PairingEnrollmentState> emit,
+  ) async {
+    if (_pendingCleanup == null) return true;
+    return _completeCleanup(generation, emit);
+  }
+
+  Future<bool> _completeCleanup(
+    int generation,
+    Emitter<PairingEnrollmentState> emit,
+  ) async {
+    final _CleanupTarget? target = _pendingCleanup;
+    if (target == null) return true;
     try {
-      await _clear();
-      if (generation != _generation) return;
       await transport.discardTerminal();
-      if (generation != _generation) return;
-      emit(const PairingEnrollmentError());
-      telemetry.record(PairingEnrollmentTelemetry.error);
+      if (generation != _generation) return false;
+      await _clear();
+      if (generation != _generation) return false;
+      if (_pendingCleanup != target) return false;
+      _pendingCleanup = null;
+      switch (target) {
+        case _CleanupTarget.cancelled:
+          emit(const PairingEnrollmentIdle());
+        case _CleanupTarget.terminalError:
+          emit(const PairingEnrollmentError());
+          telemetry.record(PairingEnrollmentTelemetry.error);
+      }
+      return true;
     } on TimeoutException {
       _offlineIfCurrent(generation, emit);
     } on PairingEnrollmentUnavailableException {
@@ -282,6 +320,7 @@ final class PairingEnrollmentBloc
     } on PairingEnrollmentPersistenceException {
       _offlineIfCurrent(generation, emit);
     }
+    return false;
   }
 
   void _emitEnrollment(
@@ -313,4 +352,13 @@ final class PairingEnrollmentBloc
     );
     return result;
   }
+
+  @override
+  Future<void> close() {
+    _generation++;
+    _activeOperation = null;
+    return super.close();
+  }
 }
+
+enum _CleanupTarget { cancelled, terminalError }
