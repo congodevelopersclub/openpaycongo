@@ -18,11 +18,11 @@ const requiredTabletopFields = [
 ];
 
 const sensitiveTabletopFields = [
-  /^\s*(?:[-*+]\s*)?(?:raw\s+sms|sms\s+body)\s*:/im,
-  /^\s*(?:[-*+]\s*)?(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
-  /^\s*(?:[-*+]\s*)?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
-  /^\s*(?:[-*+]\s*)?(?:authorization|bearer|jwt|access\s+token)\s*:/im,
-  /^\s*(?:[-*+]\s*)?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:raw\s+sms|sms\s+body)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:authorization|bearer|jwt|access\s+token)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
   /\b(?:raw\s+sms|sms\s+body)\b\s+(?:is|was|contains)\b/i,
   /\b(?:phone(?:\s+number)?|customer\s+(?:name|reference)|payment\s+(?:amount|reference)|account\s+(?:number|balance))\b\s+(?:is|was|equals)\b/i,
   /\b(?:authorization|bearer|jwt|access\s+token)\b\s+(?:is|was)\b/i,
@@ -31,6 +31,7 @@ const sensitiveTabletopFields = [
   /\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
   /\b192\.168\.\d{1,3}\.\d{1,3}\b/,
   /\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/,
+  /\b169\.254\.\d{1,3}\.\d{1,3}\b/,
 ];
 
 function assertSyntheticTabletop(fixture) {
@@ -98,6 +99,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
 
   const mutations = [
     '- Raw SMS: synthetic message text',
+    '1. Raw SMS: synthetic numbered-list message text',
     '- Phone number: +243000000000',
     '- Customer name: Synthetic Customer',
     '- Payment amount: 123',
@@ -111,6 +113,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     'The authorization is Bearer synthetic-token-value.',
     'The internal host is 10.0.0.1.',
     'Connect to http://172.16.0.1/admin for the synthetic topology.',
+    'Connect to http://169.254.169.254/latest/meta-data for the synthetic topology.',
   ];
 
   for (const mutation of mutations) {
