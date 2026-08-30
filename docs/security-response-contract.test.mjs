@@ -23,13 +23,13 @@ const sensitiveTabletopFields = [
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:authorization|bearer|jwt|access(?:\s+|_)token)\s*:/im,
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:api(?:\s+|_)key|client(?:\s+|_)secret|refresh(?:\s+|_)token|password)\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:internal(?:\s+|_)(?:host|url)|topology|private(?:\s+|_)(?:ip|endpoint))\s*:/im,
   /\b(?:raw\s+sms|sms\s+body)\b\s+(?:is|was|contains)\b/i,
   /\b(?:phone(?:\s+number)?|customer\s+(?:name|reference)|payment\s+(?:amount|reference)|account\s+(?:number|balance))\b\s+(?:is|was|equals)\b/i,
   /\b(?:authorization|bearer|jwt|access(?:\s+|_)token)\b\s+(?:is|was)\b/i,
   /\b(?:api(?:\s+|_)key|client(?:\s+|_)secret|refresh(?:\s+|_)token|password)\b\s+(?:is|was|equals|contains)\b/i,
   /\b(?:api(?:\s+|_)key|client(?:\s+|_)secret|refresh(?:\s+|_)token|access(?:\s+|_)token|password)\s*=\s*[^\s&#"'<>]+/i,
-  /\b(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\b\s+(?:is|was)\b/i,
+  /\b(?:internal(?:\s+|_)(?:host|url)|topology|private(?:\s+|_)(?:ip|endpoint))\b\s+(?:is|was)\b/i,
   /\+\d{7,15}\b/,
   /\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
   /\b192\.168\.\d{1,3}\.\d{1,3}\b/,
@@ -43,6 +43,9 @@ function plainSafetyText(markdown) {
   return markdown
     .replace(/\[([^\]\n]+)\]\([^\)\n]*\)/g, '$1')
     .replace(/<[^>\n]*>/g, '')
+    .replaceAll('\\_', '_')
+    .replaceAll('\\*', '*')
+    .replaceAll('\\`', '`')
     .replace(/_([^_\n]+):_/g, '$1:')
     .replace(/[`*]/g, '');
 }
@@ -129,6 +132,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     '- JWT: synthetic-token-value',
     '- API key: sk_live_example',
     '- api_key: sk_live_REALVALUE',
+    '- api\\_key: synthetic-secret-value',
     '- client secret: synthetic-client-secret-value',
     '- client_secret: synthetic-client-secret-value',
     '- refresh token: synthetic-refresh-token-value',
@@ -137,6 +141,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     '&lt;a href="https://example.invalid/?access_token=REALVALUE"&gt;admin&lt;/a&gt;',
     'The password is synthetic-password-value.',
     '- Internal host: 10.0.0.1',
+    '- internal_host: prod-db.corp.internal',
     'The raw SMS body contains synthetic message text.',
     'The phone number is +243000000000.',
     'The customer name is Synthetic Customer.',
