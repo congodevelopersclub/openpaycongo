@@ -5,15 +5,17 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-const script = resolve('scripts/upgrade-quiescent.sh');
+const script = resolve('../scripts/upgrade-quiescent.sh');
 
 async function run(migrateStatus) {
   const directory = await mkdtemp(join(tmpdir(), 'openpay-upgrade-'));
   const log = join(directory, 'commands');
   const docker = join(directory, 'docker');
   const executable = join(directory, 'upgrade-quiescent.sh');
-  await writeFile(docker, `#!/bin/sh\necho "$*" >> "$OPENPAY_TEST_LOG"\n[ "$2" = run ] && exit ${migrateStatus}\n`);
-  await writeFile(executable, (await readFile(script, 'utf8')).replaceAll('\r\n', '\n'));
+  await writeFile(docker, `#!/bin/sh\necho "$*" >> "$OPENPAY_TEST_LOG"\nif [ "$2" = run ]; then exit ${migrateStatus}; fi\nexit 0\n`);
+  const source = await readFile(script, 'utf8');
+  assert.doesNotMatch(source, /\r/);
+  await writeFile(executable, source);
   await chmod(docker, 0o755);
   const result = spawnSync('sh', [executable], { env: { ...process.env, OPENPAY_DOCKER_BIN: docker, OPENPAY_TEST_LOG: log } });
   const commands = (await readFile(log, 'utf8')).trim().split('\n');
