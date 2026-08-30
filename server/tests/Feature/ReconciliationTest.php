@@ -7,6 +7,7 @@ use App\Deposits\RecordProviderDeposit;
 use App\Models\Customer;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
+use App\Models\Deposit;
 use App\Models\FinancialCorrectionAudit;
 use App\Models\LedgerEntry;
 use App\Models\User;
@@ -354,6 +355,69 @@ final class ReconciliationTest extends TestCase
         DB::table('deposits')->where('id', $deposit->id)->update(['kind' => 'provider_reversal']);
 
         self::assertContains('reversal_evidence', app(ReconcileDeposit::class)->report($reversal)->discrepancies);
+    }
+
+    public function test_reconciliation_rejects_the_exact_malformed_evidence_states_without_a_correction(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $reverse = app(ReverseDeposit::class);
+        $reconcile = app(ReconcileDeposit::class);
+
+        $misScoped = app(RecordProviderDeposit::class)->record($this->transfer('mis-scoped-original'))->deposit;
+        $otherCustomer = Customer::query()->create([
+            'organization_id' => $misScoped->organization_id,
+            'private_lookup_digest' => hash('sha256', 'mis-scoped-customer'),
+            'private_lookup_id' => 'mis-scoped-customer',
+            'private_lookup_key_version' => 'test',
+        ]);
+        $otherCredit = CustomerCredit::query()->create(['customer_id' => $otherCustomer->id, 'currency' => $misScoped->currency, 'available_minor' => $misScoped->amount_minor]);
+        CustomerCreditPosting::query()->where('deposit_id', $misScoped->id)->update(['customer_credit_id' => $otherCredit->id]);
+        CustomerCredit::query()->where('customer_id', $misScoped->customer_id)->where('currency', $misScoped->currency)->update(['available_minor' => 0]);
+
+        self::assertContains('customer_credit_posting_scope', $reconcile->report($misScoped)->discrepancies);
+        $this->assertCorrectionIsRejected($reverse, $operator, $misScoped);
+
+        $unsupported = app(RecordProviderDeposit::class)->record($this->transfer('unsupported-kind'))->deposit;
+        DB::table('deposits')->where('id', $unsupported->id)->update(['kind' => 'unknown']);
+
+        self::assertFalse($reconcile->report($unsupported)->isReconciled);
+        self::assertContains('unsupported_deposit_kind', $reconcile->report($unsupported)->discrepancies);
+        $this->assertCorrectionIsRejected($reverse, $operator, $unsupported);
+
+        $withoutAudit = app(RecordProviderDeposit::class)->record($this->transfer('missing-reversal-audit'))->deposit;
+        $reversal = $reverse->reverse($operator, $withoutAudit, 'provider_correction')->deposit;
+        FinancialCorrectionAudit::query()->where('deposit_id', $reversal->id)->delete();
+
+        self::assertContains('reversal_evidence', $reconcile->report($reversal)->discrepancies);
+        $this->assertCorrectionIsRejected($reverse, $operator, $withoutAudit);
+
+        $wrongOrganization = app(RecordProviderDeposit::class)->record($this->transfer('customer-organization-mismatch'))->deposit;
+        DB::table('customers')->where('id', $wrongOrganization->customer_id)->update(['organization_id' => '00000000-0000-4000-8000-000000000099']);
+
+        self::assertContains('customer_scope_mismatch', $reconcile->report($wrongOrganization)->discrepancies);
+        $this->assertCorrectionIsRejected($reverse, $operator, $wrongOrganization);
+
+        $wrongOriginalKind = app(RecordProviderDeposit::class)->record($this->transfer('wrong-original-kind'))->deposit;
+        $wrongOriginalReversal = $reverse->reverse($operator, $wrongOriginalKind, 'provider_correction')->deposit;
+        DB::table('deposits')->where('id', $wrongOriginalKind->id)->update(['kind' => 'unknown']);
+
+        self::assertContains('reversal_evidence', $reconcile->report($wrongOriginalReversal)->discrepancies);
+    }
+
+    private function assertCorrectionIsRejected(ReverseDeposit $reverse, User $operator, Deposit $deposit): void
+    {
+        $depositCount = Deposit::query()->count();
+        $postingCount = CustomerCreditPosting::query()->count();
+        $auditCount = FinancialCorrectionAudit::query()->count();
+
+        try {
+            $reverse->reverse($operator, $deposit, 'provider_correction');
+            self::fail('A correction against malformed evidence must be rejected.');
+        } catch (ValidationException) {
+            self::assertSame($depositCount, Deposit::query()->count());
+            self::assertSame($postingCount, CustomerCreditPosting::query()->count());
+            self::assertSame($auditCount, FinancialCorrectionAudit::query()->count());
+        }
     }
 
     private function transfer(string $providerReference = 'reconciliation-provider-reference'): ProviderTransfer
