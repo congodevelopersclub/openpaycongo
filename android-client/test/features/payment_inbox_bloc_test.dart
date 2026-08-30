@@ -88,6 +88,39 @@ void main() {
       expect(gateway.clearCalls, 1);
     },
   );
+
+  test(
+    'rule save stays unknown after initial and reconciliation reload fail',
+    () async {
+      final PaymentInboxBloc bloc = PaymentInboxBloc(
+        gateway: _Gateway(
+          failCommit: false,
+          failReload: true,
+          failInitialReload: true,
+        ),
+      );
+      addTearDown(bloc.close);
+
+      bloc.add(const PaymentInboxStarted());
+      await bloc.stream.firstWhere((PaymentInboxState state) => state.ready);
+      expect(bloc.state.authority, PaymentInboxAuthority.unknown);
+
+      bloc.add(
+        const PaymentInboxTrustedSenderSaveRequested(
+          sender: 'TEST',
+          template: '{amount} {currency} {reference}',
+        ),
+      );
+      final PaymentInboxState state = await bloc.stream.firstWhere(
+        (PaymentInboxState state) =>
+            state.feedback == PaymentInboxFeedback.ruleSaved ||
+            state.feedback == PaymentInboxFeedback.ruleAddReloadFailed,
+      );
+
+      expect(state.authority, PaymentInboxAuthority.unknown);
+      expect(state.records, isEmpty);
+    },
+  );
 }
 
 final class _Gateway implements SmsGatewayPort {
@@ -96,12 +129,14 @@ final class _Gateway implements SmsGatewayPort {
     required this.failReload,
     this.failAdd = false,
     this.addGate,
+    this.failInitialReload = false,
   });
 
   final bool failCommit;
   final bool failReload;
   final bool failAdd;
   final Completer<void>? addGate;
+  final bool failInitialReload;
   int _listCalls = 0;
   int addCalls = 0;
   int clearCalls = 0;
@@ -124,7 +159,10 @@ final class _Gateway implements SmsGatewayPort {
   @override
   Future<List<String>> listTrustedSenders() async {
     _listCalls += 1;
-    if (failReload && _listCalls > 1) throw StateError('unavailable');
+    if ((failInitialReload && _listCalls == 1) ||
+        (failReload && _listCalls > 1)) {
+      throw StateError('unavailable');
+    }
     return const <String>[];
   }
 

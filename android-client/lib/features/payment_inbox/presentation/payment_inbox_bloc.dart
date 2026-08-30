@@ -236,12 +236,16 @@ final class PaymentInboxBloc
       return;
     }
     try {
-      final List<String> values = await gateway.addTrustedSender(sender.value);
+      await gateway.addTrustedSender(sender.value);
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
+      );
       emit(
         state.copyWith(
-          authority: PaymentInboxAuthority.authoritative,
-          trustedSenders: _decodeTrustedSenders(values),
-          feedback: PaymentInboxFeedback.ruleSaved,
+          feedback: reloaded
+              ? PaymentInboxFeedback.ruleSaved
+              : PaymentInboxFeedback.ruleAddReloadFailed,
         ),
       );
     } on Object {
@@ -264,14 +268,16 @@ final class PaymentInboxBloc
     Emitter<PaymentInboxState> emit,
   ) async {
     try {
-      final List<String> values = await gateway.revokeTrustedSender(
-        event.sender.value,
+      await gateway.revokeTrustedSender(event.sender.value);
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
       );
       emit(
         state.copyWith(
-          authority: PaymentInboxAuthority.authoritative,
-          trustedSenders: _decodeTrustedSenders(values),
-          feedback: PaymentInboxFeedback.none,
+          feedback: reloaded
+              ? PaymentInboxFeedback.none
+              : PaymentInboxFeedback.ruleRevokeReloadFailed,
         ),
       );
     } on Object {
@@ -294,12 +300,16 @@ final class PaymentInboxBloc
     Emitter<PaymentInboxState> emit,
   ) async {
     try {
-      final List<String> values = await gateway.clearTrustedSenders();
+      await gateway.clearTrustedSenders();
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
+      );
       emit(
         state.copyWith(
-          authority: PaymentInboxAuthority.authoritative,
-          trustedSenders: _decodeTrustedSenders(values),
-          feedback: PaymentInboxFeedback.none,
+          feedback: reloaded
+              ? PaymentInboxFeedback.none
+              : PaymentInboxFeedback.ruleClearReloadFailed,
         ),
       );
     } on Object {
