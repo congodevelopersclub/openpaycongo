@@ -14,11 +14,17 @@ import 'package:opencongopay/widgets/opencongopayapp.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const MethodChannel smsChannel = MethodChannel('openpaycongo/sms_gateway');
+  const MethodChannel appLockChannel = MethodChannel('openpaycongo/app_lock');
   const MethodChannel localAuthChannel = MethodChannel(
     'plugins.flutter.io/local_auth',
   );
 
   setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(appLockChannel, (MethodCall call) async {
+          if (call.method == 'status') return 'ready';
+          return null;
+        });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(smsChannel, (MethodCall call) async {
           return switch (call.method) {
@@ -51,6 +57,8 @@ void main() {
   });
 
   tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(appLockChannel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(smsChannel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -101,6 +109,7 @@ void main() {
     addTearDown(pairing.close);
 
     await tester.pumpWidget(OpenCongoPayApp(pairingSession: pairing));
+    await _unlockApp(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     pairing.add(const PairingSessionStarted());
@@ -120,6 +129,7 @@ void main() {
     addTearDown(enrollment.close);
 
     await tester.pumpWidget(OpenCongoPayApp(pairingEnrollment: enrollment));
+    await _unlockApp(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     enrollment.add(const PairingEnrollmentStarted());
@@ -139,6 +149,7 @@ void main() {
     addTearDown(sync.close);
 
     await tester.pumpWidget(OpenCongoPayApp(syncCursor: sync));
+    await _unlockApp(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     sync.add(const SyncCursorStarted());
@@ -537,6 +548,12 @@ void main() {
     );
     expect(find.textContaining('can never create a payment'), findsOneWidget);
   });
+}
+
+Future<void> _unlockApp(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Use biometrics'));
+  await tester.pumpAndSettle();
 }
 
 final class _FakeGateway implements SmsGatewayPort {

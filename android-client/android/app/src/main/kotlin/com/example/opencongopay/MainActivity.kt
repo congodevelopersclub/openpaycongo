@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.WindowManager
 import com.congodeveloperclub.opencongopay.sms.CaptureDecision
 import com.congodeveloperclub.opencongopay.sms.DecisionConflictException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskBusyException
@@ -21,22 +22,34 @@ import com.congodeveloperclub.opencongopay.sms.RecoveryRequiredException
 import com.congodeveloperclub.opencongopay.sms.SmsAccessDenial
 import com.congodeveloperclub.opencongopay.sms.SmsAccessGuard
 import com.congodeveloperclub.opencongopay.sms.SmsVaultProvider
+import com.congodeveloperclub.opencongopay.lock.AppLockRecoveryRequiredException
+import com.congodeveloperclub.opencongopay.lock.AppLockVault
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "openpaycongo/sms_gateway"
     private val outboxChannelName = "openpaycongo/payment_outbox"
+    private val appLockChannelName = "openpaycongo/app_lock"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val appLockTasks = Executors.newSingleThreadExecutor()
     private val smsTasks = GuardedTaskRunner(
         isCurrent = { generation -> smsAccessDenial(generation) == null },
         deliver = { callback -> mainHandler.post(callback) },
     )
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        // Prevent Android screenshots and recents thumbnails from retaining
+        // payment content while the Activity exists.
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -44,6 +57,8 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handleGatewayCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, outboxChannelName)
             .setMethodCallHandler(::handleOutboxCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, appLockChannelName)
+            .setMethodCallHandler(::handleAppLockCall)
     }
 
     override fun onResume() {
@@ -57,6 +72,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun onDestroy() {
+        appLockTasks.shutdownNow()
         smsTasks.close()
         super.onDestroy()
     }
@@ -103,6 +119,46 @@ class MainActivity : FlutterFragmentActivity() {
             result.error("outbox_storage_failure", "Encrypted outbox storage failed", null)
         } catch (_: IllegalArgumentException) {
             result.error("outbox_storage_failure", "Encrypted outbox storage failed", null)
+        }
+    }
+
+    private fun handleAppLockCall(call: MethodCall, result: MethodChannel.Result) {
+        val pin = call.arguments as? String
+        if ((call.method == "enroll" || call.method == "verifyPin") && pin == null) {
+            result.error("recovery_required", "App lock recovery is required", null)
+            return
+        }
+        appLockTasks.execute {
+            try {
+                val vault = AppLockVault(applicationContext)
+                val value: Any = when (call.method) {
+                    "status" -> vault.status()
+                    "enroll" -> vault.enroll(pin!!)
+                    "verifyPin" -> vault.verify(pin!!, System.currentTimeMillis()).let { outcome ->
+                        if (outcome.getString("status") == "cooldown") {
+                            mapOf(
+                                "status" to "cooldown",
+                                "next_attempt_ms" to outcome.getLong("next_attempt_ms"),
+                            )
+                        } else {
+                            mapOf("status" to outcome.getString("status"))
+                        }
+                    }
+                    else -> {
+                        mainHandler.post { result.notImplemented() }
+                        return@execute
+                    }
+                }
+                mainHandler.post { result.success(value) }
+            } catch (_: AppLockRecoveryRequiredException) {
+                mainHandler.post {
+                    result.error("recovery_required", "App lock recovery is required", null)
+                }
+            } catch (_: Exception) {
+                mainHandler.post {
+                    result.error("recovery_required", "App lock recovery is required", null)
+                }
+            }
         }
     }
 
