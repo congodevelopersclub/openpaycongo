@@ -6,8 +6,8 @@ Accepted
 
 ## Decision
 
-- Administrators authenticate only through Fortify `web` sessions, after confirmed TOTP or passkey. They never authenticate as API bearer identities. This extends [ADR 007: first-run administrator setup](adr-007-first-run-admin-setup.md).
-- Developer services use confidential Passport OAuth2 client-credentials. This self-hosted Laravel server validates resources locally; there is no OIDC discovery, external issuer, or refresh token.
+- Administrators authenticate only through Fortify `web` sessions after the required TOTP challenge. A passkey may enhance the session but never replaces required TOTP. They never authenticate as API bearer identities. This extends [ADR 007: first-run administrator setup](adr-007-first-run-admin-setup.md).
+- Developer services use confidential Passport OAuth2 client-credentials. Passport's local resource-server `CheckToken` middleware (the Laravel 13 successor to `CheckClientCredentials`) validates service access and scopes; there is no OIDC discovery, external issuer, or refresh token.
 - Mobile installations use Sanctum tokens under the distinct `mobile` guard and mobile abilities. Only pairing issue #17 may issue an installation token; this ADR does not implement pairing or issuance.
 - Authorization resolves organization, application, and installation from persisted token or client ownership. Request identifiers and claims never select ownership.
 - Reverse-proxy identity headers are never identity authority. The canonical base URL is static configuration.

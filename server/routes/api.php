@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\ResolveDeveloperApplication;
+use App\Models\DeveloperApplication;
 use App\Operations\AssessReadiness;
 use App\Operations\MigrationReadiness;
 use Illuminate\Support\Facades\Route;
+use Laravel\Passport\Http\Middleware\CheckToken;
 
 Route::get('/healthz', static fn () => response()->json(['status' => 'ok']));
 
@@ -27,3 +30,13 @@ Route::get('/mobile/identity', static function () {
 
     return response()->json(['organization_id' => $installation->organization_id], 200, ['cache-control' => 'no-store']);
 })->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'throttle:mobile-api']);
+
+Route::get('/services/identity', static function () {
+    /** @var DeveloperApplication $application */
+    $application = request()->attributes->get(DeveloperApplication::class);
+
+    return response()->json([
+        'application_id' => $application->getKey(),
+        'organization_id' => $application->organization_id,
+    ], 200, ['cache-control' => 'no-store']);
+})->middleware([CheckToken::using('payment-requests:read'), ResolveDeveloperApplication::class]);

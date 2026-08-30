@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Middleware\RequireConfirmedTwoFactorForPasskeys;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -41,6 +43,12 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(static function (AuthenticationException $exception, Request $request) {
+            return $request->expectsJson() ? response()->json(['message' => 'Unauthenticated.'], 401) : null;
+        });
+        $exceptions->render(static function (AuthorizationException $exception, Request $request) {
+            return $request->expectsJson() ? response()->json(['message' => 'Forbidden'], 403) : null;
+        });
         $exceptions->render(static function (HttpExceptionInterface $exception, Request $request) {
             return $exception->getStatusCode() === 403 && $request->expectsJson()
                 ? response()->json(['message' => 'Forbidden'], 403)
