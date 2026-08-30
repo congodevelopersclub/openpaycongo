@@ -138,6 +138,38 @@ final class IdentityBoundaryConfigurationTest extends TestCase
             ->assertDontSee($client->plainSecret);
     }
 
+    public function test_client_credentials_issuance_is_limited_to_persisted_client_scope_grants(): void
+    {
+        [, $client] = $this->developerApplicationWithScopes(
+            '00000000-0000-4000-8000-000000000014',
+            ['payment-requests:read'],
+        );
+
+        $allowedToken = $this->postJson('/oauth/token', [
+            'grant_type' => 'client_credentials',
+            'client_id' => $client->getKey(),
+            'client_secret' => $client->plainSecret,
+            'scope' => 'payment-requests:read',
+        ])->assertOk()
+            ->assertJsonMissing(['client_secret'])
+            ->assertDontSee($client->plainSecret)
+            ->json('access_token');
+
+        $this->withToken($allowedToken)->getJson('/services/identity')->assertOk();
+
+        foreach (['deposits:read', 'customers:pii:read'] as $scope) {
+            $this->postJson('/oauth/token', [
+                'grant_type' => 'client_credentials',
+                'client_id' => $client->getKey(),
+                'client_secret' => $client->plainSecret,
+                'scope' => $scope,
+            ])->assertStatus(400)
+                ->assertJsonPath('error', 'invalid_scope')
+                ->assertJsonMissing(['client_secret'])
+                ->assertDontSee($client->plainSecret);
+        }
+    }
+
     public function test_mobile_wrong_scope_and_revoked_service_client_fail_closed_without_secret_output(): void
     {
         [$application, $client] = $this->developerApplication('00000000-0000-4000-8000-000000000011');
@@ -177,16 +209,29 @@ final class IdentityBoundaryConfigurationTest extends TestCase
         ]);
     }
 
-    /** @return array{DeveloperApplication, Client} */
-    private function developerApplication(string $organizationId): array
+    /**
+     * @param  string[]  $scopes
+     * @return array{DeveloperApplication, Client}
+     */
+    private function developerApplication(string $organizationId, array $scopes = ['payment-requests:read', 'wallets:read']): array
     {
         $client = app(ClientRepository::class)->createClientCredentialsGrantClient('synthetic-service');
+        $client->forceFill(['scopes' => $scopes])->save();
         $application = DeveloperApplication::query()->create([
             'organization_id' => $organizationId,
             'oauth_client_id' => $client->getKey(),
         ]);
 
         return [$application, $client];
+    }
+
+    /**
+     * @param  string[]  $scopes
+     * @return array{DeveloperApplication, Client}
+     */
+    private function developerApplicationWithScopes(string $organizationId, array $scopes): array
+    {
+        return $this->developerApplication($organizationId, $scopes);
     }
 
     /** @param string[] $scopes */

@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_04_000002_create_oauth_access_tokens_table';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_04_000003_add_scopes_to_oauth_clients_table';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {

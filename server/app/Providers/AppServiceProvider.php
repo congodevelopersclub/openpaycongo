@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Http\Responses\PasskeyLoginResponse;
 use App\Models\Deposit;
+use App\OAuth\ClientScopeRepository;
 use App\Operations\LaravelMigrationReadiness;
 use App\Operations\LedgerProjectionReadiness;
 use App\Operations\MigrationReadiness;
@@ -17,6 +18,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passkeys\Contracts\PasskeyLoginResponse as PasskeyLoginResponseContract;
+use Laravel\Passport\Bridge\ScopeRepository as PassportScopeRepository;
 use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
@@ -27,6 +29,8 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         Passport::ignoreRoutes();
+
+        $this->app->bind(PassportScopeRepository::class, ClientScopeRepository::class);
 
         $this->app->bind(ProjectionReadiness::class, LedgerProjectionReadiness::class);
         $this->app->bind(MigrationReadiness::class, LaravelMigrationReadiness::class);
