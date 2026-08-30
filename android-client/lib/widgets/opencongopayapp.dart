@@ -9,14 +9,20 @@ import '../bloc/parser_bloc.dart';
 import '../services/Config/config_service.dart';
 import '../services/Parsers/parser_store.dart';
 import '../features/payment_inbox/presentation/payment_inbox_screen.dart';
+import '../features/pairing/presentation/pairing_session_bloc.dart';
 import '../features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import '../features/sms_gateway/infrastructure/platform_sms_gateway.dart';
 import '../features/sms_gateway/presentation/sms_permission_gate.dart';
 
 class OpenCongoPayApp extends StatefulWidget {
-  const OpenCongoPayApp({super.key, this.paymentLifecycle});
+  const OpenCongoPayApp({
+    super.key,
+    this.paymentLifecycle,
+    this.pairingSession,
+  });
 
   final PaymentLifecycle? paymentLifecycle;
+  final PairingSessionBloc? pairingSession;
 
   @override
   State<OpenCongoPayApp> createState() => _OpenCongoPayAppState();
@@ -31,7 +37,9 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
   void initState() {
     super.initState();
     final PaymentLifecycle? lifecycle = widget.paymentLifecycle;
-    if (lifecycle != null) _paymentLifecycleBloc = PaymentLifecycleBloc(lifecycle: lifecycle);
+    if (lifecycle != null) {
+      _paymentLifecycleBloc = PaymentLifecycleBloc(lifecycle: lifecycle);
+    }
   }
 
   @override
@@ -44,6 +52,7 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
     PaymentInboxScreen(
       gateway: _smsGateway,
       paymentLifecycle: _paymentLifecycleBloc,
+      pairingSession: widget.pairingSession,
     ),
     const ParsersScreen(),
     const RegexBuilderScreen(),

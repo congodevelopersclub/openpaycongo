@@ -1,43 +1,129 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
+import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
 import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
 import 'package:opencongopay/features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
+import 'package:opencongopay/widgets/opencongopayapp.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const MethodChannel smsChannel = MethodChannel('openpaycongo/sms_gateway');
+  const MethodChannel localAuthChannel = MethodChannel(
+    'plugins.flutter.io/local_auth',
+  );
+
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(smsChannel, (MethodCall call) async {
+          return switch (call.method) {
+            'permissionState' => 'granted',
+            'accessGeneration' => 1,
+            'captureHealth' => <String, Object?>{
+              'fault': null,
+              'occurred_at_ms': null,
+              'decision_count': 0,
+              'decision_encrypted_bytes': 0,
+              'missed': null,
+              'missed_at_ms': null,
+              'recovery_required': false,
+            },
+            'drainInbox' => <Object?>[],
+            'listTrustedSenders' => <Object?>[],
+            'exportDecisions' => <String, Object?>{
+              'records': <Object?>[],
+              'next_cursor': null,
+              'truncated': false,
+            },
+            _ => null,
+          };
+        });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(localAuthChannel, (MethodCall call) async {
+          if (call.method == 'authenticate') return true;
+          return null;
+        });
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(smsChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(localAuthChannel, null);
+  });
+
   Widget app({
     SmsGatewayPort? gateway,
     GemmaCapabilityEvidence capability = const GemmaRuntimePending(),
     PaymentLifecycleBloc? paymentLifecycle,
+    PairingSessionBloc? pairingSession,
   }) => MaterialApp(
     home: PaymentInboxScreen(
       gateway: gateway ?? _FakeGateway(),
       gemmaCapability: capability,
       paymentLifecycle: paymentLifecycle,
+      pairingSession: pairingSession,
     ),
   );
 
-  testWidgets('composes the payment lifecycle status into the production inbox', (
+  testWidgets('composes injected pairing BLoC into the production inbox', (
+    tester,
+  ) async {
+    final PairingSessionBloc pairing = PairingSessionBloc(
+      store: _PairingStore(),
+      gateway: _PairingGateway(),
+      telemetry: _PairingTelemetry(),
+    );
+    addTearDown(pairing.close);
+    await tester.pumpWidget(app(pairingSession: pairing));
+    pairing.add(const PairingSessionStarted());
+    await tester.pumpAndSettle();
+    expect(find.text('Pairing awaits confirmation'), findsOneWidget);
+  });
+
+  testWidgets('app composition passes injected pairing BLoC to its inbox', (
     WidgetTester tester,
   ) async {
-    final PaymentLifecycleBloc lifecycle = PaymentLifecycleBloc(
-      lifecycle: _OfflinePaymentLifecycle(),
-      now: () => DateTime.utc(2026, 8, 30, 10),
+    final PairingSessionBloc pairing = PairingSessionBloc(
+      store: _PairingStore(),
+      gateway: _PairingGateway(),
+      telemetry: _PairingTelemetry(),
     );
-    addTearDown(lifecycle.close);
+    addTearDown(pairing.close);
 
-    await tester.pumpWidget(app(paymentLifecycle: lifecycle));
-    lifecycle.add(const PaymentLifecycleSyncRequested(OutboxScope(
-      tenantId: 'tenant-001',
-      deviceId: 'device-001',
-    )));
+    await tester.pumpWidget(OpenCongoPayApp(pairingSession: pairing));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    pairing.add(const PairingSessionStarted());
     await tester.pumpAndSettle();
 
-    expect(find.text('Payment sync is offline'), findsOneWidget);
-    expect(find.text('Retry sync'), findsOneWidget);
+    expect(find.text('Pairing awaits confirmation'), findsOneWidget);
   });
+
+  testWidgets(
+    'composes the payment lifecycle status into the production inbox',
+    (WidgetTester tester) async {
+      final PaymentLifecycleBloc lifecycle = PaymentLifecycleBloc(
+        lifecycle: _OfflinePaymentLifecycle(),
+        now: () => DateTime.utc(2026, 8, 30, 10),
+      );
+      addTearDown(lifecycle.close);
+
+      await tester.pumpWidget(app(paymentLifecycle: lifecycle));
+      lifecycle.add(
+        const PaymentLifecycleSyncRequested(
+          OutboxScope(tenantId: 'tenant-001', deviceId: 'device-001'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Payment sync is offline'), findsOneWidget);
+      expect(find.text('Retry sync'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'native trusted record leaves inbox only after durable decision',
@@ -54,17 +140,17 @@ void main() {
           ),
         ],
       );
-    await tester.pumpWidget(app(gateway: gateway));
-    await tester.pumpAndSettle();
-    expect(find.text('Critical capture fault'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('Reviewed — remove raw SMS'),
-      300,
-    );
-    await tester.drag(find.byType(ListView), const Offset(0, -160));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Trusted sender: ORANGE'), findsOneWidget);
-    await tester.tap(find.text('Reviewed — remove raw SMS'));
+      await tester.pumpWidget(app(gateway: gateway));
+      await tester.pumpAndSettle();
+      expect(find.text('Critical capture fault'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Reviewed — remove raw SMS'),
+        300,
+      );
+      await tester.drag(find.byType(ListView), const Offset(0, -160));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Trusted sender: ORANGE'), findsOneWidget);
+      await tester.tap(find.text('Reviewed — remove raw SMS'));
       await tester.pumpAndSettle();
       expect(gateway.decisions, <NativeCaptureDecision>[
         NativeCaptureDecision.reviewed,
@@ -169,7 +255,10 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
     expect(find.text('Add manual evidence'), findsNothing);
-    expect(find.textContaining('Automatic capture unavailable'), findsOneWidget);
+    expect(
+      find.textContaining('Automatic capture unavailable'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('transient storage fault offers guarded recovery probe', (
@@ -202,44 +291,51 @@ void main() {
     expect(find.textContaining('probe outcome is unknown'), findsOneWidget);
   });
 
-  testWidgets('failed initial rule load is unknown, never authoritative empty', (
-    WidgetTester tester,
-  ) async {
-    final _FakeGateway gateway = _FakeGateway(failListAlways: true);
-    await tester.pumpWidget(app(gateway: gateway));
-    await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, -360));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Trusted sender state is unknown'), findsOneWidget);
-    expect(find.textContaining('Automatic capture unavailable'), findsNothing);
-  });
+  testWidgets(
+    'failed initial rule load is unknown, never authoritative empty',
+    (WidgetTester tester) async {
+      final _FakeGateway gateway = _FakeGateway(failListAlways: true);
+      await tester.pumpWidget(app(gateway: gateway));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, -360));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Trusted sender state is unknown'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Automatic capture unavailable'),
+        findsNothing,
+      );
+    },
+  );
 
-  testWidgets('probe never claims reload when authoritative reload also fails', (
-    WidgetTester tester,
-  ) async {
-    final _FakeGateway gateway = _FakeGateway(
-      health: const NativeCaptureHealth(fault: CaptureFault.storage),
-      failProbe: true,
-      failListAfterMutationFailure: true,
-    );
-    await tester.pumpWidget(app(gateway: gateway));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Retry storage check'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Authoritative reload also failed'), findsOneWidget);
-    expect(find.textContaining('capture health was reloaded'), findsNothing);
-  });
+  testWidgets(
+    'probe never claims reload when authoritative reload also fails',
+    (WidgetTester tester) async {
+      final _FakeGateway gateway = _FakeGateway(
+        health: const NativeCaptureHealth(fault: CaptureFault.storage),
+        failProbe: true,
+        failListAfterMutationFailure: true,
+      );
+      await tester.pumpWidget(app(gateway: gateway));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Retry storage check'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Authoritative reload also failed'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('capture health was reloaded'), findsNothing);
+    },
+  );
 
   testWidgets('exact trusted rule is stored through secure gateway callback', (
     WidgetTester tester,
   ) async {
     final _FakeGateway gateway = _FakeGateway();
     await tester.pumpWidget(
-      MaterialApp(
-        home: PaymentInboxScreen(
-          gateway: gateway,
-        ),
-      ),
+      MaterialApp(home: PaymentInboxScreen(gateway: gateway)),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byType(FloatingActionButton));
@@ -279,7 +375,10 @@ void main() {
     );
     await tester.tap(find.text('Store trusted rule securely'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Authoritative reload also failed'), findsOneWidget);
+    expect(
+      find.textContaining('Authoritative reload also failed'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('persisted trusted rules load and can be revoked or cleared', (
@@ -298,13 +397,19 @@ void main() {
     await tester.tap(find.text('Revoke').first);
     await tester.pumpAndSettle();
     expect(gateway.trustedSenders, <String>['ORANGE']);
-    await tester.scrollUntilVisible(find.text('Clear all trusted senders'), 300);
+    await tester.scrollUntilVisible(
+      find.text('Clear all trusted senders'),
+      300,
+    );
     await tester.drag(find.byType(ListView), const Offset(0, -120));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Clear all trusted senders'));
     await tester.pumpAndSettle();
     expect(gateway.trustedSenders, isEmpty);
-    expect(find.textContaining('Automatic capture unavailable'), findsOneWidget);
+    expect(
+      find.textContaining('Automatic capture unavailable'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('rule revoke never claims reload when reconciliation fails', (
@@ -322,7 +427,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Revoke'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Authoritative reload also failed'), findsOneWidget);
+    expect(
+      find.textContaining('Authoritative reload also failed'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('rule clear never claims reload when reconciliation fails', (
@@ -335,12 +443,18 @@ void main() {
     );
     await tester.pumpWidget(app(gateway: gateway));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Clear all trusted senders'), 300);
+    await tester.scrollUntilVisible(
+      find.text('Clear all trusted senders'),
+      300,
+    );
     await tester.drag(find.byType(ListView), const Offset(0, -160));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Clear all trusted senders'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Authoritative reload also failed'), findsOneWidget);
+    expect(
+      find.textContaining('Authoritative reload also failed'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('journal control failure is an explicit recovery state', (
@@ -417,6 +531,7 @@ final class _FakeGateway implements SmsGatewayPort {
     if (committed && failHealthAfterCommit) throw StateError('health');
     return health;
   }
+
   @override
   Future<bool> probeStorage() async {
     probeCount += 1;
@@ -429,6 +544,7 @@ final class _FakeGateway implements SmsGatewayPort {
     }
     return true;
   }
+
   @override
   Future<NativeDecisionPage> exportDecisions({
     int limit = 100,
@@ -466,11 +582,12 @@ final class _FakeGateway implements SmsGatewayPort {
     trustedSenders = (<String>{...trustedSenders, sender}.toList()..sort());
     return List<String>.of(trustedSenders);
   }
+
   @override
   Future<List<String>> listTrustedSenders() async =>
       failListAlways || (failListAfterMutationFailure && mutationFailed)
-          ? throw StateError('list timeout')
-          : List<String>.of(trustedSenders);
+      ? throw StateError('list timeout')
+      : List<String>.of(trustedSenders);
   @override
   Future<List<String>> clearTrustedSenders() async {
     if (failClear) {
@@ -480,15 +597,19 @@ final class _FakeGateway implements SmsGatewayPort {
     trustedSenders = <String>[];
     return const <String>[];
   }
+
   @override
   Future<List<String>> revokeTrustedSender(String sender) async {
     if (failRevoke) {
       mutationFailed = true;
       throw StateError('revoke timeout');
     }
-    trustedSenders = trustedSenders.where((String value) => value != sender).toList();
+    trustedSenders = trustedSenders
+        .where((String value) => value != sender)
+        .toList();
     return List<String>.of(trustedSenders);
   }
+
   @override
   Future<SmsAccessState> permissionState() async => SmsAccessState.granted;
   @override
@@ -504,8 +625,32 @@ final class _FakeGateway implements SmsGatewayPort {
 
 final class _OfflinePaymentLifecycle implements PaymentLifecycle {
   @override
-  Future<PaymentLifecycleResult> sync(
-    OutboxScope scope,
-    DateTime now,
-  ) async => const PaymentLifecycleResult.offline();
+  Future<PaymentLifecycleResult> sync(OutboxScope scope, DateTime now) async =>
+      const PaymentLifecycleResult.offline();
+}
+
+final class _PairingStore implements PairingSessionStore {
+  @override
+  Future<void> clear() async {}
+  @override
+  Future<PairingSession?> load() async => null;
+  @override
+  Future<void> save(PairingSession session) async {}
+}
+
+final class _PairingGateway implements PairingSessionGateway {
+  final PairingSession session = PairingSession(
+    sessionId: 'opaque',
+    phase: PairingPhase.pending,
+    updatedAt: DateTime.utc(2026),
+  );
+  @override
+  Future<PairingSession> begin() async => session;
+  @override
+  Future<PairingSession> refresh(String sessionId) async => session;
+}
+
+final class _PairingTelemetry implements PairingTelemetry {
+  @override
+  void record(PairingTelemetrySignal signal) {}
 }
