@@ -331,27 +331,26 @@ final class RecordProviderDeposit
         if ($lookupIds->count() > 1) {
             throw new LogicException('Deposit lookup aliases are inconsistent.');
         }
+
         $lookupId = $lookupIds->first() ?? (string) Str::uuid();
-        $createdWithoutExistingAlias = $lookupIds->isEmpty();
-
-        foreach ($digests as $index => $digest) {
-            $alias = PrivateLookupAlias::query()->createOrFirst(
-                ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $digest],
-                ['lookup_id' => $lookupId, 'created_at' => CarbonImmutable::now()],
-            );
-
-            if ($alias->lookup_id !== $lookupId) {
-                if ($index === array_key_first($digests) && $createdWithoutExistingAlias) {
-                    $lookupId = $alias->lookup_id;
-
-                    continue;
-                }
-
-                throw new LogicException('Deposit lookup aliases are inconsistent.');
-            }
+        foreach ($digests as $digest) {
+            DB::table('private_lookup_aliases')->insertOrIgnore([
+                'id' => (string) Str::uuid(),
+                'organization_id' => $organizationId,
+                'purpose' => $purpose,
+                'digest' => $digest,
+                'lookup_id' => $lookupId,
+                'created_at' => CarbonImmutable::now(),
+            ]);
         }
 
-        return $lookupId;
+        $resolvedIds = PrivateLookupAlias::query()->where('organization_id', $organizationId)->where('purpose', $purpose)
+            ->whereIn('digest', array_values($digests))->pluck('lookup_id')->unique()->values();
+        if ($resolvedIds->count() !== 1) {
+            throw new LogicException('Deposit lookup aliases are inconsistent.');
+        }
+
+        return $resolvedIds->first();
     }
 
     private function isRetryableTransactionFailure(QueryException $exception): bool
