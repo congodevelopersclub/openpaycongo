@@ -111,15 +111,21 @@ supported artifact:
    release owners, and freezes promotion of affected candidate artifacts.
 2. The triage owner confirms scope with the minimum safe reproduction and
    records containment. Do not paste sensitive material into the record.
-3. The release owner prepares the smallest remediation, with a regression test
+3. If a repository credential, signing key, protected release identity, or
+   other release authority may be compromised, contain that authority before
+   preparing a patch: revoke or rotate the credential, recover protected keys,
+   restore a trusted release identity, and rebuild from a restored trust root.
+   Do not publish through a possibly compromised path.
+4. The release owner prepares the smallest remediation, with a regression test
    where safe, and reviews affected trust boundaries and dependencies.
-4. Build, test, scan, and identify the patched artifacts using the normal
+5. Build, test, scan, and identify the patched artifacts using the normal
    Docker-backed release evidence; unavailable scanners or evidence fail the
    release decision visibly.
-5. The release owner authorizes the patched release or rollback under the
-   repository's approved release authority, then the coordinator records user
-   communication and the advisory decision.
-6. After containment, conduct a blameless review and update this policy, the
+6. The release owner authorizes the patched release or rollback only after the
+   release authority is restored and verified under the repository's approved
+   release authority, then the coordinator records user communication and the
+   advisory decision.
+7. After containment, conduct a blameless review and update this policy, the
    threat model, tests, or release controls when evidence shows a gap.
 
 This procedure does not bypass branch protection, create real advisories,
