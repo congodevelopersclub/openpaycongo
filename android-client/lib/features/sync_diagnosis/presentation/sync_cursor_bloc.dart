@@ -136,6 +136,11 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
     return attempt;
   }
 
+  Future<SyncCursor?> _load() async {
+    await _persistence;
+    return store.load();
+  }
+
   Future<void> _retry(
     SyncCursorRetryRequested event,
     Emitter<SyncCursorState> emit,
@@ -151,7 +156,7 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
     final int generation = ++_generation;
     emit(const SyncCursorLoading());
     try {
-      final SyncCursor? current = await store.load();
+      final SyncCursor? current = await _load();
       if (generation != _generation) return;
       final SyncCursorReconciliation reconciliation = await contract.reconcile(
         current,
@@ -201,7 +206,7 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
   ) async {
     final int generation = ++_generation;
     try {
-      final SyncCursor? current = await store.load();
+      final SyncCursor? current = await _load();
       if (generation != _generation) return;
       final SyncCursorDeliveryDecision decision = await contract
           .classifyDelivery(current, event.cursor);

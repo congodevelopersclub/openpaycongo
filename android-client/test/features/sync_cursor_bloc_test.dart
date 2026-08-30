@@ -22,9 +22,10 @@ void main() {
       await synced;
       expect(store.value?.value, 'cursor-1');
       await bloc.close();
+      final _Contract restartedContract = _Contract(cursor);
       final SyncCursorBloc restarted = SyncCursorBloc(
         store: store,
-        contract: _Contract(cursor),
+        contract: restartedContract,
         telemetry: _Telemetry(),
       );
       final Future<SyncCursorState> restored = restarted.stream.firstWhere(
@@ -32,6 +33,7 @@ void main() {
       );
       restarted.add(const SyncCursorRecovered());
       await restored;
+      expect(restartedContract.inputs.single?.value, 'cursor-1');
       await restarted.close();
     },
   );
@@ -232,9 +234,11 @@ final class _Contract implements SyncCursorContract {
 
   final SyncCursor? value;
   final SyncCursorHealth health;
+  final List<SyncCursor?> inputs = <SyncCursor?>[];
 
   @override
   Future<SyncCursorReconciliation> reconcile(SyncCursor? cursor) async {
+    inputs.add(cursor);
     return SyncCursorReconciliation(cursor: value, health: health);
   }
 
