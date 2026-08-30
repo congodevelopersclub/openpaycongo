@@ -12,6 +12,8 @@ import 'package:flutter/services.dart';
 import '../../sms_gateway/domain/sms_gateway.dart';
 import '../../payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import '../../payment_outbox/presentation/payment_lifecycle_status_card.dart';
+import '../../payment_outbox/presentation/payment_request_lifecycle_bloc.dart';
+import '../../payment_outbox/presentation/payment_request_lifecycle_card.dart';
 import '../domain/payment_ingestion.dart';
 
 final class PaymentInboxScreen extends StatefulWidget {
@@ -22,6 +24,7 @@ final class PaymentInboxScreen extends StatefulWidget {
     this.pairingEnrollment,
     this.pairingSession,
     this.paymentLifecycle,
+    this.paymentRequestLifecycle,
     this.syncCursor,
     required this.gateway,
   });
@@ -30,6 +33,7 @@ final class PaymentInboxScreen extends StatefulWidget {
   final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
   final PaymentLifecycleBloc? paymentLifecycle;
+  final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final SyncCursorBloc? syncCursor;
   final SmsGatewayPort gateway;
   @override
@@ -257,6 +261,14 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
               BlocProvider<PaymentLifecycleBloc>.value(
                 value: lifecycle,
                 child: const PaymentLifecycleStatusCard(),
+              ),
+            ],
+            if (widget.paymentRequestLifecycle
+                case final PaymentRequestLifecycleBloc lifecycle) ...<Widget>[
+              const SizedBox(height: 12),
+              BlocProvider<PaymentRequestLifecycleBloc>.value(
+                value: lifecycle,
+                child: const PaymentRequestLifecycleCard(),
               ),
             ],
             if (_nativeHealth?.fault != null) ...<Widget>[
