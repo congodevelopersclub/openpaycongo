@@ -22,6 +22,9 @@ The Android slice requests `RECEIVE_SMS` in context, blocks product access until
 - A local Flutter UI prototype with parser, configuration, and biometric-gate screens.
 - A bounded trusted-SMS receiver, encrypted local inbox, deterministic manual parser and review-only model boundary.
 - Local SQLite stores used by the prototype.
+- A contract-only sync cursor BLoC seam. `SyncCursorStore` persists an opaque
+  checkpoint and `SyncCursorContract` reconciles it; neither accepts records,
+  sender identities, SMS bodies, credentials, or a fabricated server protocol.
 
 ## Known limitations
 
@@ -29,5 +32,8 @@ The Android slice requests `RECEIVE_SMS` in context, blocks product access until
 - No verified server authentication/HMAC, production API-credential storage, encrypted canonical ledger database, or proven recovery flow.
 - No production Android signing, Play distribution, offline delivery guarantees, or real-app screenshot test.
 - The home view is incomplete and the documented backend integration is not wired into the prototype.
+- The sync cursor seam has no server transport implementation yet. A future
+  authenticated Laravel contract must supply it before it can represent server
+  delivery or acknowledgement.
 
 Read the repository [mobile PRD](../docs/prd-mobile.md), [architecture](../docs/architecture.md), and [reliability plan](../docs/reliability.md) before extending the app.

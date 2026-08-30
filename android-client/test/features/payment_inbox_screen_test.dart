@@ -7,6 +7,7 @@ import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.
 import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
 import 'package:opencongopay/features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
+import 'package:opencongopay/features/sync_diagnosis/presentation/sync_cursor_bloc.dart';
 import 'package:opencongopay/widgets/opencongopayapp.dart';
 
 void main() {
@@ -60,12 +61,14 @@ void main() {
     GemmaCapabilityEvidence capability = const GemmaRuntimePending(),
     PaymentLifecycleBloc? paymentLifecycle,
     PairingSessionBloc? pairingSession,
+    SyncCursorBloc? syncCursor,
   }) => MaterialApp(
     home: PaymentInboxScreen(
       gateway: gateway ?? _FakeGateway(),
       gemmaCapability: capability,
       paymentLifecycle: paymentLifecycle,
       pairingSession: pairingSession,
+      syncCursor: syncCursor,
     ),
   );
 
@@ -101,6 +104,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Pairing awaits confirmation'), findsOneWidget);
+  });
+
+  testWidgets('app composition passes injected sync BLoC to its inbox', (
+    WidgetTester tester,
+  ) async {
+    final SyncCursorBloc sync = SyncCursorBloc(
+      store: _SyncStore(),
+      contract: _SyncContract(),
+      telemetry: _SyncTelemetry(),
+    );
+    addTearDown(sync.close);
+
+    await tester.pumpWidget(OpenCongoPayApp(syncCursor: sync));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    sync.add(const SyncCursorStarted());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sync cursor current'), findsOneWidget);
   });
 
   testWidgets(
@@ -653,4 +675,36 @@ final class _PairingGateway implements PairingSessionGateway {
 final class _PairingTelemetry implements PairingTelemetry {
   @override
   void record(PairingTelemetrySignal signal) {}
+}
+
+final class _SyncStore implements SyncCursorStore {
+  @override
+  Future<SyncCursor?> load() async => null;
+
+  @override
+  Future<void> save(SyncCursor cursor) async {}
+
+  @override
+  Future<void> clear() async {}
+}
+
+final class _SyncContract implements SyncCursorContract {
+  @override
+  Future<SyncCursorReconciliation> reconcile(SyncCursor? durableCursor) async {
+    return const SyncCursorReconciliation(
+      cursor: SyncCursor('opaque-test-cursor'),
+      health: SyncCursorHealth.current,
+    );
+  }
+
+  @override
+  Future<SyncCursorDeliveryDecision> classifyDelivery(
+    SyncCursor? durableCursor,
+    SyncCursor delivery,
+  ) async => SyncCursorDeliveryDecision.accept;
+}
+
+final class _SyncTelemetry implements SyncCursorTelemetry {
+  @override
+  void record(SyncCursorTelemetrySignal signal) {}
 }
