@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ClaimInitialSetupRequest;
-use App\Setup\InitialSetupAvailability;
 use App\Setup\ClaimInitialSetup;
+use App\Setup\InitialSetupAvailability;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;

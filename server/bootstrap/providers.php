@@ -1,8 +1,8 @@
 <?php
 
 use App\Providers\AppServiceProvider;
-use App\Providers\FortifyServiceProvider;
 use App\Providers\Filament\OperationsPanelProvider;
+use App\Providers\FortifyServiceProvider;
 
 return [
     AppServiceProvider::class,

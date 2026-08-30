@@ -11,8 +11,8 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
-use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
 use Laravel\Fortify\Events\RecoveryCodesGenerated;
+use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
 use Tests\TestCase;
 
 final class InitialAdminSetupTest extends TestCase

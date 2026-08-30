@@ -20,7 +20,7 @@ return new class extends Migration
     public function down(): void
     {
         if (DB::table('security_audits')->exists()) {
-            throw new \LogicException('Security audit evidence must be retained.');
+            throw new LogicException('Security audit evidence must be retained.');
         }
 
         Schema::dropIfExists('security_audits');

@@ -12,7 +12,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 final class ClaimInitialSetup
 {
     /**
-     * @param array{username: string, name: string, email: string, password: string} $attributes
+     * @param  array{username: string, name: string, email: string, password: string}  $attributes
      */
     public function claim(array $attributes): User
     {
@@ -20,7 +20,7 @@ final class ClaimInitialSetup
             $state = InitialSetupState::query()->lockForUpdate()->findOrFail(1);
 
             if ($state->completed_at !== null) {
-                throw new NotFoundHttpException();
+                throw new NotFoundHttpException;
             }
 
             $organization = Organization::query()->create();

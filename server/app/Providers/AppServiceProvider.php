@@ -8,8 +8,8 @@ use App\Operations\LedgerProjectionReadiness;
 use App\Operations\MigrationReadiness;
 use App\Operations\ProjectionReadiness;
 use App\Policies\DepositPolicy;
-use App\Security\FinancialOperatorMfaSession;
 use App\Security\EstablishedFinancialOperatorMfaSession;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
