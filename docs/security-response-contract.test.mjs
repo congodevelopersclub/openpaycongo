@@ -32,12 +32,15 @@ const sensitiveTabletopFields = [
   /\b192\.168\.\d{1,3}\.\d{1,3}\b/,
   /\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/,
   /\b169\.254\.\d{1,3}\.\d{1,3}\b/,
+  /\[(?:::1|fe[89ab][0-9a-f:]*|f[cd][0-9a-f:]*)\]/i,
 ];
 
 function assertSyntheticTabletop(fixture) {
   for (const field of requiredTabletopFields) assert.match(fixture, field);
+
+  const normalizedSafetyText = fixture.replaceAll('**', '').replaceAll('__', '');
   for (const field of sensitiveTabletopFields) {
-    assert.doesNotMatch(fixture, field, `synthetic tabletop contains a prohibited field: ${field}`);
+    assert.doesNotMatch(normalizedSafetyText, field, `synthetic tabletop contains a prohibited field: ${field}`);
   }
 
   const stepOneStart = fixture.indexOf('1. A triage owner');
@@ -99,6 +102,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
 
   const mutations = [
     '- Raw SMS: synthetic message text',
+    '- **Raw SMS:** synthetic bold-label message text',
     '1. Raw SMS: synthetic numbered-list message text',
     '1) Raw SMS: synthetic parenthesized-list message text',
     '- Phone number: +243000000000',
@@ -115,6 +119,9 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     'The internal host is 10.0.0.1.',
     'Connect to http://172.16.0.1/admin for the synthetic topology.',
     'Connect to http://169.254.169.254/latest/meta-data for the synthetic topology.',
+    'Connect to http://[::1]/admin for the synthetic topology.',
+    'Connect to http://[fe80::1]/admin for the synthetic topology.',
+    'Connect to http://[fd00::1]/admin for the synthetic topology.',
   ];
 
   for (const mutation of mutations) {
