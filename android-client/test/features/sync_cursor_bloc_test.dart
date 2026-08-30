@@ -56,6 +56,26 @@ void main() {
     await bloc.close();
   });
 
+  test('stale delivery preserves the durable synced cursor', () async {
+    final SyncCursor current = SyncCursor('cursor-current');
+    final _Store store = _Store()..value = current;
+    final _Telemetry telemetry = _Telemetry();
+    final SyncCursorBloc bloc = SyncCursorBloc(
+      store: store,
+      contract: _Contract(
+        null,
+        deliveryDecision: SyncCursorDeliveryDecision.stale,
+      ),
+      telemetry: telemetry,
+    );
+    bloc.add(SyncCursorDeliveryReceived(SyncCursor('cursor-stale')));
+    await bloc.stream.firstWhere((state) => state is SyncCursorSynced);
+    expect((bloc.state as SyncCursorSynced).cursor.value, 'cursor-current');
+    expect(store.saves, 0);
+    expect(telemetry.signals, contains(SyncCursorTelemetrySignal.staleCursor));
+    await bloc.close();
+  });
+
   test('typed contract failure is offline and retry recovers', () async {
     final _FlakyContract contract = _FlakyContract(SyncCursor('cursor-2'));
     final _Telemetry telemetry = _Telemetry();
@@ -253,11 +273,16 @@ final class _Store implements SyncCursorStore {
 }
 
 final class _Contract implements SyncCursorContract {
-  _Contract(this.value, {this.health = SyncCursorHealth.current});
+  _Contract(
+    this.value, {
+    this.health = SyncCursorHealth.current,
+    this.deliveryDecision = SyncCursorDeliveryDecision.accept,
+  });
 
   final SyncCursor? value;
   final SyncCursorHealth health;
   final List<SyncCursor?> inputs = <SyncCursor?>[];
+  final SyncCursorDeliveryDecision deliveryDecision;
 
   @override
   Future<SyncCursorReconciliation> reconcile(SyncCursor? cursor) async {
@@ -269,9 +294,11 @@ final class _Contract implements SyncCursorContract {
   Future<SyncCursorDeliveryDecision> classifyDelivery(
     SyncCursor? durableCursor,
     SyncCursor delivery,
-  ) async => durableCursor?.value == delivery.value
+  ) async =>
+      deliveryDecision == SyncCursorDeliveryDecision.accept &&
+          durableCursor?.value == delivery.value
       ? SyncCursorDeliveryDecision.duplicate
-      : SyncCursorDeliveryDecision.accept;
+      : deliveryDecision;
 }
 
 final class _FlakyContract implements SyncCursorContract {

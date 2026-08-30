@@ -219,7 +219,7 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
       if (decision == SyncCursorDeliveryDecision.stale) {
         telemetry.record(SyncCursorTelemetrySignal.staleCursor);
         emit(
-          current == null ? const SyncCursorEmpty() : SyncCursorStale(current),
+          current == null ? const SyncCursorEmpty() : SyncCursorSynced(current),
         );
         return;
       }
