@@ -146,6 +146,8 @@ test('security response policy is private, accountable, and release-blocking', a
   }
 
   assert.match(security, /private vulnerability reporting is currently disabled/i);
+  assert.match(security, /GitHub public issues are permitted only for a sanitized report/i);
+  assert.match(security, /Use the bug-report template/i);
   assert.match(security, /No production-supported release currently exists/i);
   assert.match(security, /Production release \| Not available/i);
   assert.match(security, /Main branch and pull-request artifacts \| Not supported/i);
@@ -157,6 +159,7 @@ test('security response policy is private, accountable, and release-blocking', a
   assert.match(security, /repository credential, signing key, protected release identity/i);
   assert.match(security, /revoke or rotate the credential/i);
   assert.match(security, /rebuild from a restored trust root/i);
+  assert.match(security, /verifying ordinary release authority—or, if step 3 found compromise/i);
   assert.match(security, /two business days/i);
   assert.match(security, /seven calendar\s+days/i);
   assert.match(security, /regression test/i);

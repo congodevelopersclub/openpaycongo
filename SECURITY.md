@@ -1,9 +1,9 @@
 # Security policy
 
-Do not publish vulnerabilities, raw SMS, credentials, tokens, private keys,
-usable enrollment artifacts, personal payment data, exploit payloads, or
-operational topology details in public issues, pull requests, logs,
-screenshots, CI output, or release notes.
+Do not publish sensitive vulnerability details, raw SMS, credentials, tokens,
+private keys, usable enrollment artifacts, personal payment data, exploit
+payloads, or operational topology details in public issues, pull requests,
+logs, screenshots, CI output, or release notes.
 
 ## Private reporting
 
@@ -19,9 +19,11 @@ receives a report must move it into the GitHub private-report workflow as soon
 as that workflow is available. This policy does not create a mailbox, request
 real findings in fixtures, or authorize a public disclosure.
 
-Safe public reports may describe an affected released version, high-level
-impact, and a synthetic reproduction without exploit payloads or sensitive
-details.
+GitHub public issues are permitted only for a sanitized report: affected
+released version, high-level impact, and a synthetic reproduction without
+exploit payloads or sensitive details. Use the bug-report template and do not
+include anything prohibited above. A maintainer must move a report that needs
+private details to the verified private maintainer channel instead.
 
 ## Supported versions
 
@@ -121,10 +123,11 @@ supported artifact:
 5. Build, test, scan, and identify the patched artifacts using the normal
    Docker-backed release evidence; unavailable scanners or evidence fail the
    release decision visibly.
-6. The release owner authorizes the patched release or rollback only after the
-   release authority is restored and verified under the repository's approved
-   release authority, then the coordinator records user communication and the
-   advisory decision.
+6. The release owner authorizes the patched release or rollback only after
+   verifying ordinary release authority—or, if step 3 found compromise, after
+   the restored authority is verified under the repository's approved release
+   authority. The coordinator then records user communication and the advisory
+   decision.
 7. After containment, conduct a blameless review and update this policy, the
    threat model, tests, or release controls when evidence shows a gap.
 
