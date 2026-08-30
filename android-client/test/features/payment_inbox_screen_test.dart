@@ -726,6 +726,9 @@ final class _EnrollmentTransport implements PairingEnrollmentTransport {
   @override
   Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
       this.enrollment;
+
+  @override
+  Future<void> discardTerminal() async {}
 }
 
 final class _EnrollmentTelemetry implements PairingEnrollmentTelemetryPort {

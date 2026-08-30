@@ -109,10 +109,12 @@ void main() {
   test(
     'typed protocol failure emits error and recovery without state is empty',
     () async {
+      final _ProtocolFailureTransport transport = _ProtocolFailureTransport();
+      final _Store store = _Store()..value = _pending();
       final _Telemetry telemetry = _Telemetry();
       final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
-        store: _Store(),
-        transport: const _ProtocolFailureTransport(),
+        store: store,
+        transport: transport,
         telemetry: telemetry,
       );
       final Future<PairingEnrollmentState> error = bloc.stream.firstWhere(
@@ -124,10 +126,67 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(bloc.state, isA<PairingEnrollmentIdle>());
+      expect(store.value, isNull);
+      expect(transport.discardCalls, 1);
       expect(telemetry.signals, contains(PairingEnrollmentTelemetry.error));
       await bloc.close();
     },
   );
+
+  test(
+    'terminal cleanup failure is retryable offline, not terminal error',
+    () async {
+      final _ProtocolFailureTransport transport = _ProtocolFailureTransport();
+      final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+        store: const _FailingClearStore(),
+        transport: transport,
+        telemetry: _Telemetry(),
+      );
+      final Future<PairingEnrollmentState> offline = bloc.stream.firstWhere(
+        (PairingEnrollmentState state) => state is PairingEnrollmentOffline,
+      );
+
+      bloc.add(const PairingEnrollmentStarted());
+
+      await offline;
+      expect(bloc.state, isA<PairingEnrollmentOffline>());
+      expect(transport.discardCalls, 0);
+      await bloc.close();
+    },
+  );
+
+  for (final PairingEnrollmentEvent event in <PairingEnrollmentEvent>[
+    const PairingEnrollmentRetryRequested(),
+    const PairingEnrollmentRecovered(),
+  ]) {
+    test(
+      'cancel during deferred $event cannot revive loaded enrollment',
+      () async {
+        final _DeferredLoadStore store = _DeferredLoadStore();
+        final _CountingTransport transport = _CountingTransport();
+        final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+          store: store,
+          transport: transport,
+          telemetry: _Telemetry(),
+        );
+
+        bloc.add(event);
+        await store.loadEntered.future;
+        final Future<PairingEnrollmentState> idle = bloc.stream.firstWhere(
+          (PairingEnrollmentState state) => state is PairingEnrollmentIdle,
+        );
+        bloc.add(const PairingEnrollmentCancelled());
+        await idle;
+        store.releaseLoad.complete(_pending());
+        await Future<void>.delayed(Duration.zero);
+
+        expect(bloc.state, isA<PairingEnrollmentIdle>());
+        expect(store.value, isNull);
+        expect(transport.calls, 0);
+        await bloc.close();
+      },
+    );
+  }
 
   for (final PairingEnrollmentEvent event in <PairingEnrollmentEvent>[
     const PairingEnrollmentRetryRequested(),
@@ -190,6 +249,9 @@ final class _Transport implements PairingEnrollmentTransport {
   @override
   Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
       this.enrollment;
+
+  @override
+  Future<void> discardTerminal() async {}
 }
 
 final class _Telemetry implements PairingEnrollmentTelemetryPort {
@@ -215,6 +277,9 @@ final class _DeferredTransport implements PairingEnrollmentTransport {
   @override
   Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
       enrollment;
+
+  @override
+  Future<void> discardTerminal() async {}
 }
 
 final class _RetryTransport implements PairingEnrollmentTransport {
@@ -237,10 +302,13 @@ final class _RetryTransport implements PairingEnrollmentTransport {
   @override
   Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
       enrollment;
+
+  @override
+  Future<void> discardTerminal() async {}
 }
 
 final class _ProtocolFailureTransport implements PairingEnrollmentTransport {
-  const _ProtocolFailureTransport();
+  int discardCalls = 0;
 
   @override
   Future<PairingEnrollment> begin() async =>
@@ -253,6 +321,67 @@ final class _ProtocolFailureTransport implements PairingEnrollmentTransport {
   @override
   Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
       enrollment;
+
+  @override
+  Future<void> discardTerminal() async => discardCalls++;
+}
+
+final class _DeferredLoadStore implements PairingEnrollmentStore {
+  final Completer<void> loadEntered = Completer<void>();
+  final Completer<PairingEnrollment?> releaseLoad =
+      Completer<PairingEnrollment?>();
+  PairingEnrollment? value;
+
+  @override
+  Future<void> clear() async => value = null;
+
+  @override
+  Future<PairingEnrollment?> load() {
+    if (!loadEntered.isCompleted) loadEntered.complete();
+    return releaseLoad.future;
+  }
+
+  @override
+  Future<void> save(PairingEnrollment enrollment) async => value = enrollment;
+}
+
+final class _FailingClearStore implements PairingEnrollmentStore {
+  const _FailingClearStore();
+
+  @override
+  Future<void> clear() async =>
+      throw const PairingEnrollmentPersistenceException();
+
+  @override
+  Future<PairingEnrollment?> load() async => null;
+
+  @override
+  Future<void> save(PairingEnrollment enrollment) async {}
+}
+
+final class _CountingTransport implements PairingEnrollmentTransport {
+  int calls = 0;
+
+  @override
+  Future<PairingEnrollment> begin() async {
+    calls++;
+    return _pending();
+  }
+
+  @override
+  Future<PairingEnrollment> recover(PairingEnrollment enrollment) async {
+    calls++;
+    return enrollment;
+  }
+
+  @override
+  Future<PairingEnrollment> retry(PairingEnrollment enrollment) async {
+    calls++;
+    return enrollment;
+  }
+
+  @override
+  Future<void> discardTerminal() async {}
 }
 
 final class _UnexpectedLoadStore implements PairingEnrollmentStore {

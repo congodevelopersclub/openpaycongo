@@ -31,6 +31,7 @@ abstract interface class PairingEnrollmentTransport {
   Future<PairingEnrollment> begin();
   Future<PairingEnrollment> retry(PairingEnrollment enrollment);
   Future<PairingEnrollment> recover(PairingEnrollment enrollment);
+  Future<void> discardTerminal();
 }
 
 /// Expected durable-storage failure; unexpected programming errors propagate.
@@ -148,8 +149,14 @@ final class PairingEnrollmentBloc
     PairingEnrollmentRetryRequested event,
     Emitter<PairingEnrollmentState> emit,
   ) async {
+    if (_activeOperation != null) {
+      telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
+      return;
+    }
+    final int generation = _generation;
     final bool wasOffline = state is PairingEnrollmentOffline;
-    final PairingEnrollment? enrollment = await _load(emit);
+    final PairingEnrollment? enrollment = await _load(emit, generation);
+    if (generation != _generation) return;
     if (enrollment == null) {
       if (!wasOffline && state is PairingEnrollmentOffline) return;
       await _run(emit, transport.begin, started: true);
@@ -162,8 +169,14 @@ final class PairingEnrollmentBloc
     PairingEnrollmentRecovered event,
     Emitter<PairingEnrollmentState> emit,
   ) async {
+    if (_activeOperation != null) {
+      telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
+      return;
+    }
+    final int generation = _generation;
     final bool wasOffline = state is PairingEnrollmentOffline;
-    final PairingEnrollment? enrollment = await _load(emit);
+    final PairingEnrollment? enrollment = await _load(emit, generation);
+    if (generation != _generation) return;
     if (enrollment == null) {
       if (!wasOffline && state is PairingEnrollmentOffline) return;
       if (state is! PairingEnrollmentOffline) {
@@ -174,17 +187,20 @@ final class PairingEnrollmentBloc
     await _run(emit, () => transport.recover(enrollment), recovered: true);
   }
 
-  Future<PairingEnrollment?> _load(Emitter<PairingEnrollmentState> emit) async {
-    if (_activeOperation != null) {
-      telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
-      return null;
-    }
+  Future<PairingEnrollment?> _load(
+    Emitter<PairingEnrollmentState> emit,
+    int generation,
+  ) async {
     await _persistence;
+    if (generation != _generation) return null;
     try {
-      return await store.load();
+      final PairingEnrollment? enrollment = await store.load();
+      return generation == _generation ? enrollment : null;
     } on PairingEnrollmentPersistenceException {
-      emit(const PairingEnrollmentOffline());
-      telemetry.record(PairingEnrollmentTelemetry.offline);
+      if (generation == _generation) {
+        emit(const PairingEnrollmentOffline());
+        telemetry.record(PairingEnrollmentTelemetry.offline);
+      }
       return null;
     }
   }
@@ -217,10 +233,7 @@ final class PairingEnrollmentBloc
     } on PairingEnrollmentPersistenceException {
       _offlineIfCurrent(generation, emit);
     } on PairingEnrollmentProtocolException {
-      if (generation == _generation) {
-        emit(const PairingEnrollmentError());
-        telemetry.record(PairingEnrollmentTelemetry.error);
-      }
+      await _discardTerminalIfCurrent(generation, emit);
     } finally {
       if (_activeOperation == generation) _activeOperation = null;
     }
@@ -248,6 +261,26 @@ final class PairingEnrollmentBloc
     if (generation == _generation) {
       emit(const PairingEnrollmentOffline());
       telemetry.record(PairingEnrollmentTelemetry.offline);
+    }
+  }
+
+  Future<void> _discardTerminalIfCurrent(
+    int generation,
+    Emitter<PairingEnrollmentState> emit,
+  ) async {
+    try {
+      await _clear();
+      if (generation != _generation) return;
+      await transport.discardTerminal();
+      if (generation != _generation) return;
+      emit(const PairingEnrollmentError());
+      telemetry.record(PairingEnrollmentTelemetry.error);
+    } on TimeoutException {
+      _offlineIfCurrent(generation, emit);
+    } on PairingEnrollmentUnavailableException {
+      _offlineIfCurrent(generation, emit);
+    } on PairingEnrollmentPersistenceException {
+      _offlineIfCurrent(generation, emit);
     }
   }
 

@@ -29,6 +29,11 @@ void main() {
     pending.complete(_enrollment(PairingEnrollmentPhase.pendingConfirmation));
     await tester.pumpAndSettle();
     expect(find.text('Pairing enrollment awaits confirmation'), findsOneWidget);
+    expect(find.text('Cancel pairing enrollment'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel pairing enrollment'));
+    await tester.pumpAndSettle();
+    expect(find.text('No pairing enrollment'), findsOneWidget);
   });
 
   testWidgets('renders offline and dispatches retry intent', (
@@ -133,6 +138,9 @@ final class _Transport implements PairingEnrollmentTransport {
 
   @override
   Future<PairingEnrollment> retry(PairingEnrollment enrollment) async => result;
+
+  @override
+  Future<void> discardTerminal() async {}
 }
 
 final class _Telemetry implements PairingEnrollmentTelemetryPort {

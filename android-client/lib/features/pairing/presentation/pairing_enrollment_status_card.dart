@@ -19,9 +19,7 @@ final class PairingEnrollmentStatusCard extends StatelessWidget {
               PairingEnrollmentLoading() => const Text(
                 'Pairing enrollment in progress',
               ),
-              PairingEnrollmentPending() => const Text(
-                'Pairing enrollment awaits confirmation',
-              ),
+              PairingEnrollmentPending() => _PendingAction(),
               PairingEnrollmentActive() => const Text(
                 'Pairing enrollment active',
               ),
@@ -46,6 +44,23 @@ final class _RetryAction extends StatelessWidget {
           const PairingEnrollmentRetryRequested(),
         ),
         child: const Text('Retry pairing enrollment'),
+      ),
+    ],
+  );
+}
+
+final class _PendingAction extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      const Text('Pairing enrollment awaits confirmation'),
+      TextButton(
+        onPressed: () => context.read<PairingEnrollmentBloc>().add(
+          const PairingEnrollmentCancelled(),
+        ),
+        child: const Text('Cancel pairing enrollment'),
       ),
     ],
   );
