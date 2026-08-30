@@ -18,11 +18,11 @@ const requiredTabletopFields = [
 ];
 
 const sensitiveTabletopFields = [
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:raw\s+sms|sms\s+body)\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:authorization|bearer|jwt|access\s+token)\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+\.\s*))?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:raw\s+sms|sms\s+body)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:authorization|bearer|jwt|access\s+token)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
   /\b(?:raw\s+sms|sms\s+body)\b\s+(?:is|was|contains)\b/i,
   /\b(?:phone(?:\s+number)?|customer\s+(?:name|reference)|payment\s+(?:amount|reference)|account\s+(?:number|balance))\b\s+(?:is|was|equals)\b/i,
   /\b(?:authorization|bearer|jwt|access\s+token)\b\s+(?:is|was)\b/i,
@@ -100,6 +100,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
   const mutations = [
     '- Raw SMS: synthetic message text',
     '1. Raw SMS: synthetic numbered-list message text',
+    '1) Raw SMS: synthetic parenthesized-list message text',
     '- Phone number: +243000000000',
     '- Customer name: Synthetic Customer',
     '- Payment amount: 123',
