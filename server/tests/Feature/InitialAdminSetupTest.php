@@ -65,6 +65,22 @@ final class InitialAdminSetupTest extends TestCase
         $this->assertSame(1, Organization::query()->count());
     }
 
+    public function test_completed_setup_rejects_malformed_replays_before_validation(): void
+    {
+        $this->post('/setup', [
+            'username' => 'initial-admin',
+            'name' => 'Initial administrator',
+            'email' => 'admin@example.test',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertRedirect('/setup/security');
+
+        $this->post('/setup')->assertNotFound();
+
+        $this->assertDatabaseCount('organizations', 1);
+        $this->assertSame(1, User::query()->count());
+    }
+
     public function test_password_only_operator_session_cannot_access_financial_operations(): void
     {
         $operator = User::factory()->create([
