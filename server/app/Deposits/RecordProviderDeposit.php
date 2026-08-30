@@ -5,6 +5,7 @@ namespace App\Deposits;
 use App\Models\Customer;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
+use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -41,7 +42,8 @@ final class RecordProviderDeposit
 
         try {
             return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests): RecordProviderDepositResult {
-                $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true);
+                $providerReferenceLookupId = $this->resolveLookupId('provider_reference', $transfer->organizationId, $providerReferenceDigests);
+                $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true, $providerReferenceLookupId);
                 if ($existing !== null) {
                     return $this->replayResult($existing, $idempotencyDigests);
                 }
@@ -58,6 +60,7 @@ final class RecordProviderDeposit
                     'currency' => strtoupper($transfer->currency),
                     'provider_reference' => $transfer->providerReference,
                     'provider_reference_digest' => $this->activeDigest($providerReferenceDigests),
+                    'provider_reference_lookup_id' => $providerReferenceLookupId,
                     'provider_reference_key_version' => $this->activeKeyId(),
                     'provider_occurred_at' => CarbonImmutable::parse($transfer->providerOccurredAt),
                     'received_at' => $receivedAt,
@@ -193,11 +196,17 @@ final class RecordProviderDeposit
     }
 
     /** @param array<string, string> $providerReferenceDigests */
-    private function existing(string $organizationId, array $providerReferenceDigests, bool $lock = false): ?Deposit
+    private function existing(string $organizationId, array $providerReferenceDigests, bool $lock = false, ?string $lookupId = null): ?Deposit
     {
         $query = Deposit::query()
-            ->where('organization_id', $organizationId)
-            ->whereIn('provider_reference_digest', array_values($providerReferenceDigests));
+            ->where('organization_id', $organizationId);
+
+        $query->where(function ($query) use ($providerReferenceDigests, $lookupId): void {
+            $query->whereIn('provider_reference_digest', array_values($providerReferenceDigests));
+            if ($lookupId !== null) {
+                $query->orWhere('provider_reference_lookup_id', $lookupId);
+            }
+        });
 
         return $lock ? $query->lockForUpdate()->first() : $query->first();
     }
@@ -215,14 +224,24 @@ final class RecordProviderDeposit
     {
         $digests = $this->digests('customer_lookup', $transfer->organizationId, $transfer->customerLookupIdentifier);
 
-        return $this->firstOrCreateCustomer($transfer->organizationId, $digests);
+        $lookupId = $this->resolveLookupId('customer_lookup', $transfer->organizationId, $digests);
+
+        return Customer::query()->createOrFirst(
+            ['organization_id' => $transfer->organizationId, 'private_lookup_id' => $lookupId],
+            ['private_lookup_digest' => $this->activeDigest($digests), 'private_lookup_key_version' => $this->activeKeyId()],
+        );
     }
 
     private function installation(ProviderTransfer $transfer): SourceInstallation
     {
         $digests = $this->digests('installation_lookup', $transfer->organizationId, $transfer->installationIdentifier);
 
-        return $this->firstOrCreateInstallation($transfer->organizationId, $digests);
+        $lookupId = $this->resolveLookupId('installation_lookup', $transfer->organizationId, $digests);
+
+        return SourceInstallation::query()->createOrFirst(
+            ['organization_id' => $transfer->organizationId, 'installation_lookup_id' => $lookupId],
+            ['installation_digest' => $this->activeDigest($digests), 'installation_key_version' => $this->activeKeyId()],
+        );
     }
 
     private function appendEntries(Deposit $deposit, CarbonImmutable $recordedAt, bool $reverse): void
@@ -244,41 +263,31 @@ final class RecordProviderDeposit
     }
 
     /** @param array<string, string> $digests */
-    private function firstOrCreateCustomer(string $organizationId, array $digests): Customer
+    private function resolveLookupId(string $purpose, string $organizationId, array $digests): string
     {
-        $existing = Customer::query()->where('organization_id', $organizationId)->whereIn('private_lookup_digest', array_values($digests))->first();
-        if ($existing !== null) {
-            return $existing;
+        ksort($digests);
+        $firstDigest = reset($digests);
+        if ($firstDigest === false) {
+            throw new LogicException('Deposit lookup-token key ring is not configured.');
         }
 
-        try {
-            return Customer::query()->create([
-                'organization_id' => $organizationId,
-                'private_lookup_digest' => $this->activeDigest($digests),
-                'private_lookup_key_version' => $this->activeKeyId(),
-            ]);
-        } catch (QueryException) {
-            return Customer::query()->where('organization_id', $organizationId)->whereIn('private_lookup_digest', array_values($digests))->firstOrFail();
-        }
-    }
+        $first = PrivateLookupAlias::query()->createOrFirst(
+            ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $firstDigest],
+            ['lookup_id' => (string) Str::uuid(), 'created_at' => CarbonImmutable::now()],
+        );
 
-    /** @param array<string, string> $digests */
-    private function firstOrCreateInstallation(string $organizationId, array $digests): SourceInstallation
-    {
-        $existing = SourceInstallation::query()->where('organization_id', $organizationId)->whereIn('installation_digest', array_values($digests))->first();
-        if ($existing !== null) {
-            return $existing;
+        foreach ($digests as $digest) {
+            $alias = PrivateLookupAlias::query()->createOrFirst(
+                ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $digest],
+                ['lookup_id' => $first->lookup_id, 'created_at' => CarbonImmutable::now()],
+            );
+
+            if ($alias->lookup_id !== $first->lookup_id) {
+                throw new LogicException('Deposit lookup aliases are inconsistent.');
+            }
         }
 
-        try {
-            return SourceInstallation::query()->create([
-                'organization_id' => $organizationId,
-                'installation_digest' => $this->activeDigest($digests),
-                'installation_key_version' => $this->activeKeyId(),
-            ]);
-        } catch (QueryException) {
-            return SourceInstallation::query()->where('organization_id', $organizationId)->whereIn('installation_digest', array_values($digests))->firstOrFail();
-        }
+        return $first->lookup_id;
     }
 
     /** @return array<string, string> */

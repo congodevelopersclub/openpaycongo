@@ -13,7 +13,7 @@ class SourceInstallation extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['organization_id', 'installation_digest', 'installation_key_version'];
+    protected $fillable = ['organization_id', 'installation_digest', 'installation_lookup_id', 'installation_key_version'];
 
-    protected $hidden = ['installation_digest', 'installation_key_version'];
+    protected $hidden = ['installation_digest', 'installation_lookup_id', 'installation_key_version'];
 }

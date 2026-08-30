@@ -55,8 +55,6 @@ final class RecordProviderDepositTest extends TestCase
 
         self::assertSame(RecordResult::Replayed, $replay->outcome);
         self::assertSame($first->deposit->id, $replay->deposit->id);
-        self::assertSame('previous', $replay->deposit->provider_reference_key_version);
-        self::assertSame('previous', $replay->deposit->idempotency_key_version);
         self::assertDatabaseCount('deposits', 1);
         self::assertDatabaseCount('ledger_entries', 2);
     }
@@ -85,6 +83,8 @@ final class RecordProviderDepositTest extends TestCase
 
         self::assertSame(RecordResult::Replayed, $replay->outcome);
         self::assertSame($first->deposit->id, $replay->deposit->id);
+        self::assertSame('previous', $replay->deposit->provider_reference_key_version);
+        self::assertSame('previous', $replay->deposit->idempotency_key_version);
         self::assertDatabaseCount('deposits', 1);
         self::assertDatabaseCount('ledger_entries', 2);
     }

@@ -16,12 +16,12 @@ class Deposit extends ImmutableFinancialModel
 
     protected $fillable = [
         'organization_id', 'customer_id', 'source_installation_id', 'reverses_deposit_id', 'kind',
-        'amount_minor', 'currency', 'provider_reference', 'provider_reference_digest', 'provider_reference_key_version', 'provider_occurred_at',
+        'amount_minor', 'currency', 'provider_reference', 'provider_reference_digest', 'provider_reference_lookup_id', 'provider_reference_key_version', 'provider_occurred_at',
         'received_at', 'sender_identifier', 'receiver_identifier', 'idempotency_digest', 'idempotency_key_version',
     ];
 
     protected $hidden = [
-        'provider_reference', 'provider_reference_digest', 'provider_reference_key_version', 'sender_identifier', 'receiver_identifier', 'idempotency_digest', 'idempotency_key_version',
+        'provider_reference', 'provider_reference_digest', 'provider_reference_lookup_id', 'provider_reference_key_version', 'sender_identifier', 'receiver_identifier', 'idempotency_digest', 'idempotency_key_version',
     ];
 
     protected function casts(): array
