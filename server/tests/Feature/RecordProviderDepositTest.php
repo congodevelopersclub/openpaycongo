@@ -15,6 +15,7 @@ use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
 use App\Models\User;
 use App\Reconciliation\ReverseDeposit;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,16 @@ use Tests\TestCase;
 final class RecordProviderDepositTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
+        {
+            public function assertVerified(User $user): void {}
+        });
+    }
 
     public function test_it_records_a_provider_transfer_once_with_encrypted_pii_and_balanced_ledger_entries(): void
     {
