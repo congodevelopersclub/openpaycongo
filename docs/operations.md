@@ -51,6 +51,25 @@ must be at least 32 bytes, and must come from the secret manager. These four
 values are required by this production Compose path; do not substitute a
 wildcard, a forwarded host header, or a local HTTP address.
 
+## Legacy administrator provisioning
+
+If this migration is deployed to an installation which already contains users,
+public `/setup` stays closed. After migrations complete, an administrator
+authenticated to the deployment host may nominate one existing account by its
+numeric local user ID (never by email or another identifier that can leak into
+shell history):
+
+```bash
+docker compose exec -T php php artisan openpay:provision-legacy-operator 123 --force
+```
+
+The command locks setup state and refuses an open setup, another operator, or
+ambiguous organization ownership. It never reopens `/setup`, creates a
+non-secret audit record, and prints no account details. The nominated user must
+then sign in, enroll Fortify TOTP, generate and acknowledge recovery codes, and
+complete any recommended passkey enrollment before financial operations become
+available.
+
 Compose first runs the one-shot `migrate` service. The `php`, `nginx`, `queue`, and
 `scheduler` services wait for PostgreSQL health and successful migrations, use
 `unless-stopped` restart policies, and share the named `app-storage` volume.

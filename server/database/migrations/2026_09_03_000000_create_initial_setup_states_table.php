@@ -29,7 +29,7 @@ return new class extends Migration
     public function down(): void
     {
         if (DB::table('initial_setup_states')->whereNotNull('completed_at')->exists()) {
-            throw new \LogicException('Completed initial setup cannot be removed.');
+            throw new LogicException('Completed initial setup cannot be removed.');
         }
 
         Schema::dropIfExists('initial_setup_states');

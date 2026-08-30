@@ -16,10 +16,10 @@ final class InitialSetupSecurityController
 
         return view('setup.security', [
             'user' => $user,
-            'passkeys' => Features::canManagePasskeys()
+            'passkeys' => Features::canManagePasskeys() && $user->two_factor_confirmed_at !== null
                 ? $user->passkeys()->orderByDesc('created_at')->get(['id', 'name', 'last_used_at'])
                 : collect(),
-            'passkeysAvailable' => Features::canManagePasskeys(),
+            'passkeysAvailable' => Features::canManagePasskeys() && $user->two_factor_confirmed_at !== null,
         ]);
     }
 

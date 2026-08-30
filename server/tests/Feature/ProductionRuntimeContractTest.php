@@ -94,6 +94,9 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/vendor/.openpay-host-dependency-marker', $runner);
         self::assertStringContainsString('server/node_modules/.openpay-host-dependency-marker', $runner);
         self::assertStringContainsString('--target production-contract -f server/docker/nginx.Dockerfile .', $runner);
+        self::assertStringContainsString('php artisan config:cache', $runner);
+        self::assertStringContainsString('OPENPAY_PASSKEY_USER_HANDLE_SECRET', $runner);
+        self::assertStringContainsString('bash scripts/ci/run-initial-setup-browser.sh', $runner);
         self::assertStringNotContainsString('production-security-contract', $workflow);
         self::assertStringNotContainsString('chown -R nginx:nginx /var/cache/nginx /var/www/html/public', $nginxDockerfile);
         self::assertStringContainsString('chown -R nginx:nginx /var/cache/nginx', $nginxDockerfile);

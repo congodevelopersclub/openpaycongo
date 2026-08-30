@@ -34,5 +34,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="OPENPAY_APP_URL" value="https://localhost" force="true"/>
+        <env name="OPENPAY_PASSKEY_RP_ID" value="localhost" force="true"/>
+        <env name="OPENPAY_PASSKEY_ALLOWED_ORIGINS" value="[&quot;https://localhost&quot;]" force="true"/>
+        <env name="OPENPAY_PASSKEY_USER_HANDLE_SECRET" value="testing-passkey-user-handle-secret-at-least-32" force="true"/>
     </php>
 </phpunit>

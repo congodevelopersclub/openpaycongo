@@ -18,9 +18,11 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const CURRENT_MIGRATION_REVISION = '2026_09_03_000004_create_security_audits_table';
+
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
-        $expectedRevision = '2026_09_02_000000_add_reconciliation_correction_evidence';
+        $expectedRevision = self::CURRENT_MIGRATION_REVISION;
         $this->getJson('/healthz')->assertOk()->assertExactJson(['status' => 'ok']);
         $ready = $this->getJson('/readyz')
             ->assertOk()
@@ -121,6 +123,8 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 
     public function test_database_ahead_migration_ledger_closes_readiness(): void
     {
+        $expectedRevision = self::CURRENT_MIGRATION_REVISION;
+
         DB::table('migrations')->insert([
             'migration' => '2099_01_01_000000_removed_migration',
             'batch' => 999,
@@ -137,7 +141,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 
         $this->getJson('/version')
             ->assertOk()
-            ->assertJson(['migration_revision' => '2026_09_02_000000_add_reconciliation_correction_evidence']);
+            ->assertJson(['migration_revision' => $expectedRevision]);
     }
 
     public function test_trusted_proxy_https_forwarding_is_recognized(): void

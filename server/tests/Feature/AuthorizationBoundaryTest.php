@@ -18,6 +18,15 @@ final class AuthorizationBoundaryTest extends TestCase
             'GET|HEAD version',
             'GET|HEAD up', // Explicitly retained by bootstrap/app.php.
             'GET|HEAD /',
+            'GET|HEAD login',
+            'POST login',
+            'GET|HEAD two-factor-challenge',
+            'POST two-factor-challenge',
+            'GET|HEAD passkeys/login/options',
+            'POST passkeys/login',
+            // This boundary returns 404 before request validation after initial setup is claimed.
+            'GET|HEAD setup',
+            'POST setup',
         ];
         $signedFrameworkRoutes = [
             'GET|HEAD storage/{path}' => 'storage.local',
@@ -28,7 +37,7 @@ final class AuthorizationBoundaryTest extends TestCase
         $authorizedRoutes = [];
         $runtimeRouteCount = 0;
 
-        self::assertCount(5, $anonymousRoutes);
+        self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
         self::assertCount(0, $authorizedRoutes);
 
@@ -67,7 +76,7 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(12, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(38, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void

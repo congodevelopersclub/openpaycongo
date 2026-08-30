@@ -8,6 +8,7 @@
     },
     "devDependencies": {
         "@laravel/passkeys": "^0.4.0",
+        "@playwright/test": "^1.57.0",
         "@tailwindcss/vite": "^4.0.0",
         "concurrently": "^10.0.3",
         "laravel-vite-plugin": "^3.1",

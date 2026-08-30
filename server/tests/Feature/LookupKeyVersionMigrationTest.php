@@ -14,6 +14,8 @@ final class LookupKeyVersionMigrationTest extends TestCase
 {
     use DatabaseMigrations;
 
+    private const LOOKUP_KEY_MIGRATION = '2026_08_31_000000_add_lookup_key_versions_to_deposit_ledger_tables';
+
     public function test_upgrade_backfills_pr180_private_digests_and_rotated_reads_keep_the_same_facts(): void
     {
         $organizationId = '00000000-0000-4000-8000-000000000165';
@@ -26,7 +28,7 @@ final class LookupKeyVersionMigrationTest extends TestCase
         $installationId = (string) Str::uuid();
         $depositId = (string) Str::uuid();
 
-        $this->artisan('migrate:rollback', ['--step' => 3])->assertExitCode(0);
+        $this->rollbackToBeforeLookupKeyMigration();
 
         DB::table('customers')->insert([
             'id' => $customerId,
@@ -133,5 +135,21 @@ final class LookupKeyVersionMigrationTest extends TestCase
             'sender_identifier' => null,
             'receiver_identifier' => null,
         ], JSON_THROW_ON_ERROR), $key);
+    }
+
+    private function rollbackToBeforeLookupKeyMigration(): void
+    {
+        $appliedMigrations = DB::table('migrations')
+            ->orderByDesc('batch')
+            ->orderByDesc('migration')
+            ->pluck('migration')
+            ->all();
+        $lookupKeyMigrationPosition = array_search(self::LOOKUP_KEY_MIGRATION, $appliedMigrations, true);
+
+        self::assertNotFalse($lookupKeyMigrationPosition, 'The lookup-key migration must be applied before this historical upgrade test starts.');
+
+        $this->artisan('migrate:rollback', ['--step' => $lookupKeyMigrationPosition + 1])->assertExitCode(0);
+
+        self::assertDatabaseMissing('migrations', ['migration' => self::LOOKUP_KEY_MIGRATION]);
     }
 }

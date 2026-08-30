@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\RequireConfirmedTwoFactorForPasskeys;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,7 +21,12 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        __DIR__.'/../app/Console/Commands',
+    ])
     ->withMiddleware(function (Middleware $middleware) use ($trustedProxyCidrs): void {
+        $middleware->appendToGroup('web', RequireConfirmedTwoFactorForPasskeys::class);
+
         $middleware->trustProxies(
             at: $trustedProxyCidrs,
             headers: Request::HEADER_X_FORWARDED_FOR

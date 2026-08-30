@@ -11,10 +11,27 @@ an operational route can be used. Recovery codes remain a recovery mechanism,
 not a way to avoid enrollment.
 
 An installation which already has any users is treated as legacy and setup is
-closed by migration before a request can reach it. A release operator must use
-the authenticated administrative provisioning procedure to designate an
-existing user as a financial operator; public first-run setup is never a
-remediation mechanism for an existing installation.
+closed by migration before a request can reach it. Public first-run setup is
+never a remediation mechanism for an existing installation. After all
+migrations have run, a locally authenticated release operator may run the
+explicit `openpay:provision-legacy-operator <numeric-user-id> --force` command.
+It locks the closed setup state, refuses an existing operator or ambiguous
+organization ownership, creates or uses the sole organization, and records a
+non-secret audit event. The provisioned user must sign in and complete Fortify
+TOTP enrollment plus recovery-code acknowledgement before operations; the
+command does not establish an MFA session.
+
+## Browser verification boundary
+
+`bash scripts/ci/run-initial-setup-browser.sh` runs the first-install form, setup
+replay denial, pre-TOTP operations denial, and passkey-enrollment hiding against
+an isolated Docker Laravel stack. It does not exercise a WebAuthn ceremony,
+reauthentication, or credential persistence, and records no physical
+authenticator, credential private key, biometric, or challenge. The maintained
+package's server routes, trust configuration, ownership, reauthentication,
+persistence model, and MFA-state transitions are covered by Laravel feature
+tests; a physical authenticator remains an operator acceptance exercise outside
+automated CI.
 
 Passkeys supplement, rather than replace, the password and TOTP flow. The
 application uses Laravel Fortify's maintained `laravel/passkeys` integration;

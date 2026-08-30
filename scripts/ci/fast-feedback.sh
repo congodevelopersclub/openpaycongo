@@ -80,6 +80,20 @@ run_laravel_pr() (
   docker build --target production-contract -f server/docker/nginx.Dockerfile .
   docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
   docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
+  docker run --rm \
+    --env APP_KEY="$OPENPAY_APP_KEY" \
+    --env OPENPAY_APP_URL="$OPENPAY_APP_URL" \
+    --env OPENPAY_PASSKEY_RP_ID="$OPENPAY_PASSKEY_RP_ID" \
+    --env OPENPAY_PASSKEY_ALLOWED_ORIGINS="$OPENPAY_PASSKEY_ALLOWED_ORIGINS" \
+    --env OPENPAY_PASSKEY_USER_HANDLE_SECRET="$OPENPAY_PASSKEY_USER_HANDLE_SECRET" \
+    congo-openpay-fpm:ci sh -ceu '
+      php artisan config:cache
+      php artisan config:show passkeys > /tmp/openpay-passkeys
+      grep -Eq "relying_party_id.*openpay\.test" /tmp/openpay-passkeys
+      grep -Eq "allowed_origins.*https:\/\/openpay\.test" /tmp/openpay-passkeys
+      grep -q "user_handle_secret" /tmp/openpay-passkeys
+    '
+  bash scripts/ci/run-initial-setup-browser.sh
   for image in congo-openpay-fpm:ci congo-openpay-nginx:ci; do
     MSYS_NO_PATHCONV=1 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check "$image"
   done

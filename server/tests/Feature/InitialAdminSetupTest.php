@@ -9,11 +9,13 @@ use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Events\RecoveryCodesGenerated;
 use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
+use Laravel\Passkeys\Contracts\PasskeyLoginResponse;
 use Tests\TestCase;
 
 final class InitialAdminSetupTest extends TestCase
@@ -37,6 +39,80 @@ final class InitialAdminSetupTest extends TestCase
         $this->get('/setup')->assertNotFound();
         $this->post('/setup')->assertNotFound();
         $this->assertSame(1, User::query()->count());
+    }
+
+    public function test_organization_migration_rolls_back_named_indexes_before_user_columns(): void
+    {
+        $migration = require database_path('migrations/2026_09_03_000002_create_organizations_and_link_users.php');
+
+        $migration->down();
+
+        $this->assertFalse(Schema::hasColumn('users', 'organization_id'));
+        $this->assertFalse(Schema::hasColumn('users', 'username'));
+
+        $migration->up();
+
+        $this->assertTrue(Schema::hasColumn('users', 'organization_id'));
+        $this->assertTrue(Schema::hasColumn('users', 'username'));
+    }
+
+    public function test_a_locally_authorized_command_provisions_one_legacy_operator_without_reopening_setup(): void
+    {
+        $user = User::factory()->create();
+        InitialSetupState::query()->findOrFail(1)->forceFill(['completed_at' => now()])->save();
+
+        $this->artisan('openpay:provision-legacy-operator', [
+            'user_id' => $user->getKey(),
+            '--force' => true,
+        ])->assertExitCode(0);
+
+        $this->assertTrue($user->fresh()->is_financial_operator);
+        $this->assertNotNull($user->fresh()->organization_id);
+        $this->assertDatabaseCount('organizations', 1);
+        $this->assertDatabaseHas('security_audits', [
+            'user_id' => $user->getKey(),
+            'action' => 'legacy_financial_operator_provisioned',
+        ]);
+        $this->get('/setup')->assertNotFound();
+        $this->post('/setup')->assertNotFound();
+    }
+
+    public function test_legacy_operator_provisioning_command_is_available_to_artisan(): void
+    {
+        $this->assertArrayHasKey('openpay:provision-legacy-operator', Artisan::all());
+    }
+
+    public function test_legacy_provisioning_refuses_an_open_installation_without_mutation(): void
+    {
+        $user = User::factory()->create();
+
+        $this->artisan('openpay:provision-legacy-operator', [
+            'user_id' => $user->getKey(),
+            '--force' => true,
+        ])->assertExitCode(1);
+
+        $this->assertFalse($user->fresh()->is_financial_operator);
+        $this->assertNull($user->fresh()->organization_id);
+        $this->assertDatabaseCount('organizations', 0);
+        $this->assertDatabaseCount('security_audits', 0);
+    }
+
+    public function test_legacy_provisioning_refuses_ambiguous_organization_ownership_without_mutation(): void
+    {
+        $user = User::factory()->create();
+        InitialSetupState::query()->findOrFail(1)->forceFill(['completed_at' => now()])->save();
+        Organization::query()->create();
+        Organization::query()->create();
+
+        $this->artisan('openpay:provision-legacy-operator', [
+            'user_id' => $user->getKey(),
+            '--force' => true,
+        ])->assertExitCode(1);
+
+        $this->assertFalse($user->fresh()->is_financial_operator);
+        $this->assertNull($user->fresh()->organization_id);
+        $this->assertDatabaseCount('organizations', 2);
+        $this->assertDatabaseCount('security_audits', 0);
     }
 
     public function test_generic_registration_is_not_an_alternate_first_administrator_entry_point(): void
@@ -148,8 +224,8 @@ final class InitialAdminSetupTest extends TestCase
 
     public function test_the_passkey_boundary_uses_the_explicit_local_trust_contract(): void
     {
-        $this->assertSame('localhost', config('fortify.passkeys.relying_party_id'));
-        $this->assertSame(['https://localhost'], config('fortify.passkeys.allowed_origins'));
+        $this->assertSame('localhost', config('passkeys.relying_party_id'));
+        $this->assertSame(['https://localhost'], config('passkeys.allowed_origins'));
         $this->assertTrue(in_array('passkeys', config('fortify.features'), true));
     }
 
@@ -167,6 +243,21 @@ final class InitialAdminSetupTest extends TestCase
             ->assertSee('data-passkey-name', false);
     }
 
+    public function test_passkey_enrollment_is_unavailable_until_totp_is_confirmed(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+
+        $this->actingAs($operator)
+            ->get('/setup/security')
+            ->assertOk()
+            ->assertDontSee('data-passkey-registration', false)
+            ->assertDontSee('Passkeys');
+
+        $this->withSession(['auth.password_confirmed_at' => time()])
+            ->getJson('/user/passkeys/options')
+            ->assertForbidden();
+    }
+
     public function test_password_fallback_sends_a_totp_enabled_operator_to_the_fortify_challenge(): void
     {
         $operator = User::factory()->create([
@@ -182,18 +273,77 @@ final class InitialAdminSetupTest extends TestCase
         ])->assertRedirect('/two-factor-challenge');
     }
 
+    public function test_passkey_login_stages_a_financial_operator_for_the_normal_totp_challenge(): void
+    {
+        $operator = User::factory()->create([
+            'is_financial_operator' => true,
+            'two_factor_secret' => Crypt::encryptString('test-only-totp-secret'),
+            'two_factor_confirmed_at' => now(),
+            'recovery_codes_confirmed_at' => now(),
+        ]);
+
+        $this->actingAs($operator);
+
+        $request = request();
+        $request->setLaravelSession($this->app['session.store']);
+        $response = app(PasskeyLoginResponse::class)->toResponse($request);
+
+        $this->assertSame(url('/two-factor-challenge'), $response->getTargetUrl());
+        $this->assertGuest();
+        $this->assertSame($operator->getKey(), session('login.id'));
+        try {
+            app(FinancialOperatorMfaSession::class)->assertVerified($operator);
+            $this->fail('A passkey login must not establish financial MFA.');
+        } catch (AuthorizationException) {
+            event(new ValidTwoFactorAuthenticationCodeProvided($operator));
+        }
+
+        $this->actingAs($operator);
+        app(FinancialOperatorMfaSession::class)->assertVerified($operator);
+    }
+
+    public function test_passkey_login_fails_closed_when_a_financial_operator_has_not_confirmed_totp(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+
+        $this->actingAs($operator);
+
+        $request = request();
+        $request->setLaravelSession($this->app['session.store']);
+        $response = app(PasskeyLoginResponse::class)->toResponse($request);
+
+        $this->assertSame(url('/'), $response->getTargetUrl());
+        $this->assertGuest();
+        $this->assertNull(session('login.id'));
+        $this->assertNull(session('financial_operator_mfa.user_id'));
+    }
+
     public function test_passkey_registration_requires_fresh_password_confirmation(): void
     {
-        $operator = User::factory()->create();
+        $operator = User::factory()->create(['two_factor_confirmed_at' => now()]);
 
         $this->actingAs($operator)
             ->get('/user/passkeys/options')
             ->assertRedirect('/user/confirm-password');
     }
 
+    public function test_the_maintained_passkey_registration_route_uses_the_canonical_rp_after_fresh_reauthentication(): void
+    {
+        $operator = User::factory()->create(['two_factor_confirmed_at' => now()]);
+
+        $this->actingAs($operator)
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->getJson('/user/passkeys/options')
+            ->assertOk()
+            ->assertJsonPath('options.rp.id', 'localhost')
+            ->assertJsonPath('options.authenticatorSelection.userVerification', 'required');
+
+        $this->assertNotNull(session('passkey.registration_options'));
+    }
+
     public function test_an_operator_cannot_remove_another_users_passkey(): void
     {
-        $operator = User::factory()->create();
+        $operator = User::factory()->create(['two_factor_confirmed_at' => now()]);
         $otherUser = User::factory()->create();
         $passkey = $otherUser->passkeys()->create([
             'name' => 'Other device',
@@ -211,7 +361,7 @@ final class InitialAdminSetupTest extends TestCase
 
     public function test_the_passkey_trust_configuration_never_uses_request_host_headers(): void
     {
-        $configuration = file_get_contents(config_path('fortify.php'));
+        $configuration = file_get_contents(config_path('openpay.php'));
 
         $this->assertIsString($configuration);
         $this->assertStringContainsString('OPENPAY_PASSKEY_RP_ID', $configuration);

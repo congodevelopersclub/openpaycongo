@@ -1,0 +1,38 @@
+name: openpay-initial-setup-browser
+
+services:
+  browser-app:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: browser-app
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "false"
+      APP_KEY: base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      APP_URL: https://localhost
+      OPENPAY_APP_URL: https://localhost
+      OPENPAY_PASSKEY_RP_ID: localhost
+      OPENPAY_PASSKEY_ALLOWED_ORIGINS: '["https://localhost"]'
+      OPENPAY_PASSKEY_USER_HANDLE_SECRET: browser-test-user-handle-secret-at-least-32-characters
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /app/database/browser.sqlite
+      CACHE_STORE: database
+      SESSION_DRIVER: database
+      SESSION_SECURE_COOKIE: "false"
+    command: ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(@file_get_contents(\"http://127.0.0.1:8000/setup\") === false ? 1 : 0);'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  browser:
+    build:
+      context: .
+      dockerfile: server/docker/browser.Dockerfile
+    environment:
+      BASE_URL: http://browser-app:8000
+    depends_on:
+      browser-app:
+        condition: service_healthy

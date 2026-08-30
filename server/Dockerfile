@@ -78,6 +78,11 @@ COPY server/public ./public
 COPY server/vite.config.js ./
 RUN npm run build
 
+FROM quality AS browser-app
+
+COPY --from=assets /app/public/build ./public/build
+RUN touch database/browser.sqlite
+
 FROM php83-platform-check AS production-dependencies
 
 WORKDIR /app

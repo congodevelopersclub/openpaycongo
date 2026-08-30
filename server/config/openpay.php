@@ -1,13 +1,8 @@
 <?php
 
-use Laravel\Fortify\Features;
-
 $production = env('APP_ENV') === 'production';
 $relyingPartyId = env('OPENPAY_PASSKEY_RP_ID', $production ? null : 'localhost');
-$allowedOrigins = json_decode(
-    (string) env('OPENPAY_PASSKEY_ALLOWED_ORIGINS', $production ? '[]' : '["https://localhost"]'),
-    true,
-);
+$allowedOrigins = json_decode((string) env('OPENPAY_PASSKEY_ALLOWED_ORIGINS', $production ? '[]' : '["https://localhost"]'), true);
 $userHandleSecret = env('OPENPAY_PASSKEY_USER_HANDLE_SECRET', $production ? null : env('APP_KEY'));
 $canonicalOrigin = env('OPENPAY_APP_URL', $production ? null : 'https://localhost');
 
@@ -22,21 +17,16 @@ $passkeysConfigured = is_string($relyingPartyId)
     && strlen($userHandleSecret) >= 32;
 
 return [
-    'guard' => 'web',
-    'middleware' => ['web'],
-    'auth_middleware' => 'auth',
-    'passwords' => 'users',
-    'username' => 'email',
-    'email' => 'email',
-    'views' => true,
-    'home' => '/operations',
-    'limiters' => [
-        'login' => 'login',
-        'two-factor' => 'two-factor',
-        'passkeys' => 'passkeys',
-    ],
-    'features' => [
-        Features::twoFactorAuthentication(['confirm' => true, 'confirmPassword' => true]),
-        ...($passkeysConfigured ? [Features::passkeys(['confirmPassword' => true])] : []),
+    'passkeys_configured' => $passkeysConfigured,
+    'passkeys' => [
+        'relying_party_id' => $relyingPartyId,
+        'allowed_origins' => $passkeysConfigured ? $allowedOrigins : [],
+        'user_handle_secret' => $userHandleSecret,
+        'timeout' => 60000,
+        'guard' => 'web',
+        'middleware' => ['web'],
+        'management_middleware' => ['password.confirm'],
+        'throttle' => 'throttle:passkeys',
+        'redirect' => '/two-factor-challenge',
     ],
 ];
