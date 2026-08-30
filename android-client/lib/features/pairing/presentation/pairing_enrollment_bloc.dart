@@ -149,6 +149,7 @@ final class PairingEnrollmentBloc
   int? _activeOperation;
   Future<void> _persistence = Future<void>.value();
   PairingEnrollmentCleanup? _pendingCleanup;
+  PairingEnrollmentCleanup? _unsavedCleanup;
 
   Future<void> _start(
     PairingEnrollmentStarted event,
@@ -327,11 +328,22 @@ final class PairingEnrollmentBloc
     int generation,
     Emitter<PairingEnrollmentState> emit,
   ) async {
+    final PairingEnrollmentCleanup? unsaved = _unsavedCleanup;
+    if (unsaved != null) {
+      if (!await _installCleanup(unsaved, generation, emit)) {
+        return _CleanupResume.failed;
+      }
+      return await _completeCleanup(generation, emit)
+          ? _CleanupResume.resumed
+          : _CleanupResume.failed;
+    }
     if (_pendingCleanup == null) {
       await _persistence;
       if (generation != _generation) return _CleanupResume.failed;
       try {
-        _pendingCleanup = await store.loadCleanup();
+        final PairingEnrollmentCleanup? cleanup = await store.loadCleanup();
+        if (generation != _generation) return _CleanupResume.failed;
+        _pendingCleanup = cleanup;
       } on PairingEnrollmentPersistenceException {
         _offlineIfCurrent(generation, emit);
         return _CleanupResume.failed;
@@ -348,11 +360,14 @@ final class PairingEnrollmentBloc
     int generation,
     Emitter<PairingEnrollmentState> emit,
   ) async {
-    _pendingCleanup = target;
     try {
       await _queue(() => store.saveCleanup(target));
-      return generation == _generation;
+      if (generation != _generation) return false;
+      _pendingCleanup = target;
+      _unsavedCleanup = null;
+      return true;
     } on PairingEnrollmentPersistenceException {
+      _unsavedCleanup = target;
       _offlineIfCurrent(generation, emit);
       return false;
     }
@@ -365,6 +380,7 @@ final class PairingEnrollmentBloc
     final PairingEnrollmentCleanup? target = _pendingCleanup;
     if (target == null) return true;
     try {
+      if (generation != _generation) return false;
       await transport.discardTerminal();
       if (generation != _generation) return false;
       await _clear();
@@ -373,6 +389,7 @@ final class PairingEnrollmentBloc
       await _queue(store.clearCleanup);
       if (generation != _generation) return false;
       _pendingCleanup = null;
+      _unsavedCleanup = null;
       switch (target) {
         case PairingEnrollmentCleanup.cancelled:
           emit(const PairingEnrollmentIdle());

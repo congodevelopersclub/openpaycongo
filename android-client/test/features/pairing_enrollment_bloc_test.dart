@@ -271,6 +271,35 @@ void main() {
     expect(store.value, isNull);
   });
 
+  test('retry persists a failed cleanup marker before disposal', () async {
+    final _FailOnceCleanupStore store = _FailOnceCleanupStore()
+      ..value = _pending();
+    final _DeferredTransport transport = _DeferredTransport(
+      Completer<PairingEnrollment>(),
+    );
+    final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+      store: store,
+      transport: transport,
+      telemetry: _Telemetry(),
+    );
+    final Future<PairingEnrollmentState> offline = bloc.stream.firstWhere(
+      (PairingEnrollmentState state) => state is PairingEnrollmentOffline,
+    );
+    bloc.add(const PairingEnrollmentCancelled());
+    await offline;
+    expect(transport.discardCalls, 0);
+    expect(store.value, isNotNull);
+
+    final Future<PairingEnrollmentState> idle = bloc.stream.firstWhere(
+      (PairingEnrollmentState state) => state is PairingEnrollmentIdle,
+    );
+    bloc.add(const PairingEnrollmentRetryRequested());
+    await idle;
+    expect(transport.discardCalls, 1);
+    expect(store.value, isNull);
+    await bloc.close();
+  });
+
   test(
     'stale protocol failure cannot replace cancellation cleanup intent',
     () async {
@@ -533,6 +562,19 @@ final class _FailingClearStore implements PairingEnrollmentStore {
 
   @override
   Future<void> clearCleanup() async {}
+}
+
+final class _FailOnceCleanupStore extends _Store {
+  bool failed = false;
+
+  @override
+  Future<void> saveCleanup(PairingEnrollmentCleanup cleanup) async {
+    if (!failed) {
+      failed = true;
+      throw const PairingEnrollmentPersistenceException();
+    }
+    await super.saveCleanup(cleanup);
+  }
 }
 
 final class _FlakyDiscardTransport implements PairingEnrollmentTransport {
