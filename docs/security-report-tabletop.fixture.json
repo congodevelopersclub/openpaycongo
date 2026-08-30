@@ -1,0 +1,15 @@
+{
+  "fixture": "SYNTHETIC-REPORT-001",
+  "component": "example.invalid/synthetic-component",
+  "reporterContact": "withheld",
+  "claim": "a synthetic authorization boundary needs review",
+  "evidence": "non-executable, synthetic reproduction summary",
+  "steps": [
+    "acknowledge_and_freeze",
+    "reproduce_and_block",
+    "fix_and_regression",
+    "draft_advisory",
+    "record_release_decision",
+    "coordinate_disclosure"
+  ]
+}

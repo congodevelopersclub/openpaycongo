@@ -7,6 +7,70 @@ import test from 'node:test';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFile(resolve(repositoryRoot, path), 'utf8');
 
+const tabletopSource = {
+  fixture: 'SYNTHETIC-REPORT-001',
+  component: 'example.invalid/synthetic-component',
+  reporterContact: 'withheld',
+  claim: 'a synthetic authorization boundary needs review',
+  evidence: 'non-executable, synthetic reproduction summary',
+  steps: [
+    'acknowledge_and_freeze',
+    'reproduce_and_block',
+    'fix_and_regression',
+    'draft_advisory',
+    'record_release_decision',
+    'coordinate_disclosure',
+  ],
+};
+
+function renderTabletop(source) {
+  return `# SYNTHETIC TABLETOP ONLY: private-report lifecycle
+
+This fixture exercises the process without creating a real report, advisory,
+or release. No real user, customer, credential, token, key, raw SMS, exploit
+payload, or topology detail appears here. Do not submit this fixture to GitHub
+or copy it into a report.
+
+## Input
+
+- Private report identifier: \`${source.fixture}\`
+- Affected component: \`${source.component}\`
+- Reporter contact: withheld in this public fixture
+- Claim: ${source.claim}
+- Evidence: a ${source.evidence} only
+
+## Tabletop path
+
+1. A triage owner acknowledges the private report within two business days,
+   assigns provisional severe classification, freezes the synthetic candidate,
+   and records neither report details nor a public disclosure.
+2. The triage and release owners reproduce the synthetic claim with safe
+   evidence and decide the affected artifact is a release blocker for this
+   tabletop.
+3. A maintainer prepares the smallest synthetic fix and a regression test that
+   proves the boundary. The regression test contains no exploit payload.
+4. The coordinator prepares a private advisory draft with affected and patched
+   synthetic versions, mitigation, reporter credit preference, and links the
+   synthetic fix and regression-test evidence from step 3.
+5. The release owner records a patched-release decision after Docker-backed
+   tests and scans identify the synthetic artifact.
+6. The group agrees a coordinated disclosure date, then records the
+   post-incident learning: update the threat model if the boundary or residual
+   risk changed.
+
+## Expected result
+
+The exercise proves the sequence **private report → fix → regression test →
+advisory draft → patched-release decision**. It creates no real advisory,
+release, customer record, secret, or security finding.
+`.replaceAll('\n', '\r\n');
+}
+
+function assertClosedWorldTabletop(source, markdown) {
+  assert.deepEqual(source, tabletopSource, 'tabletop JSON must contain only the approved synthetic schema and values');
+  assert.equal(markdown, renderTabletop(source), 'Markdown fixture must be the deterministic rendering of the closed-world JSON source');
+}
+
 const requiredTabletopFields = [
   /# SYNTHETIC TABLETOP ONLY: private-report lifecycle/,
   /Private report identifier: `SYNTHETIC-REPORT-001`/,
@@ -51,25 +115,7 @@ function plainSafetyText(markdown) {
 }
 
 function assertSyntheticTabletop(fixture) {
-  for (const field of requiredTabletopFields) assert.match(fixture, field);
-
-  for (const safetyText of [fixture, plainSafetyText(fixture)]) {
-    for (const field of sensitiveTabletopFields) {
-      assert.doesNotMatch(safetyText, field, `synthetic tabletop contains a prohibited field: ${field}`);
-    }
-  }
-
-  const stepOneStart = fixture.indexOf('1. A triage owner');
-  const stepTwoStart = fixture.indexOf('2. The triage and release owners');
-  assert.ok(stepOneStart >= 0 && stepTwoStart > stepOneStart, 'tabletop must contain ordered first and second steps');
-  const stepOne = fixture.slice(stepOneStart, stepTwoStart);
-  assert.match(stepOne, /assigns provisional severe classification, freezes the synthetic candidate/i);
-  const advisoryDraft = fixture.indexOf('4. The coordinator prepares a private advisory draft');
-  const releaseDecision = fixture.indexOf('5. The release owner records a patched-release decision');
-  assert.ok(advisoryDraft >= 0 && advisoryDraft < releaseDecision, 'private advisory draft must precede the patched-release decision');
-  const advisoryStepEnd = fixture.indexOf('5. The release owner', advisoryDraft);
-  const advisoryStep = fixture.slice(advisoryDraft, advisoryStepEnd);
-  assert.match(advisoryStep, /links the\s+synthetic fix and regression-test evidence/i);
+  assertClosedWorldTabletop(tabletopSource, fixture);
 }
 
 test('security response policy is private, accountable, and release-blocking', async () => {
@@ -105,10 +151,11 @@ test('security response policy is private, accountable, and release-blocking', a
   assert.match(security, /trust-boundary/i);
 });
 
-test('private-report tabletop fixture is synthetic and excludes sensitive content', async () => {
+test('private-report tabletop fixture is synthetic, closed-world, and rendered deterministically', async () => {
   const fixture = await read('docs/security-report-tabletop.fixture.md');
+  const source = JSON.parse(await read('docs/security-report-tabletop.fixture.json'));
 
-  assertSyntheticTabletop(fixture);
+  assertClosedWorldTabletop(source, fixture);
   assert.match(fixture, /private report/i);
   assert.match(fixture, /regression test/i);
   assert.match(fixture, /advisory draft/i);
@@ -160,8 +207,12 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
   for (const mutation of mutations) {
     assert.throws(
       () => assertSyntheticTabletop(`${fixture}\n${mutation}\n`),
-      /synthetic tabletop contains a prohibited field/,
+      /Markdown fixture|closed-world/,
       `fixture mutation must be rejected: ${mutation}`,
     );
   }
+
+  assert.throws(() => assertClosedWorldTabletop({ ...source, unknown: 'freeform prose' }, fixture));
+  assert.throws(() => assertClosedWorldTabletop({ ...source, claim: 'https://example.invalid/?access_token=REALVALUE' }, fixture));
+  assert.throws(() => assertClosedWorldTabletop(source, `${fixture}\nextra prose`));
 });
