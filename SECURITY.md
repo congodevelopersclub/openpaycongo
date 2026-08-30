@@ -118,20 +118,26 @@ supported artifact:
    preparing a patch: revoke or rotate the credential, recover protected keys,
    restore a trusted release identity, and rebuild from a restored trust root.
    Do not publish through a possibly compromised path.
-4. The release owner prepares the smallest remediation, with a regression test
+4. For immediate containment, the release owner may authorize a rollback before
+   a patch exists only after identifying the rollback artifact, recording why it
+   predates the affected artifact and contains the incident, and verifying
+   ordinary release authority—or restored authority if step 3 invoked the
+   compromise response. The coordinator records the rollback decision and user
+   communication in the private record.
+5. The release owner prepares the smallest remediation, with a regression test
    where safe, and reviews affected trust boundaries and dependencies.
-5. Build, test, scan, and identify the patched artifacts using the normal
+6. Build, test, scan, and identify the patched artifacts using the normal
    Docker-backed release evidence; unavailable scanners or evidence fail the
    release decision visibly.
-6. After the artifact evidence is available, the incident coordinator prepares
+7. After the artifact evidence is available, the incident coordinator prepares
    a private advisory draft, links the fix and minimal regression evidence,
    and the release owner records the patched-release date.
-7. The release owner authorizes the patched release or rollback only after
+8. The release owner authorizes the patched release only after
    verifying ordinary release authority—or, if step 3 invoked the compromise
    response, after the restored authority is verified under the repository's
    approved release authority. The coordinator then records user communication
    and the advisory decision.
-8. After containment, conduct a blameless review and update this policy, the
+9. After containment, conduct a blameless review and update this policy, the
    threat model, tests, or release controls when evidence shows a gap.
 
 This procedure does not bypass branch protection, create real advisories,

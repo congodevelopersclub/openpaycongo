@@ -160,10 +160,15 @@ test('security response policy is private, accountable, and release-blocking', a
   assert.match(security, /revoke or rotate the credential/i);
   assert.match(security, /rebuild from a restored trust root/i);
   assert.match(security, /verifying ordinary release authority—or, if step 3 invoked the compromise\s+response/i);
+  const rollbackCheckpoint = security.indexOf('For immediate containment, the release owner may authorize a rollback before');
   const advisoryCheckpoint = security.indexOf('After the artifact evidence is available, the incident coordinator prepares');
-  const authorizationCheckpoint = security.indexOf('The release owner authorizes the patched release or rollback');
+  const authorizationCheckpoint = security.indexOf('The release owner authorizes the patched release only after');
+  assert.ok(rollbackCheckpoint >= 0, 'emergency procedure must retain a rollback path before a patch exists');
+  assert.match(security, /identifying the rollback artifact, recording why it\s+predates the affected artifact and contains the incident/i);
+  assert.match(security, /rollback decision and user\s+communication in the private record/i);
   assert.ok(advisoryCheckpoint >= 0, 'emergency procedure must create a private advisory after artifact evidence');
   assert.ok(authorizationCheckpoint >= 0, 'emergency procedure must authorize a release explicitly');
+  assert.ok(rollbackCheckpoint < advisoryCheckpoint, 'immediate rollback must remain available before patch-only advisory gates');
   assert.ok(advisoryCheckpoint < authorizationCheckpoint, 'private advisory, fix/regression links, and release date must precede authorization');
   assert.match(security, /private advisory draft, links the fix and minimal regression evidence,\s+and the release owner records the patched-release date/i);
   assert.match(security, /two business days/i);
