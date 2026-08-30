@@ -19,6 +19,8 @@ use Illuminate\Validation\ValidationException;
 
 final class ReverseDeposit
 {
+    public function __construct(private readonly ReconcileDeposit $reconciliation) {}
+
     public function reverse(User $actor, Deposit $deposit, string $reasonCode, ?string $detail = null): ReverseProviderDepositResult
     {
         Gate::forUser($actor)->authorize('correct', $deposit);
@@ -30,6 +32,9 @@ final class ReverseDeposit
             $original = Deposit::query()->lockForUpdate()->findOrFail($deposit->id);
             if ($original->kind !== DepositKind::ProviderCredit->value) {
                 throw ValidationException::withMessages(['deposit' => 'Deposit cannot be reversed.']);
+            }
+            if (! $this->reconciliation->report($original)->isReconciled) {
+                throw ValidationException::withMessages(['deposit' => 'Deposit must reconcile before reversal.']);
             }
             $reversal = Deposit::query()->where('reverses_deposit_id', $original->id)->first();
             if ($reversal === null) {
@@ -57,18 +62,19 @@ final class ReverseDeposit
                 $customerCredit->available_minor = (int) $customerCredit->available_minor - (int) $reversal->amount_minor;
                 $customerCredit->save();
                 CustomerCreditPosting::query()->create(['deposit_id' => $reversal->id, 'customer_credit_id' => $customerCredit->id, 'amount_minor' => -(int) $reversal->amount_minor]);
-            }
-            $result = new ReverseProviderDepositResult($reversal->wasRecentlyCreated ? ReversalResult::Reversed : ReversalResult::Replayed, $reversal);
-            FinancialCorrectionAudit::query()->firstOrCreate(
-                ['deposit_id' => $result->deposit->id, 'correction' => 'reverse_deposit'],
-                [
-                    'organization_id' => $result->deposit->organization_id,
+                FinancialCorrectionAudit::query()->create([
+                    'deposit_id' => $reversal->id,
+                    'organization_id' => $reversal->organization_id,
                     'actor_user_id' => $actor->id,
+                    'correction' => 'reverse_deposit',
                     'reason_code' => $reasonCode,
                     'detail' => $detail,
-                    'recorded_at' => CarbonImmutable::now(),
-                ],
-            );
+                    'recorded_at' => $recordedAt,
+                ]);
+            } elseif (! FinancialCorrectionAudit::query()->where('deposit_id', $reversal->id)->where('correction', 'reverse_deposit')->exists()) {
+                throw ValidationException::withMessages(['deposit' => 'Existing reversal is missing correction evidence.']);
+            }
+            $result = new ReverseProviderDepositResult($reversal->wasRecentlyCreated ? ReversalResult::Reversed : ReversalResult::Replayed, $reversal);
 
             return $result;
         }, attempts: 3);

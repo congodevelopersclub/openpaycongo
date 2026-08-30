@@ -26,6 +26,10 @@ final class ReconcileDeposit
         $deposit->loadMissing('ledgerEntries.reversesLedgerEntry');
         $discrepancies = [];
         $entries = $deposit->ledgerEntries;
+        $supportedKind = in_array($deposit->kind, [DepositKind::ProviderCredit->value, DepositKind::ProviderReversal->value], true);
+        if (! $supportedKind) {
+            $discrepancies[] = 'unsupported_deposit_kind';
+        }
 
         if ($entries->count() !== 2) {
             $discrepancies[] = 'ledger_entry_count';
@@ -83,9 +87,15 @@ final class ReconcileDeposit
 
     private function hasExpectedLedgerShape(Deposit $deposit): bool
     {
-        $expected = $deposit->kind === DepositKind::ProviderReversal->value
-            ? [['customer_credit', (int) $deposit->amount_minor, 0], ['provider_receivable', 0, (int) $deposit->amount_minor]]
-            : [['provider_receivable', (int) $deposit->amount_minor, 0], ['customer_credit', 0, (int) $deposit->amount_minor]];
+        $expected = match ($deposit->kind) {
+            DepositKind::ProviderCredit->value => [['provider_receivable', (int) $deposit->amount_minor, 0], ['customer_credit', 0, (int) $deposit->amount_minor]],
+            DepositKind::ProviderReversal->value => [['customer_credit', (int) $deposit->amount_minor, 0], ['provider_receivable', 0, (int) $deposit->amount_minor]],
+            default => [],
+        };
+
+        if ($expected === []) {
+            return false;
+        }
 
         return collect($expected)->every(fn (array $entry): bool => $deposit->ledgerEntries->contains(
             fn (LedgerEntry $actual): bool => $actual->account === $entry[0]

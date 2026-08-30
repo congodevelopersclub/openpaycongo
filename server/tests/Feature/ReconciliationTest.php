@@ -139,6 +139,10 @@ final class ReconciliationTest extends TestCase
 
         self::assertContains('customer_credit_posting_scope', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
 
+        $originalCredit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->firstOrFail();
+        CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->update(['customer_credit_id' => $originalCredit->id]);
+        $originalCredit->available_minor = $deposit->amount_minor;
+        $originalCredit->save();
         $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
         DB::table('deposits')->where('id', $reversal->id)->update(['amount_minor' => 6000]);
         DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'customer_credit')->update(['debit_minor' => 6000]);
@@ -150,13 +154,43 @@ final class ReconciliationTest extends TestCase
         self::assertContains('reversal_ledger_linkage', app(ReconcileDeposit::class)->report($reversal)->discrepancies);
     }
 
-    private function transfer(): ProviderTransfer
+    public function test_reversal_refuses_an_unreconciled_original_and_legacy_replay_without_evidence(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
+
+        try {
+            app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
+            self::fail('An unreconciled original must not be reversed.');
+        } catch (ValidationException) {
+            self::assertDatabaseCount('financial_correction_audits', 0);
+        }
+
+        CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 0]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer('legacy-replay'))->deposit;
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
+        DB::table('financial_correction_audits')->where('deposit_id', $reversal->id)->delete();
+
+        $this->expectException(ValidationException::class);
+        app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
+    }
+
+    public function test_reconciliation_rejects_an_unknown_deposit_kind(): void
+    {
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        DB::table('deposits')->where('id', $deposit->id)->update(['kind' => 'unknown']);
+
+        self::assertContains('unsupported_deposit_kind', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
+    }
+
+    private function transfer(string $providerReference = 'reconciliation-provider-reference'): ProviderTransfer
     {
         return new ProviderTransfer(
             organizationId: '00000000-0000-4000-8000-000000000001',
             installationIdentifier: 'reconciliation-installation',
             customerLookupIdentifier: Str::uuid()->toString(),
-            providerReference: 'reconciliation-provider-reference',
+            providerReference: $providerReference,
             amountMinor: 12500,
             currency: 'CDF',
             providerOccurredAt: '2026-08-30T01:00:00+00:00',
