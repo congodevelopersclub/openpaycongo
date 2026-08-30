@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../pairing/presentation/pairing_session_bloc.dart';
 import '../../pairing/presentation/pairing_session_status_card.dart';
+import '../../pairing/presentation/pairing_enrollment_bloc.dart';
+import '../../pairing/presentation/pairing_enrollment_status_card.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_bloc.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_card.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -17,6 +19,7 @@ final class PaymentInboxScreen extends StatefulWidget {
     super.key,
     this.smsPermissionState = SmsPermissionState.ready,
     this.gemmaCapability = const GemmaRuntimePending(),
+    this.pairingEnrollment,
     this.pairingSession,
     this.paymentLifecycle,
     this.syncCursor,
@@ -24,6 +27,7 @@ final class PaymentInboxScreen extends StatefulWidget {
   });
   final SmsPermissionState smsPermissionState;
   final GemmaCapabilityEvidence gemmaCapability;
+  final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
   final PaymentLifecycleBloc? paymentLifecycle;
   final SyncCursorBloc? syncCursor;
@@ -227,6 +231,14 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
             ),
             const SizedBox(height: 24),
             _CaptureStatusCard(state: widget.smsPermissionState),
+            if (widget.pairingEnrollment
+                case final PairingEnrollmentBloc enrollment) ...<Widget>[
+              const SizedBox(height: 12),
+              BlocProvider<PairingEnrollmentBloc>.value(
+                value: enrollment,
+                child: const PairingEnrollmentStatusCard(),
+              ),
+            ],
             if (widget.pairingSession
                 case final PairingSessionBloc pairing) ...<Widget>[
               const SizedBox(height: 12),
