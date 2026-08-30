@@ -18,7 +18,7 @@ No examples in this document contain personal data, usable credentials, private 
 - The pairing protocol binds an authenticated administrator ceremony to a bounded QR, uses protected ephemeral/private material, and requires `private, no-store` pairing responses. It explicitly does not protect a compromised hosting edge, administrator UI, or OAuth session ([ADR 004](adr-004-secure-device-enrollment.md)).
 - The canonical Laravel implementation and Android client are not evidence of release signing, deployable server image, or completed authentication lifecycle ([README](../README.md)).
 - **Prototype warning:** the canonical Laravel server does not yet establish production authentication, secret storage, telemetry retention, or deployment readiness. It must not process real data.
-- **Legacy Flutter prototype removal:** the unused plaintext `paymentdetail`
+- **Legacy Flutter encryption removal:** the unused plaintext `paymentdetail`
   SQLite path and its empty encryption placeholder were removed. The supported
   mobile seam is the encrypted native inbox plus the scoped durable payment
   outbox; aggregate sync telemetry exposes only a count, never credentials,
