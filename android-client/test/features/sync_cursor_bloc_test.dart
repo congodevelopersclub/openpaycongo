@@ -169,6 +169,23 @@ void main() {
     },
   );
 
+  test('empty reconciliation clears after an older blocked save', () async {
+    final _BlockedSaveStore store = _BlockedSaveStore();
+    final SyncCursorBloc bloc = SyncCursorBloc(
+      store: store,
+      contract: _Contract(null),
+      telemetry: _Telemetry(),
+    );
+    bloc.add(SyncCursorDeliveryReceived(SyncCursor('cursor-old')));
+    await store.saveEntered.future;
+    bloc.add(const SyncCursorStarted());
+    store.releaseSave();
+    await bloc.stream.firstWhere((state) => state is SyncCursorEmpty);
+    expect(store.value, isNull);
+    expect(store.clearCalls, 1);
+    await bloc.close();
+  });
+
   test('unexpected contract errors are not mapped to offline', () async {
     final _ObservingBlocObserver observer = _ObservingBlocObserver();
     final BlocObserver previous = Bloc.observer;
@@ -280,6 +297,31 @@ final class _FailFirstSaveStore extends _Store {
     saves++;
     if (saves == 1) throw const SyncCursorFailure();
     value = cursor;
+  }
+}
+
+final class _BlockedSaveStore extends _Store {
+  final Completer<void> saveEntered = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+  int clearCalls = 0;
+
+  void releaseSave() => _release.complete();
+
+  @override
+  Future<SyncCursor?> load() async => null;
+
+  @override
+  Future<void> save(SyncCursor cursor) async {
+    saves++;
+    saveEntered.complete();
+    await _release.future;
+    value = cursor;
+  }
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    value = null;
   }
 }
 

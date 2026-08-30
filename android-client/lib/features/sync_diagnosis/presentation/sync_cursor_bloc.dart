@@ -159,10 +159,8 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
       if (generation != _generation) return;
       final SyncCursor? next = reconciliation.cursor;
       if (next == null) {
-        if (current != null) {
-          await _clear();
-          if (generation != _generation) return;
-        }
+        await _clear();
+        if (generation != _generation) return;
         if (reconciliation.health == SyncCursorHealth.degraded) {
           emit(const SyncCursorDegraded(null));
           telemetry.record(SyncCursorTelemetrySignal.degraded);
