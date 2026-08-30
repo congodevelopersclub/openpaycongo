@@ -131,7 +131,21 @@ final class PairingSessionBloc
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
       return;
     }
-    _cancellationIntent = false;
+    final Future<bool>? activeCleanup = _cleanupForGeneration(_generation);
+    if (activeCleanup != null) {
+      await activeCleanup;
+      if (_activeOperation != null) return;
+    }
+    if (_cancellationIntent) {
+      final int cancellationGeneration = _generation;
+      final bool cleared = await _installCancellationCleanup(
+        _persistenceQueue,
+        cancellationGeneration,
+        emit,
+      );
+      if (!cleared || cancellationGeneration != _generation) return;
+      _cancellationIntent = false;
+    }
     final int generation = ++_generation;
     _activeOperation = generation;
     emit(const PairingSessionLoading());
@@ -174,7 +188,13 @@ final class PairingSessionBloc
       return;
     }
     final int observedGeneration = _generation;
-    final PairingSession? session = await store.load();
+    final PairingSession? session;
+    try {
+      session = await store.load();
+    } on PairingSessionPersistenceException {
+      _emitOfflineIfCurrent(observedGeneration, emit);
+      return;
+    }
     if (observedGeneration != _generation) return;
     if (session == null) {
       await _start(const PairingSessionStarted(), emit);
@@ -218,7 +238,13 @@ final class PairingSessionBloc
       return;
     }
     final int observedGeneration = _generation;
-    final PairingSession? session = await store.load();
+    final PairingSession? session;
+    try {
+      session = await store.load();
+    } on PairingSessionPersistenceException {
+      _emitOfflineIfCurrent(observedGeneration, emit);
+      return;
+    }
     if (observedGeneration != _generation) return;
     if (_activeOperation != null) {
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
