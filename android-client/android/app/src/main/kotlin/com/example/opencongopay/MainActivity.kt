@@ -14,6 +14,9 @@ import com.congodeveloperclub.opencongopay.sms.GuardedTaskRunner
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskTimeoutException
 import com.congodeveloperclub.opencongopay.sms.InvalidDecisionCursorException
 import com.congodeveloperclub.opencongopay.sms.LegacySmsMigrationRequiredException
+import com.congodeveloperclub.opencongopay.sms.OutboxRecoveryRequiredException
+import com.congodeveloperclub.opencongopay.sms.OutboxStorageException
+import com.congodeveloperclub.opencongopay.sms.PaymentOutboxVaultProvider
 import com.congodeveloperclub.opencongopay.sms.RecoveryRequiredException
 import com.congodeveloperclub.opencongopay.sms.SmsAccessDenial
 import com.congodeveloperclub.opencongopay.sms.SmsAccessGuard
@@ -25,6 +28,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "openpaycongo/sms_gateway"
+    private val outboxChannelName = "openpaycongo/payment_outbox"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
@@ -38,6 +42,8 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler(::handleGatewayCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, outboxChannelName)
+            .setMethodCallHandler(::handleOutboxCall)
     }
 
     override fun onResume() {
@@ -81,6 +87,32 @@ class MainActivity : FlutterFragmentActivity() {
             else -> result.notImplemented()
         }
     }
+
+    private fun handleOutboxCall(call: MethodCall, result: MethodChannel.Result) {
+        val vault = PaymentOutboxVaultProvider.get(applicationContext)
+        try {
+            when (call.method) {
+                "storageDirectory" -> result.success(vault.storageDirectory())
+                "encrypt" -> result.success(vault.encrypt(outboxIdentity(call), outboxValue(call)))
+                "decrypt" -> result.success(vault.decrypt(outboxIdentity(call), outboxValue(call)))
+                else -> result.notImplemented()
+            }
+        } catch (_: OutboxRecoveryRequiredException) {
+            result.error("outbox_recovery_required", "Encrypted outbox recovery is required", null)
+        } catch (_: OutboxStorageException) {
+            result.error("outbox_storage_failure", "Encrypted outbox storage failed", null)
+        } catch (_: IllegalArgumentException) {
+            result.error("outbox_storage_failure", "Encrypted outbox storage failed", null)
+        }
+    }
+
+    private fun outboxIdentity(call: MethodCall): String =
+        (call.arguments as? Map<*, *>)?.get("identity") as? String
+            ?: throw IllegalArgumentException()
+
+    private fun outboxValue(call: MethodCall): String =
+        (call.arguments as? Map<*, *>)?.get("value") as? String
+            ?: throw IllegalArgumentException()
 
     private fun updateUnlock(call: MethodCall, result: MethodChannel.Result) {
         val arguments = call.arguments as? Map<*, *>

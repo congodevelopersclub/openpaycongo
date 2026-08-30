@@ -143,7 +143,7 @@ private class AndroidDirectorySync : DirectorySync {
     }
 }
 
-private class AndroidKeystoreKeyAccess(
+internal class AndroidKeystoreKeyAccess(
     private val alias: String,
     private val ciphertextExists: () -> Boolean,
 ) : SecretKeyAccess {
