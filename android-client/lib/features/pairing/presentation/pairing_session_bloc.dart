@@ -115,6 +115,7 @@ final class PairingSessionBloc
   int _generation = 0;
   PairingSession? _desiredSession;
   int _persistenceRevision = 0;
+  Future<void>? _cancellationCleanup;
   Future<void> _start(
     PairingSessionStarted event,
     Emitter<PairingSessionState> emit,
@@ -144,6 +145,11 @@ final class PairingSessionBloc
     PairingSessionRetryRequested event,
     Emitter<PairingSessionState> emit,
   ) async {
+    final Future<void>? cancellationCleanup = _cancellationCleanup;
+    if (cancellationCleanup != null) {
+      await cancellationCleanup;
+      return;
+    }
     final int observedGeneration = _generation;
     final PairingSession? session = await store.load();
     if (observedGeneration != _generation) return;
@@ -174,6 +180,11 @@ final class PairingSessionBloc
     PairingSessionRecovered event,
     Emitter<PairingSessionState> emit,
   ) async {
+    final Future<void>? cancellationCleanup = _cancellationCleanup;
+    if (cancellationCleanup != null) {
+      await cancellationCleanup;
+      return;
+    }
     if (_activeOperation != null) {
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
       return;
@@ -206,7 +217,12 @@ final class PairingSessionBloc
     _activeOperation = null;
     _setDesiredSession(null);
     telemetry.record(PairingTelemetrySignal.cancelled);
-    await _reconcileDurableSession();
+    final Future<void> cleanup = _reconcileDurableSession();
+    _cancellationCleanup = cleanup;
+    await cleanup;
+    if (identical(_cancellationCleanup, cleanup)) {
+      _cancellationCleanup = null;
+    }
     if (generation != _generation) return;
     emit(const PairingSessionIdle());
   }

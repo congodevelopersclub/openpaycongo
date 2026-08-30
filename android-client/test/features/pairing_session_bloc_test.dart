@@ -367,6 +367,42 @@ void main() {
       await bloc.close();
     },
   );
+  test(
+    'retry and recovery during cancel cleanup cannot revive a session',
+    () async {
+      final PairingSession oldSession = _session(PairingPhase.pending);
+      final _DeferredClearStore store = _DeferredClearStore();
+      final _Gateway gateway = _Gateway(oldSession);
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: gateway,
+        telemetry: _Telemetry(),
+      );
+      final Future<PairingSessionState> pending = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionPending,
+      );
+      bloc.add(const PairingSessionStarted());
+      await pending;
+      expect(store.value, same(oldSession));
+
+      bloc.add(const PairingSessionCancelled());
+      await store.clearEntered.future;
+      bloc
+        ..add(const PairingSessionRetryRequested())
+        ..add(const PairingSessionRecovered());
+      expect(gateway.calls, 1);
+
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      store.releaseClear.complete();
+      await idle;
+      expect(bloc.state, isA<PairingSessionIdle>());
+      expect(store.value, isNull);
+      expect(gateway.calls, 1);
+      await bloc.close();
+    },
+  );
 }
 
 PairingSession _session(PairingPhase phase) => PairingSession(
@@ -538,6 +574,7 @@ final class _DeferredFirstSaveStore extends _Store {
 final class _DeferredClearStore extends _Store {
   final Completer<void> clearEntered = Completer<void>();
   final Completer<void> releaseClear = Completer<void>();
+  final Completer<void> clearReturned = Completer<void>();
   final Completer<void> newSessionRestored = Completer<void>();
   bool _clearReturned = false;
 
@@ -547,6 +584,7 @@ final class _DeferredClearStore extends _Store {
     await releaseClear.future;
     value = null;
     _clearReturned = true;
+    clearReturned.complete();
   }
 
   @override
