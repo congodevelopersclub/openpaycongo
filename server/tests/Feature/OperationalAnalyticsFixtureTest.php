@@ -33,9 +33,15 @@ final class OperationalAnalyticsFixtureTest extends TestCase
                 'adapter' => 'sqlite',
                 'implementation' => 'congo-openpay-server',
             ]);
-        $this->getJson('/version')
+        $originalConnection = config('database.default');
+        config(['database.default' => 'pgsql']);
+        $version = $this->getJson('/version');
+        config(['database.default' => $originalConnection]);
+
+        $version
             ->assertOk()
-            ->assertHeader('cache-control', 'no-store, private');
+            ->assertHeader('cache-control', 'no-store, private')
+            ->assertJson(['adapter' => 'pgsql']);
     }
 
     public function test_projection_dependency_failure_closes_readiness(): void

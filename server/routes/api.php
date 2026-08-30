@@ -17,6 +17,6 @@ Route::get('/version', static fn () => response()->json([
     'build' => 'dev',
     'contract_version' => 'unimplemented',
     'implementation' => 'congo-openpay-server',
-    'adapter' => 'sqlite',
+    'adapter' => config('database.default'),
     'migration_revision' => 'unimplemented',
 ], 200, ['cache-control' => 'no-store']));
