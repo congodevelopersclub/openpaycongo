@@ -403,6 +403,136 @@ void main() {
       await bloc.close();
     },
   );
+  test(
+    'cancel waits for a pre-cancel deferred save before reporting idle',
+    () async {
+      final PairingSession session = _session(PairingPhase.pending);
+      final _DeferredFirstSaveStore store = _DeferredFirstSaveStore(session);
+      final Completer<PairingSession> begin = Completer<PairingSession>();
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: _DeferredGateway(begin, Completer<PairingSession>()),
+        telemetry: _Telemetry(),
+      );
+      bloc.add(const PairingSessionStarted());
+      begin.complete(session);
+      await store.oldSaveEntered.future;
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      bloc.add(const PairingSessionCancelled());
+      expect(bloc.state, isA<PairingSessionLoading>());
+      store.releaseOldSave.complete();
+      await idle;
+      expect(store.value, isNull);
+      await bloc.close();
+    },
+  );
+  test('duplicate cancel owns one cleanup and emits telemetry once', () async {
+    final _DeferredClearStore store = _DeferredClearStore();
+    final _Telemetry telemetry = _Telemetry();
+    final PairingSessionBloc bloc = PairingSessionBloc(
+      store: store,
+      gateway: _Gateway(_session(PairingPhase.pending)),
+      telemetry: telemetry,
+    );
+    bloc
+      ..add(const PairingSessionCancelled())
+      ..add(const PairingSessionCancelled());
+    await store.clearEntered.future;
+    expect(
+      telemetry.signals.where(
+        (PairingTelemetrySignal signal) =>
+            signal == PairingTelemetrySignal.cancelled,
+      ),
+      hasLength(1),
+    );
+    store.releaseClear.complete();
+    await store.clearReturned.future;
+    expect(store.value, isNull);
+    await bloc.close();
+  });
+  test(
+    'retry and recovery share one resumed clear after a transient failure',
+    () async {
+      final PairingSession stale = _session(PairingPhase.pending);
+      final _FailOnceClearStore store = _FailOnceClearStore()..value = stale;
+      final _Gateway gateway = _Gateway(stale);
+      final List<PairingSessionState> transitions = <PairingSessionState>[];
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: gateway,
+        telemetry: _Telemetry(),
+      );
+      final StreamSubscription<PairingSessionState> subscription = bloc.stream
+          .listen(transitions.add);
+      final Future<PairingSessionState> offline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(const PairingSessionCancelled());
+      await store.firstClearAttempt.future;
+      await offline;
+      expect(bloc.state, isA<PairingSessionOffline>());
+      bloc
+        ..add(const PairingSessionRetryRequested())
+        ..add(const PairingSessionRecovered());
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      await store.resumedClearEntered.future;
+      expect(store.clearCalls, 2);
+      expect(store.loadCalls, 0);
+      expect(store.saveCalls, 0);
+      expect(gateway.calls, 0);
+      expect(bloc.state, isA<PairingSessionOffline>());
+      store.releaseResumedClear.complete();
+      await idle;
+      expect(bloc.state, isA<PairingSessionIdle>());
+      expect(store.value, isNull);
+      expect(store.clearCalls, 2);
+      expect(
+        transitions.map((PairingSessionState state) => state.runtimeType),
+        <Type>[PairingSessionOffline, PairingSessionIdle],
+      );
+      expect(gateway.calls, 0);
+      await subscription.cancel();
+      await bloc.close();
+    },
+  );
+  test('fresh start supersedes a failed cancellation cleanup', () async {
+    final PairingSession stale = _session(PairingPhase.pending);
+    final PairingSession replacement = PairingSession(
+      sessionId: 'replacement',
+      phase: PairingPhase.pending,
+      updatedAt: DateTime.utc(2026, 1, 2),
+    );
+    final _FailOnceClearStore store = _FailOnceClearStore()..value = stale;
+    final PairingSessionBloc bloc = PairingSessionBloc(
+      store: store,
+      gateway: _Gateway(replacement),
+      telemetry: _Telemetry(),
+    );
+    final List<PairingSessionState> transitions = <PairingSessionState>[];
+    final StreamSubscription<PairingSessionState> subscription = bloc.stream
+        .listen(transitions.add);
+    final Future<PairingSessionState> offline = bloc.stream.firstWhere(
+      (PairingSessionState state) => state is PairingSessionOffline,
+    );
+    bloc.add(const PairingSessionCancelled());
+    await store.firstClearAttempt.future;
+    await offline;
+    final Future<PairingSessionState> pending = bloc.stream.firstWhere(
+      (PairingSessionState state) => state is PairingSessionPending,
+    );
+    bloc.add(const PairingSessionStarted());
+    await pending;
+    expect(bloc.state, isA<PairingSessionPending>());
+    expect(store.value, same(replacement));
+    expect(store.clearCalls, 1);
+    expect(transitions.whereType<PairingSessionIdle>(), isEmpty);
+    await subscription.cancel();
+    await bloc.close();
+  });
 }
 
 PairingSession _session(PairingPhase phase) => PairingSession(
@@ -594,6 +724,34 @@ final class _DeferredClearStore extends _Store {
     if (_clearReturned && !newSessionRestored.isCompleted) {
       newSessionRestored.complete();
     }
+  }
+}
+
+final class _FailOnceClearStore extends _Store {
+  final Completer<void> firstClearAttempt = Completer<void>();
+  final Completer<void> resumedClearEntered = Completer<void>();
+  final Completer<void> releaseResumedClear = Completer<void>();
+  final Completer<void> successfulClear = Completer<void>();
+  int clearCalls = 0;
+  int loadCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    if (clearCalls == 1) {
+      firstClearAttempt.complete();
+      throw const PairingSessionPersistenceException();
+    }
+    resumedClearEntered.complete();
+    await releaseResumedClear.future;
+    value = null;
+    successfulClear.complete();
+  }
+
+  @override
+  Future<PairingSession?> load() async {
+    loadCalls++;
+    return super.load();
   }
 }
 

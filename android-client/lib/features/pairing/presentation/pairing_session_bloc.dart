@@ -32,6 +32,10 @@ abstract interface class PairingSessionStore {
   Future<void> clear();
 }
 
+final class PairingSessionPersistenceException implements Exception {
+  const PairingSessionPersistenceException();
+}
+
 abstract interface class PairingSessionGateway {
   Future<PairingSession> begin();
   Future<PairingSession> refresh(String sessionId);
@@ -115,7 +119,9 @@ final class PairingSessionBloc
   int _generation = 0;
   PairingSession? _desiredSession;
   int _persistenceRevision = 0;
-  Future<void>? _cancellationCleanup;
+  Future<bool>? _cancellationCleanup;
+  Future<void> _persistenceDrain = Future<void>.value();
+  bool _cancellationIntent = false;
   Future<void> _start(
     PairingSessionStarted event,
     Emitter<PairingSessionState> emit,
@@ -124,6 +130,7 @@ final class PairingSessionBloc
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
       return;
     }
+    _cancellationIntent = false;
     final int generation = ++_generation;
     _activeOperation = generation;
     emit(const PairingSessionLoading());
@@ -145,9 +152,13 @@ final class PairingSessionBloc
     PairingSessionRetryRequested event,
     Emitter<PairingSessionState> emit,
   ) async {
-    final Future<void>? cancellationCleanup = _cancellationCleanup;
+    final Future<bool>? cancellationCleanup = _cancellationCleanup;
     if (cancellationCleanup != null) {
       await cancellationCleanup;
+      return;
+    }
+    if (_cancellationIntent) {
+      await _resumeCancellation(emit);
       return;
     }
     final int observedGeneration = _generation;
@@ -180,9 +191,13 @@ final class PairingSessionBloc
     PairingSessionRecovered event,
     Emitter<PairingSessionState> emit,
   ) async {
-    final Future<void>? cancellationCleanup = _cancellationCleanup;
+    final Future<bool>? cancellationCleanup = _cancellationCleanup;
     if (cancellationCleanup != null) {
       await cancellationCleanup;
+      return;
+    }
+    if (_cancellationIntent) {
+      await _resumeCancellation(emit);
       return;
     }
     if (_activeOperation != null) {
@@ -213,17 +228,26 @@ final class PairingSessionBloc
     PairingSessionCancelled event,
     Emitter<PairingSessionState> emit,
   ) async {
+    final Future<bool>? activeCleanup = _cancellationCleanup;
+    if (activeCleanup != null) {
+      await activeCleanup;
+      return;
+    }
     final int generation = ++_generation;
     _activeOperation = null;
+    _cancellationIntent = true;
     _setDesiredSession(null);
     telemetry.record(PairingTelemetrySignal.cancelled);
-    final Future<void> cleanup = _reconcileDurableSession();
-    _cancellationCleanup = cleanup;
-    await cleanup;
-    if (identical(_cancellationCleanup, cleanup)) {
-      _cancellationCleanup = null;
-    }
+    final Future<void> pendingPersistence = _persistenceDrain;
+    final Future<bool> cleanup = _installCancellationCleanup(
+      pendingPersistence,
+      generation,
+      emit,
+    );
+    final bool cleanupSucceeded = await cleanup;
+    if (!cleanupSucceeded) return;
     if (generation != _generation) return;
+    _cancellationIntent = false;
     emit(const PairingSessionIdle());
   }
 
@@ -234,7 +258,7 @@ final class PairingSessionBloc
   ) async {
     if (generation != _generation) return;
     _setDesiredSession(session);
-    await store.save(session);
+    await _persist(() => store.save(session));
     if (generation != _generation || _desiredSession != session) {
       await _reconcileDurableSession();
       return;
@@ -268,11 +292,71 @@ final class PairingSessionBloc
       final int revision = _persistenceRevision;
       final PairingSession? session = _desiredSession;
       if (session == null) {
-        await store.clear();
+        await _persist(store.clear);
       } else {
-        await store.save(session);
+        await _persist(() => store.save(session));
       }
       if (revision == _persistenceRevision) return;
     }
+  }
+
+  Future<void> _persist(Future<void> Function() operation) {
+    final Future<void> result = operation();
+    _persistenceDrain = Future.wait<void>(<Future<void>>[
+      _persistenceDrain.catchError((Object _) {}),
+      result.catchError((Object _) {}),
+    ]);
+    return result;
+  }
+
+  Future<bool> _finishCancellation(
+    Future<void> pendingPersistence,
+    int generation,
+    Emitter<PairingSessionState> emit,
+  ) async {
+    try {
+      await pendingPersistence;
+      await _reconcileDurableSession();
+      return true;
+    } on PairingSessionPersistenceException {
+      if (generation == _generation) {
+        emit(const PairingSessionOffline());
+        telemetry.record(PairingTelemetrySignal.offline);
+      }
+      return false;
+    }
+  }
+
+  Future<void> _resumeCancellation(Emitter<PairingSessionState> emit) async {
+    final Future<bool>? activeCleanup = _cancellationCleanup;
+    if (activeCleanup != null) {
+      await activeCleanup;
+      return;
+    }
+    final int generation = _generation;
+    final bool cleared = await _installCancellationCleanup(
+      _persistenceDrain,
+      generation,
+      emit,
+    );
+    if (!cleared || generation != _generation) return;
+    _cancellationIntent = false;
+    emit(const PairingSessionIdle());
+  }
+
+  Future<bool> _installCancellationCleanup(
+    Future<void> pendingPersistence,
+    int generation,
+    Emitter<PairingSessionState> emit,
+  ) {
+    late final Future<bool> cleanup;
+    cleanup = _finishCancellation(pendingPersistence, generation, emit);
+    _cancellationCleanup = cleanup;
+    cleanup.whenComplete(() {
+      if (identical(_cancellationCleanup, cleanup)) {
+        _cancellationCleanup = null;
+      }
+    });
+    return cleanup;
   }
 }
