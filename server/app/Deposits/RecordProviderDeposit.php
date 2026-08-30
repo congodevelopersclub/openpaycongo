@@ -365,7 +365,8 @@ final class RecordProviderDeposit
 
         $ring = [];
         foreach ($configured as $keyId => $key) {
-            if (! is_string($keyId) || preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $keyId) !== 1 || ! is_string($key) || mb_strlen($key) < 32) {
+            $keyId = (string) $keyId;
+            if (preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $keyId) !== 1 || ! is_string($key) || mb_strlen($key) < 32) {
                 throw new LogicException('Deposit lookup-token key ring is not configured.');
             }
 

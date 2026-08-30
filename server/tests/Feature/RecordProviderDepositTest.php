@@ -90,6 +90,19 @@ final class RecordProviderDepositTest extends TestCase
         self::assertDatabaseCount('ledger_entries', 2);
     }
 
+    public function test_numeric_json_lookup_key_ids_are_normalized_to_strings(): void
+    {
+        config([
+            'deposits.lookup_token_keys' => '{"2026":"numeric-lookup-key-material-at-least-32"}',
+            'deposits.lookup_token_active_key_id' => '2026',
+        ]);
+
+        $result = app(RecordProviderDeposit::class)->record($this->transfer());
+
+        self::assertSame(RecordResult::Recorded, $result->outcome);
+        self::assertSame('2026', $result->deposit->provider_reference_key_version);
+    }
+
     public function test_a_literal_z_provider_timestamp_is_accepted_and_canonicalized_to_utc(): void
     {
         $result = app(RecordProviderDeposit::class)->record($this->transfer(

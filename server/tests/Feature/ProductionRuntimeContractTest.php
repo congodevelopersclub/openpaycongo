@@ -41,6 +41,8 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/node_modules', $dockerignore);
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
         self::assertStringContainsString('${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}', $compose);
+        self::assertStringContainsString('DEPOSIT_LOOKUP_TOKEN_KEYS: ${DEPOSIT_LOOKUP_TOKEN_KEYS:-}', $compose);
+        self::assertStringContainsString('DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID: ${DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID:-}', $compose);
         self::assertStringContainsString('SESSION_SECURE_COOKIE: "true"', $compose);
         self::assertMatchesRegularExpression('/postgres:16-alpine@sha256:[a-f0-9]{64}/', $compose);
         self::assertStringContainsString('nginx:', $compose);
