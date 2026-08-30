@@ -5,12 +5,15 @@ namespace Tests\Feature;
 use App\Models\DeveloperApplication;
 use App\Models\SourceInstallation;
 use App\Models\User;
+use App\Providers\AppServiceProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\RateLimiter;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Passport;
 use Laravel\Sanctum\Sanctum;
+use LogicException;
 use Tests\TestCase;
 
 final class IdentityBoundaryConfigurationTest extends TestCase
@@ -29,6 +32,27 @@ final class IdentityBoundaryConfigurationTest extends TestCase
         self::assertSame('session', config('auth.guards.web.driver'));
         self::assertSame('sanctum', config('auth.guards.mobile.driver'));
         self::assertSame('web', config('fortify.guard'));
+    }
+
+    public function test_passport_uses_the_explicitly_configured_key_directory(): void
+    {
+        $keyDirectory = storage_path('passport-contract-keys');
+        config(['openpay.passport_keys_path' => $keyDirectory]);
+
+        (new AppServiceProvider($this->app))->boot();
+
+        self::assertSame($keyDirectory.'/oauth-private.key', Passport::keyPath('oauth-private.key'));
+        self::assertSame($keyDirectory.'/oauth-public.key', Passport::keyPath('oauth-public.key'));
+    }
+
+    public function test_production_refuses_an_implicit_passport_key_directory(): void
+    {
+        config(['openpay.passport_keys_path' => null]);
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('Passport signing-key directory must be configured.');
+
+        (new AppServiceProvider($this->app))->boot();
     }
 
     public function test_only_client_credentials_token_exchange_is_exposed_under_oauth(): void

@@ -49,6 +49,8 @@ run_laravel_pr() (
   export OPENPAY_PASSKEY_RP_ID='openpay.test'
   export OPENPAY_PASSKEY_ALLOWED_ORIGINS='["https://openpay.test"]'
   export OPENPAY_PASSKEY_USER_HANDLE_SECRET='ci-passkey-user-handle-secret-at-least-32-characters'
+  export OPENPAY_PASSPORT_PRIVATE_KEY_FILE='/tmp/openpay-passport-private-key'
+  export OPENPAY_PASSPORT_PUBLIC_KEY_FILE='/tmp/openpay-passport-public-key'
   export OPENPAY_DB_PASSWORD='ci-compose-validation-only'
   export DEPOSIT_LOOKUP_TOKEN_KEY='ci-compose-deposit-lookup-token-only'
   created_markers=()
@@ -60,7 +62,7 @@ run_laravel_pr() (
   }
   trap cleanup_laravel_markers EXIT
   docker compose config --quiet
-  for secret in OPENPAY_APP_KEY OPENPAY_DB_PASSWORD DEPOSIT_LOOKUP_TOKEN_KEY; do
+  for secret in OPENPAY_APP_KEY OPENPAY_DB_PASSWORD DEPOSIT_LOOKUP_TOKEN_KEY OPENPAY_PASSPORT_PRIVATE_KEY_FILE OPENPAY_PASSPORT_PUBLIC_KEY_FILE; do
     if env -u "$secret" docker compose config --quiet >/dev/null 2>&1; then die 'Compose accepted a missing required secret.'; fi
   done
   run_laravel_quality_and_tests

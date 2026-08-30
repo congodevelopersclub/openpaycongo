@@ -153,6 +153,8 @@ RUN php -m | grep -qx pdo_pgsql \
     && test ! -e pint.json \
     && test ! -e .env \
     && test ! -e .env.example \
+    && test ! -e storage/oauth-private.key \
+    && test ! -e storage/oauth-public.key \
     && test ! -e node_modules \
     && test ! -e vendor/.openpay-host-dependency-marker \
     && test -f composer.json \

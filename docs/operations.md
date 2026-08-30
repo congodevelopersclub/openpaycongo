@@ -51,6 +51,46 @@ must be at least 32 bytes, and must come from the secret manager. These four
 values are required by this production Compose path; do not substitute a
 wildcard, a forwarded host header, or a local HTTP address.
 
+## Passport signing keys
+
+Passport signs and validates service tokens with a stable RSA key pair. The
+production image contains neither key and Compose does not put PEM data in
+environment variables. Generate the pair once, outside the repository and
+outside the image, in a protected host directory. This command uses Passport's
+native key generator, refuses to overwrite either existing key, and does not
+print key material:
+
+```bash
+export OPENPAY_PASSPORT_KEYS_DIR='/protected/openpay/passport'
+install -d -m 0700 "$OPENPAY_PASSPORT_KEYS_DIR"
+test ! -e "$OPENPAY_PASSPORT_KEYS_DIR/oauth-private.key"
+test ! -e "$OPENPAY_PASSPORT_KEYS_DIR/oauth-public.key"
+docker compose build php
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --env APP_ENV=production \
+  --env OPENPAY_PASSPORT_KEYS_PATH=/run/openpay-passport-keys \
+  --mount type=bind,src="$OPENPAY_PASSPORT_KEYS_DIR",dst=/run/openpay-passport-keys \
+  congo-openpay-fpm:local \
+  sh -ceu 'umask 077; php artisan passport:keys; chmod 600 /run/openpay-passport-keys/oauth-private.key /run/openpay-passport-keys/oauth-public.key'
+export OPENPAY_PASSPORT_PRIVATE_KEY_FILE="$OPENPAY_PASSPORT_KEYS_DIR/oauth-private.key"
+export OPENPAY_PASSPORT_PUBLIC_KEY_FILE="$OPENPAY_PASSPORT_KEYS_DIR/oauth-public.key"
+```
+
+The `php` service mounts those two files as Docker secrets, read-only, at
+`/run/secrets/oauth-private.key` and `/run/secrets/oauth-public.key`. It is the
+only current process that issues or validates Passport service tokens. Do not
+mount the private key into nginx, PostgreSQL, migrations, queue workers, or the
+scheduler. Any future process that uses Passport must receive the same
+read-only secret pair and be deployed with this configuration.
+
+Keep the host directory and its encrypted, access-controlled backup outside
+the repository, image, Compose project, logs, shell history, and telemetry.
+Runtime recreation does not change these files; loss or replacement changes
+the signing identity and can invalidate service tokens. Key rotation, old-key
+validation overlap, and revocation policy require an explicit operational
+decision; this baseline intentionally does not automate them.
+
 ## Legacy administrator provisioning
 
 If this migration is deployed to an installation which already contains users,

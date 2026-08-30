@@ -20,6 +20,7 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Passkeys\Contracts\PasskeyLoginResponse as PasskeyLoginResponseContract;
 use Laravel\Passport\Bridge\ScopeRepository as PassportScopeRepository;
 use Laravel\Passport\Passport;
+use LogicException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -43,6 +44,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $passportKeysPath = config('openpay.passport_keys_path');
+        if (! is_string($passportKeysPath) || trim($passportKeysPath) === '') {
+            throw new LogicException('Passport signing-key directory must be configured.');
+        }
+
+        Passport::loadKeysFrom($passportKeysPath);
+
         config()->set('passkeys', config('openpay.passkeys'));
 
         Passport::tokensCan([
