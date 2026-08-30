@@ -52,7 +52,11 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
   const runs = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []).map((step) => step.run).filter(Boolean).join('\n');
   assert.match(runs, /docker build --target test -f docs\/Dockerfile \./);
   assert.match(runs, /docker build --target test -f server\/Dockerfile \./);
-  assert.equal(workflow.jobs['postgres-migration'].services.postgres.image, 'postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685');
+  const postgresImage = 'postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685';
+  assert.equal(workflow.jobs['postgres-migration'].services.postgres.image, postgresImage);
+  const postgresClientImages = (workflow.jobs['postgres-migration'].steps ?? [])
+    .flatMap((step) => step.run?.match(/postgres:16-alpine@sha256:[a-f0-9]{64}/g) ?? []);
+  assert.deepEqual(postgresClientImages, [postgresImage, postgresImage]);
   assert.match(runs, /deposits_reverses_deposit_id_foreign:FOREIGN KEY/);
   assert.match(runs, /deposits_reverses_deposit_id_unique:UNIQUE/);
   assert.match(runs, /docker build[\s\S]*android-client/);
