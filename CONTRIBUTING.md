@@ -10,9 +10,13 @@ OpenPay Congo is an early prototype. Do not use real payment, SMS, credential, o
 - Describe compatibility, operational risk, and rollback.
 - Keep commits independently reviewable; do not mix cleanup with a behavior or security change.
 
-## Authority that is still pending
+## Authority and security reporting
 
-A maintainer decision is required before this repository can publish contribution sign-off, licensing, triage ownership, release authority, or a private security-reporting channel. Contributors must not represent any of those policies as approved until maintainers publish them.
+Contribution sign-off, licensing, and production release authority remain
+maintainer decisions. Security-reporting roles, response targets, coordinated
+disclosure, and emergency-release procedure are governed by
+[`SECURITY.md`](SECURITY.md). Do not represent a private reporting channel as
+available while repository settings show it is disabled.
 
 ## Review expectations
 

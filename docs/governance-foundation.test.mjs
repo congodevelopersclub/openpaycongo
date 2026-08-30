@@ -19,7 +19,7 @@ test('public contributor and reporting guidance requires evidence without solici
   assert.match(contributing, /rollback/i);
   assert.match(contributing, /maintainer decision/i);
   assert.match(security, /Do not publish/i);
-  assert.match(security, /not yet published/i);
+  assert.match(security, /currently disabled/i);
   assert.match(pullRequest, /evidence/i);
   assert.match(pullRequest, /rollback/i);
   assert.match(issueTemplate, /reproduction/i);

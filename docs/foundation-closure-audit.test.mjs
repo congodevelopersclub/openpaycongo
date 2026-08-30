@@ -16,6 +16,8 @@ test('foundation closure audit preserves explicit maintainer decisions and evide
   for (const issue of ['#9', '#38', '#67', '#10', '#69', '#11', '#21', '#68']) assert.match(audit, new RegExp(issue.replace('#', '\\#')));
   assert.match(audit, /do not close/i);
   assert.match(audit, /not yet approved/i);
+  assert.match(audit, /Published `SECURITY\.md` policy/);
+  assert.match(audit, /private-reporting enablement and exception authority remain pending/i);
   assert.match(audit, /reproducible public evidence/i);
   assert.doesNotMatch(audit, /all children complete/i);
 });
