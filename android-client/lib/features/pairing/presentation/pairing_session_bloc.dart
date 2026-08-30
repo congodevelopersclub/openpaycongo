@@ -121,6 +121,7 @@ final class PairingSessionBloc
   int _persistenceRevision = 0;
   Future<bool>? _cancellationCleanup;
   int? _cancellationCleanupGeneration;
+  int? _startWaitingForCleanupGeneration;
   Future<void> _persistenceQueue = Future<void>.value();
   bool _cancellationIntent = false;
   Future<void> _start(
@@ -131,9 +132,18 @@ final class PairingSessionBloc
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
       return;
     }
+    final int observedGeneration = _generation;
     final Future<bool>? activeCleanup = _cleanupForGeneration(_generation);
     if (activeCleanup != null) {
-      await activeCleanup;
+      _startWaitingForCleanupGeneration = observedGeneration;
+      try {
+        await activeCleanup;
+      } finally {
+        if (_startWaitingForCleanupGeneration == observedGeneration) {
+          _startWaitingForCleanupGeneration = null;
+        }
+      }
+      if (observedGeneration != _generation) return;
       if (_activeOperation != null) return;
     }
     if (_cancellationIntent) {
@@ -271,7 +281,25 @@ final class PairingSessionBloc
   ) async {
     final Future<bool>? activeCleanup = _cleanupForGeneration(_generation);
     if (activeCleanup != null) {
+      if (_startWaitingForCleanupGeneration != _generation) {
+        await activeCleanup;
+        return;
+      }
+      final int generation = ++_generation;
+      _activeOperation = null;
+      _cancellationIntent = true;
+      _setDesiredSession(null);
+      telemetry.record(PairingTelemetrySignal.cancelled);
       await activeCleanup;
+      final bool cleared = await _installCancellationCleanup(
+        _persistenceQueue,
+        generation,
+        emit,
+      );
+      if (cleared && generation == _generation) {
+        _cancellationIntent = false;
+        emit(const PairingSessionIdle());
+      }
       return;
     }
     final int generation = ++_generation;

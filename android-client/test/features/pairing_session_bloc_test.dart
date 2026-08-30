@@ -431,6 +431,35 @@ void main() {
       await bloc.close();
     },
   );
+  test('later cancel invalidates a start waiting for cleanup', () async {
+    final _TwoStageDeferredClearStore store = _TwoStageDeferredClearStore();
+    final _Gateway gateway = _Gateway(_session(PairingPhase.pending));
+    final _Telemetry telemetry = _Telemetry();
+    final PairingSessionBloc bloc = PairingSessionBloc(
+      store: store,
+      gateway: gateway,
+      telemetry: telemetry,
+    );
+    bloc.add(const PairingSessionCancelled());
+    await store.firstClearEntered.future;
+    bloc.add(const PairingSessionStarted());
+    final Future<void> secondCancelled = telemetry.next(
+      PairingTelemetrySignal.cancelled,
+    );
+    bloc.add(const PairingSessionCancelled());
+    await secondCancelled;
+    final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+      (PairingSessionState state) => state is PairingSessionIdle,
+    );
+    store.releaseFirstClear.complete();
+    await store.secondClearEntered.future;
+    store.releaseSecondClear.complete();
+    await idle;
+    expect(gateway.calls, 0);
+    expect(store.value, isNull);
+    expect(telemetry.signals, isNot(contains(PairingTelemetrySignal.started)));
+    await bloc.close();
+  });
   test(
     'retry and recovery during cancel cleanup cannot revive a session',
     () async {
