@@ -201,7 +201,10 @@ void main() {
       bloc.add(const SyncCursorStarted());
       await store.clearEntered.future;
       bloc.add(SyncCursorDeliveryReceived(SyncCursor('cursor-current')));
+      await Future<void>.delayed(Duration.zero);
+      expect(store.loadCalls, 1);
       store.releaseClear();
+      await store.secondLoadEntered.future;
       await bloc.stream.firstWhere((state) => state is SyncCursorSynced);
       expect(store.value?.value, 'cursor-current');
       await bloc.close();
@@ -352,8 +355,17 @@ final class _BlockedSaveStore extends _Store {
 final class _BlockedClearStore extends _Store {
   final Completer<void> clearEntered = Completer<void>();
   final Completer<void> _release = Completer<void>();
+  final Completer<void> secondLoadEntered = Completer<void>();
+  int loadCalls = 0;
 
   void releaseClear() => _release.complete();
+
+  @override
+  Future<SyncCursor?> load() async {
+    loadCalls++;
+    if (loadCalls == 2) secondLoadEntered.complete();
+    return value;
+  }
 
   @override
   Future<void> clear() async {
