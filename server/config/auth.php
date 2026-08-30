@@ -44,11 +44,6 @@ return [
             'provider' => 'users',
         ],
 
-        'services' => [
-            'driver' => 'passport',
-            'provider' => 'users',
-        ],
-
         'mobile' => [
             'driver' => 'sanctum',
             'provider' => 'source_installations',

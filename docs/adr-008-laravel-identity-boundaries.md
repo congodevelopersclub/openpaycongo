@@ -18,4 +18,4 @@ Accepted
 
 ## Consequences
 
-This slice configures supported Passport and Sanctum guards, expiry, scopes, persisted mobile ownership, and a protected identity seam. It intentionally excludes #17 pairing/token issuance, administrator client-management UI #45, credential rotation/recovery workflows, and all request-selected tenant ownership.
+This slice configures Sanctum's mobile guard plus Passport's `CheckToken` and persisted developer-application resolver service boundary, expiry, scopes, persisted mobile ownership, and protected identity seams. It intentionally excludes #17 pairing/token issuance, administrator client-management UI #45, credential rotation/recovery workflows, and all request-selected tenant ownership.

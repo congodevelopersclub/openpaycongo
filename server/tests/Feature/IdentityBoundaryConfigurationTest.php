@@ -27,7 +27,6 @@ final class IdentityBoundaryConfigurationTest extends TestCase
     public function test_identity_types_use_distinct_laravel_guards(): void
     {
         self::assertSame('session', config('auth.guards.web.driver'));
-        self::assertSame('passport', config('auth.guards.services.driver'));
         self::assertSame('sanctum', config('auth.guards.mobile.driver'));
         self::assertSame('web', config('fortify.guard'));
     }
