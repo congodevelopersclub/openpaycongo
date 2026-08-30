@@ -15,6 +15,37 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const asset = (relativePath) => new URL(relativePath, root);
 const readJson = async (relativePath) => JSON.parse(await readFile(asset(relativePath), 'utf8'));
 
+const postgresClientImages = (job) => (job.steps ?? [])
+  .flatMap((step) => (step.run ?? '').split('\n'))
+  .filter((line) => line.trimStart().startsWith('docker run '))
+  .map((line) => {
+    const arguments_ = line.trim().slice('docker run '.length).split(/\s+/);
+    let index = 0;
+
+    while (arguments_[index]?.startsWith('--')) {
+      const option = arguments_[index++];
+
+      if (option === '--rm') continue;
+
+      if (option === '--network' || option === '--env') {
+        assert.notEqual(arguments_[index], undefined, `missing value for ${option}`);
+        index++;
+        continue;
+      }
+
+      assert.fail(`unexpected docker run option: ${option}`);
+    }
+
+    const image = arguments_[index];
+    assert.notEqual(image, undefined, 'docker run command must name an image');
+
+    return image;
+  });
+
+const assertPostgresClientImages = (job, expected) => {
+  assert.deepEqual(postgresClientImages(job), expected);
+};
+
 test('the published sync API and canonical event fixtures are interoperable', async () => {
   const api = await SwaggerParser.validate(asset('openapi.yaml').pathname);
   assert.deepEqual(Object.keys(api.paths).filter((path) => path === '/v1/sync/push'), ['/v1/sync/push']);
@@ -54,9 +85,11 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
   assert.match(runs, /docker build --target test -f server\/Dockerfile \./);
   const postgresImage = 'postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685';
   assert.equal(workflow.jobs['postgres-migration'].services.postgres.image, postgresImage);
-  const postgresClientImages = (workflow.jobs['postgres-migration'].steps ?? [])
-    .flatMap((step) => step.run?.match(/postgres:16-alpine@sha256:[a-f0-9]{64}/g) ?? []);
-  assert.deepEqual(postgresClientImages, [postgresImage, postgresImage]);
+  const expectedPostgresClients = ['openpaycongo-server-postgres', postgresImage, postgresImage];
+  assertPostgresClientImages(workflow.jobs['postgres-migration'], expectedPostgresClients);
+  assert.throws(() => assertPostgresClientImages({
+    steps: [{ run: `docker run --rm ${postgresImage} \\` }, { run: 'docker run --rm postgres:16-alpine \\' }],
+  }, expectedPostgresClients), /Expected values to be strictly deep-equal/);
   assert.match(runs, /deposits_reverses_deposit_id_foreign:FOREIGN KEY/);
   assert.match(runs, /deposits_reverses_deposit_id_unique:UNIQUE/);
   assert.match(runs, /docker build[\s\S]*android-client/);
