@@ -128,7 +128,7 @@ FROM php83-platform-check AS security
 
 RUN composer audit --locked --no-interaction
 
-FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS security-composer-audit-proof
+FROM php83-platform-check AS security-composer-audit-proof
 
 WORKDIR /app
 

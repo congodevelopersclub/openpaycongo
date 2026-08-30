@@ -51,6 +51,10 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.doesNotMatch(serverDockerfile, /COPY\s+server\/\.env/);
   assert.match(serverDockerfile, /FROM quality AS test[\s\S]*?cp \.env\.example \.env[\s\S]*?composer test/);
   assert.match(serverDockerfile, /FROM dependencies AS security-authorization-proof[\s\S]*?cp \.env\.example \.env/);
+  assert.match(serverDockerfile, /FROM php83-platform-check AS dependencies/);
+  assert.match(serverDockerfile, /docker-php-ext-install pdo_pgsql pdo_mysql/);
+  assert.doesNotMatch(serverDockerfile, /composer-security-base|apk upgrade --no-cache/);
+  assert.match(guide, /PostgreSQL and MySQL PDO extensions/);
   assert.match(guide, /fail-closed/);
   assert.match(guide, /release blocker/);
   assert.match(guide, /Docker build context excludes `server\/\.env`/);
