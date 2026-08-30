@@ -1,0 +1,12 @@
+# This file is included at nginx http scope. $realip_remote_addr retains the
+# direct peer before real_ip processing, so only explicitly trusted TLS proxies
+# may contribute an X-Forwarded-Proto value.
+geo $realip_remote_addr $openpay_trusted_proxy {
+    default 0;
+__OPENPAY_TRUSTED_PROXY_GEO_DIRECTIVES__}
+
+map "$openpay_trusted_proxy:$http_x_forwarded_proto" $openpay_forwarded_proto {
+    default $scheme;
+    "~^1:https$" https;
+    "~^1:http$" http;
+}

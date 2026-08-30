@@ -54,6 +54,10 @@ If a TLS proxy needs forwarded-header support, set
 `OPENPAY_TRUSTED_PROXY_CIDRS` to a space-separated list containing only that
 proxy's exact CIDR addresses (for example, `172.30.0.2/32`). The safe default
 is loopback-only. Never use `private_ranges` or a broad private network.
+nginx accepts `X-Forwarded-Proto` only from that rendered exact list and passes
+the original proxy peer to Laravel; Laravel trusts the same list. Therefore a
+direct client cannot forge HTTPS forwarding, while a configured TLS terminator
+can make Laravel's secure-request, URL, and cookie behavior accurate.
 
 ## Resources and routine checks
 

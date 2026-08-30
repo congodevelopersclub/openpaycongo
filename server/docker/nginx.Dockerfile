@@ -7,6 +7,7 @@ RUN apk add --no-cache --upgrade \
         openssl=3.5.8-r0
 
 COPY server/docker/nginx.conf.template /etc/nginx/openpay.conf.template
+COPY server/docker/nginx-proxy-map.conf.template /etc/nginx/openpay-proxy-map.conf.template
 COPY server/docker/10-openpay-proxies.sh /docker-entrypoint.d/10-openpay-proxies.sh
 COPY server/public/ /var/www/html/public/
 

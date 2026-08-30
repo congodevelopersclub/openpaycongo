@@ -24,7 +24,10 @@ final readonly class LaravelMigrationReadiness implements MigrationReadiness
                 glob(database_path('migrations/*.php')) ?: [],
             );
 
-            return array_diff($expected, $ran) === [] ? 'current' : 'pending';
+            sort($expected);
+            sort($ran);
+
+            return $expected === $ran ? 'current' : 'pending';
         } catch (Throwable) {
             return 'failed';
         }

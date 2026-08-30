@@ -14,12 +14,14 @@ final class ProductionRuntimeContractTest extends TestCase
         $compose = file_get_contents(file_exists('/compose.yaml') ? '/compose.yaml' : dirname(base_path()).'/compose.yaml');
         $nginxDockerfile = file_get_contents(base_path('docker/nginx.Dockerfile'));
         $nginxTemplate = file_get_contents(base_path('docker/nginx.conf.template'));
+        $nginxProxyMap = file_get_contents(base_path('docker/nginx-proxy-map.conf.template'));
         $proxyRenderer = file_get_contents(base_path('docker/10-openpay-proxies.sh'));
 
         self::assertIsString($dockerfile);
         self::assertIsString($compose);
         self::assertIsString($nginxDockerfile);
         self::assertIsString($nginxTemplate);
+        self::assertIsString($nginxProxyMap);
         self::assertIsString($proxyRenderer);
         self::assertStringContainsString('php:8.3-fpm-alpine@sha256:', $dockerfile);
         self::assertStringContainsString('pdo_pgsql pdo_mysql pdo_sqlite pcntl', $dockerfile);
@@ -35,6 +37,10 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('dockerfile: server/Dockerfile', $compose);
         self::assertStringContainsString('php:9000', $nginxTemplate);
         self::assertStringContainsString('__OPENPAY_TRUSTED_PROXY_DIRECTIVES__', $nginxTemplate);
+        self::assertStringContainsString('$realip_remote_addr', $nginxTemplate);
+        self::assertStringContainsString('$openpay_forwarded_proto', $nginxTemplate);
+        self::assertStringContainsString('geo $realip_remote_addr $openpay_trusted_proxy', $nginxProxyMap);
+        self::assertStringContainsString('"~^1:https$" https;', $nginxProxyMap);
         self::assertStringContainsString('OPENPAY_TRUSTED_PROXY_CIDRS', $proxyRenderer);
         self::assertStringNotContainsString('private_ranges', $nginxTemplate.$proxyRenderer);
         self::assertStringContainsString('${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}', $compose);

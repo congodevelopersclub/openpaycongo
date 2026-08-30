@@ -8,6 +8,9 @@ use App\Operations\MigrationReadiness;
 use App\Operations\ProjectionReadiness;
 use App\Support\CanonicalAnalyticsFixture;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -101,6 +104,47 @@ final class OperationalAnalyticsFixtureTest extends TestCase
                 'write_admission' => 'closed',
             ])
             ->assertJsonMissing(['message' => 'repository was replaced']);
+    }
+
+    public function test_database_ahead_migration_ledger_closes_readiness(): void
+    {
+        DB::table('migrations')->insert([
+            'migration' => '2099_01_01_000000_removed_migration',
+            'batch' => 999,
+        ]);
+
+        $this->getJson('/readyz')
+            ->assertStatus(503)
+            ->assertJson([
+                'datastore' => 'failed',
+                'migration' => 'failed',
+                'projection' => 'failed',
+                'write_admission' => 'closed',
+            ]);
+    }
+
+    public function test_trusted_proxy_https_forwarding_is_recognized(): void
+    {
+        Route::get('/_test/forwarded-scheme', static fn (Request $request) => ['secure' => $request->isSecure()]);
+
+        $this->withServerVariables([
+            'REMOTE_ADDR' => '127.0.0.1',
+            'HTTP_X_FORWARDED_PROTO' => 'https',
+        ])->getJson('/_test/forwarded-scheme')
+            ->assertOk()
+            ->assertExactJson(['secure' => true]);
+    }
+
+    public function test_untrusted_forged_https_forwarding_is_not_recognized(): void
+    {
+        Route::get('/_test/untrusted-forwarded-scheme', static fn (Request $request) => ['secure' => $request->isSecure()]);
+
+        $this->withServerVariables([
+            'REMOTE_ADDR' => '203.0.113.50',
+            'HTTP_X_FORWARDED_PROTO' => 'https',
+        ])->getJson('/_test/untrusted-forwarded-scheme')
+            ->assertOk()
+            ->assertExactJson(['secure' => false]);
     }
 
     public function test_canonical_analytics_fixture_preserves_decimal_money_and_utc_bounds(): void
