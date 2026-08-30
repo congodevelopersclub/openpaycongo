@@ -56,3 +56,6 @@ grep -Fx charged "$barrier_root/race/first.out" || grep -Fx charged "$barrier_ro
 grep -Fx pending "$barrier_root/race/first.out" || grep -Fx pending "$barrier_root/race/second.out"
 docker run "${base_args[@]}" --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" --env PAYMENT_REQUEST_TEST_EXPECTED_CHARGED=1 --env PAYMENT_REQUEST_TEST_EXPECTED_PENDING=1 --env PAYMENT_REQUEST_TEST_EXPECTED_AVAILABLE=0 "$image" php tests/Support/assert_payment_request_state.php
 docker run "${base_args[@]}" "$image" php tests/Support/assert_payment_request_upgrade_reversal.php
+# Exercise the FIFO tie-break, expiry, all-or-nothing, currency isolation,
+# idempotency replay, and durable-delivery regressions against this same dialect.
+docker run "${base_args[@]}" "$image" php artisan test --filter=PaymentRequestTest
