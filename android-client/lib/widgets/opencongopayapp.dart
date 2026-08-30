@@ -37,8 +37,9 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
   void initState() {
     super.initState();
     final PaymentLifecycle? lifecycle = widget.paymentLifecycle;
-    if (lifecycle != null)
+    if (lifecycle != null) {
       _paymentLifecycleBloc = PaymentLifecycleBloc(lifecycle: lifecycle);
+    }
   }
 
   @override

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../pairing/presentation/pairing_session_bloc.dart';
 import '../../pairing/presentation/pairing_session_status_card.dart';

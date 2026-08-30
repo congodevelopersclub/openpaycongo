@@ -111,18 +111,20 @@ final class PairingSessionBloc
   final PairingSessionStore store;
   final PairingSessionGateway gateway;
   final PairingTelemetry telemetry;
-  bool _busy = false;
+  int? _activeOperation;
   int _generation = 0;
+  PairingSession? _desiredSession;
+  int _persistenceRevision = 0;
   Future<void> _start(
     PairingSessionStarted event,
     Emitter<PairingSessionState> emit,
   ) async {
-    if (_busy) {
+    if (_activeOperation != null) {
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
       return;
     }
-    final int generation = _generation;
-    _busy = true;
+    final int generation = ++_generation;
+    _activeOperation = generation;
     emit(const PairingSessionLoading());
     telemetry.record(PairingTelemetrySignal.started);
     try {
@@ -134,7 +136,7 @@ final class PairingSessionBloc
         telemetry.record(PairingTelemetrySignal.offline);
       }
     } finally {
-      _busy = false;
+      if (_activeOperation == generation) _activeOperation = null;
     }
   }
 
@@ -142,17 +144,19 @@ final class PairingSessionBloc
     PairingSessionRetryRequested event,
     Emitter<PairingSessionState> emit,
   ) async {
+    final int observedGeneration = _generation;
     final PairingSession? session = await store.load();
+    if (observedGeneration != _generation) return;
     if (session == null) {
       await _start(const PairingSessionStarted(), emit);
       return;
     }
-    if (_busy) {
+    if (_activeOperation != null) {
       telemetry.record(PairingTelemetrySignal.duplicateIgnored);
       return;
     }
-    final int generation = _generation;
-    _busy = true;
+    final int generation = ++_generation;
+    _activeOperation = generation;
     emit(const PairingSessionLoading());
     try {
       await _apply(await gateway.refresh(session.sessionId), emit, generation);
@@ -162,7 +166,7 @@ final class PairingSessionBloc
         telemetry.record(PairingTelemetrySignal.offline);
       }
     } finally {
-      _busy = false;
+      if (_activeOperation == generation) _activeOperation = null;
     }
   }
 
@@ -170,22 +174,41 @@ final class PairingSessionBloc
     PairingSessionRecovered event,
     Emitter<PairingSessionState> emit,
   ) async {
+    if (_activeOperation != null) {
+      telemetry.record(PairingTelemetrySignal.duplicateIgnored);
+      return;
+    }
+    final int observedGeneration = _generation;
     final PairingSession? session = await store.load();
+    if (observedGeneration != _generation) return;
+    if (_activeOperation != null) {
+      telemetry.record(PairingTelemetrySignal.duplicateIgnored);
+      return;
+    }
     if (session == null) {
       emit(const PairingSessionIdle());
       return;
     }
-    await _apply(session, emit, _generation);
+    final int generation = ++_generation;
+    _activeOperation = generation;
+    try {
+      await _apply(session, emit, generation);
+    } finally {
+      if (_activeOperation == generation) _activeOperation = null;
+    }
   }
 
   Future<void> _cancel(
     PairingSessionCancelled event,
     Emitter<PairingSessionState> emit,
   ) async {
-    _generation++;
-    await store.clear();
-    emit(const PairingSessionIdle());
+    final int generation = ++_generation;
+    _activeOperation = null;
+    _setDesiredSession(null);
     telemetry.record(PairingTelemetrySignal.cancelled);
+    await _reconcileDurableSession();
+    if (generation != _generation) return;
+    emit(const PairingSessionIdle());
   }
 
   Future<void> _apply(
@@ -194,9 +217,10 @@ final class PairingSessionBloc
     int generation,
   ) async {
     if (generation != _generation) return;
+    _setDesiredSession(session);
     await store.save(session);
-    if (generation != _generation) {
-      await store.clear();
+    if (generation != _generation || _desiredSession != session) {
+      await _reconcileDurableSession();
       return;
     }
     switch (session.phase) {
@@ -210,9 +234,29 @@ final class PairingSessionBloc
         emit(PairingSessionRecoveryRequired(session));
         telemetry.record(PairingTelemetrySignal.recoveryRequired);
       case PairingPhase.expired:
-        await store.clear();
+        _setDesiredSession(null);
+        await _reconcileDurableSession();
+        if (generation != _generation) return;
         emit(const PairingSessionExpired());
         telemetry.record(PairingTelemetrySignal.expired);
+    }
+  }
+
+  void _setDesiredSession(PairingSession? session) {
+    _desiredSession = session;
+    _persistenceRevision++;
+  }
+
+  Future<void> _reconcileDurableSession() async {
+    while (true) {
+      final int revision = _persistenceRevision;
+      final PairingSession? session = _desiredSession;
+      if (session == null) {
+        await store.clear();
+      } else {
+        await store.save(session);
+      }
+      if (revision == _persistenceRevision) return;
     }
   }
 }
