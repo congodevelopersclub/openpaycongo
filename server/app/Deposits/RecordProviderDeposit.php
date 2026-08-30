@@ -80,7 +80,7 @@ final class RecordProviderDeposit
                     return $this->replayResult($existing, $idempotencyDigests);
                 }
 
-                if ($attempt < 3 && $this->isUniqueConstraintViolation($exception)) {
+                if ($attempt < 3 && $this->isRetryableTransactionFailure($exception)) {
                     continue;
                 }
 
@@ -306,9 +306,10 @@ final class RecordProviderDeposit
         return $lookupId;
     }
 
-    private function isUniqueConstraintViolation(QueryException $exception): bool
+    private function isRetryableTransactionFailure(QueryException $exception): bool
     {
-        return in_array($exception->getCode(), ['23000', '23505'], true);
+        return in_array($exception->getCode(), ['23000', '23505'], true)
+            || str_contains($exception->getMessage(), 'Record has changed since last read');
     }
 
     /** @return array<string, string> */
