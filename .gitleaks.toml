@@ -2,14 +2,20 @@
 [extend]
 useDefault = true
 
-# These public protocol vectors contain deterministic, non-production key material.
-# Keep the exclusion path-scoped: all other files, including future fixtures, remain scanned.
+# Public protocol vectors contain deterministic, non-production values that
+# match Gitleaks' generic-key rule. These exact values are intentionally
+# allowed; paths are never excluded, so changed or appended vector content is
+# still scanned in both worktree and Git-history modes.
 [allowlist]
-paths = [
-  '''docs/pairing-key-schedule\.vector\.json''',
-  '''docs/pairing-protocol\.vector\.json''',
-  '''docs/pairing-response-plaintext\.(invalid|valid)\.json''',
-  '''^artifacts/security/''',
+description = "Exact deterministic public vector values"
+regexTarget = "secret"
+regexes = [
+  '''96cca119fadda9490c972d89459c944df15ba4c1afdad5806d9148ee99e73888''',
+  '''9663aa1da97e848a914a436d04163dfbb89178f107f1b5b77ed3854203382854''',
+  '''ZQcgbrXWTD1bjhYfpisscx_IkpKxBdpRYVaK3gc5Ypo''',
+  '''zM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6us''',
+  '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8''',
+  '''ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8''',
 ]
 
 [[rules]]

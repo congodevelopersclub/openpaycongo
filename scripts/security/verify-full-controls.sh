@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 artifacts="${root}/artifacts/security"
-trivy_cache="${artifacts}/trivy-cache"
+trivy_cache="openpaycongo-security-trivy-cache"
 trivy_image="aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c"
 vulnerable_image="alpine@sha256:c75ac27b49326926b803b9ed43bf088bc220d22556de1bc5f72d742c91398f69"
 
@@ -21,10 +21,22 @@ if grep --quiet 'scripts/security/fixtures\|vulnerable-composer\|vulnerable-flut
   exit 1
 fi
 
+result="$(mktemp)"
+trap 'rm -f "${result}"' EXIT
+
 if MSYS_NO_PATHCONV=1 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock --volume "${trivy_cache}:/root/.cache/trivy" "${trivy_image}" \
-  image --quiet --severity HIGH,CRITICAL --exit-code 1 "${vulnerable_image}"; then
+  image --scanners vuln --quiet --severity HIGH,CRITICAL --exit-code 1 "${vulnerable_image}" >"${result}" 2>&1; then
   echo 'Container scanner accepted the pinned vulnerable image fixture' >&2
+  cat "${result}" >&2
   exit 1
 fi
+
+if ! grep --quiet --fixed-strings 'CVE-2022-37434' "${result}"; then
+  echo 'Container scanner failed without the expected vulnerable-image finding' >&2
+  cat "${result}" >&2
+  exit 1
+fi
+
+cat "${result}"
 
 echo 'SBOM generation and container scanner rejected their controlled checks'

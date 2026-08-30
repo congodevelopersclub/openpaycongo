@@ -31,7 +31,7 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
-/artifacts/security/
+/artifacts/security/*.cdx.json
 
 # Docker-only documentation contract validator dependencies
 /docs/node_modules/

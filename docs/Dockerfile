@@ -22,6 +22,7 @@ COPY scripts/upgrade-quiescent.sh /workspace/scripts/upgrade-quiescent.sh
 COPY server/Dockerfile /workspace/server/Dockerfile
 COPY server/composer.json /workspace/server/composer.json
 COPY server/phpstan.neon /workspace/server/phpstan.neon
+COPY server/tests/Feature/AuthorizationBoundaryTest.php /workspace/server/tests/Feature/AuthorizationBoundaryTest.php
 COPY android-client/Dockerfile.ci /workspace/android-client/Dockerfile.ci
 COPY android-client/android/app/build.gradle /workspace/android-client/android/app/build.gradle
 COPY android-client/android/app/src/main/AndroidManifest.xml /workspace/android-client/android/app/src/main/AndroidManifest.xml

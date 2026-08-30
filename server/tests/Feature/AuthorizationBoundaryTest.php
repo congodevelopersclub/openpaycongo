@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use PHPUnit\Framework\Attributes\WithoutErrorHandler;
 use Tests\TestCase;
 
 final class AuthorizationBoundaryTest extends TestCase
 {
+    #[WithoutErrorHandler]
     public function test_every_runtime_route_is_reviewed_as_public_or_authorized(): void
     {
         $anonymousRoutes = [
@@ -14,14 +16,31 @@ final class AuthorizationBoundaryTest extends TestCase
             'GET|HEAD version',
             'GET|HEAD up', // Explicitly retained by bootstrap/app.php.
             'GET|HEAD /',
-            'GET|HEAD storage/{path}',
-            'PUT storage/{path}',
         ];
+        $signedFrameworkRoutes = [
+            'GET|HEAD storage/{path}' => 'storage.local',
+            'PUT storage/{path}' => 'storage.local.upload',
+        ];
+        $runtimeRouteCount = 0;
+
+        self::assertCount(5, $anonymousRoutes);
+        self::assertCount(2, $signedFrameworkRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
+            $runtimeRouteCount++;
             $signature = implode('|', $route->methods()).' '.$route->uri();
 
             if (in_array($signature, $anonymousRoutes, true)) {
+                continue;
+            }
+
+            if (array_key_exists($signature, $signedFrameworkRoutes)) {
+                self::assertSame(
+                    $signedFrameworkRoutes[$signature],
+                    $route->getName(),
+                    "Framework route [{$signature}] must retain its explicit signed-route inventory entry.",
+                );
+
                 continue;
             }
 
@@ -32,5 +51,14 @@ final class AuthorizationBoundaryTest extends TestCase
                 "Route [{$signature}] is neither in the reviewed anonymous inventory nor protected by authorization middleware.",
             );
         }
+
+        self::assertSame(7, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+    }
+
+    #[WithoutErrorHandler]
+    public function test_unsigned_framework_storage_routes_are_rejected(): void
+    {
+        $this->get('/storage/not-signed')->assertForbidden();
+        $this->put('/storage/not-signed?upload=true')->assertForbidden();
     }
 }

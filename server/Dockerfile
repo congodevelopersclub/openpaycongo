@@ -130,21 +130,19 @@ FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a
 WORKDIR /app
 
 COPY scripts/security/fixtures/vulnerable-composer/composer.lock ./composer.lock
-RUN printf '%s\n' '{"name":"openpaycongo/security-audit-proof","require":{"symfony/http-foundation":"2.7.0"}}' > composer.json \
-    && if composer audit --locked --no-interaction; then echo 'Composer audit accepted the seeded vulnerable lockfile' >&2; exit 1; fi
+RUN set -eu; printf '%s\n' '{"name":"openpaycongo/security-audit-proof","require":{"symfony/http-foundation":"2.7.0"}}' > composer.json; set +e; output="$(composer audit --locked --no-interaction 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'CVE-2019-10913'
 
 FROM dependencies AS security-php-static-proof
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
-RUN composer dump-autoload --no-interaction --optimize \
-    && printf '%s\n' '<?php' 'final class Broken {public function run(){}}' > app/SecurityGateBrokenFixture.php \
-    && if composer run lint; then echo 'Canonical Pint accepted the seeded formatting violation' >&2; exit 1; fi
+RUN set -eu; composer dump-autoload --no-interaction --optimize; printf '%s\n' '<?php' 'final class Broken {public function run(){}}' > app/SecurityGateBrokenFixture.php; set +e; output="$(composer run lint 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'SecurityGateBrokenFixture.php'
 
 FROM dependencies AS security-authorization-proof
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
-RUN composer dump-autoload --no-interaction --optimize \
-    && printf '%s\n' "Route::get('/security-gate-unprotected-fixture', static fn () => response()->noContent());" >> routes/web.php \
-    && if php artisan test --filter=AuthorizationBoundaryTest; then echo 'Authorization route inventory accepted an unreviewed public application route' >&2; exit 1; fi
+RUN set -eu; composer dump-autoload --no-interaction --optimize; printf '%s\n' "Route::get('/security-gate-unprotected-fixture', static fn () => response()->noContent());" >> routes/web.php; set +e; output="$(php artisan test --filter=AuthorizationBoundaryTest 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'security-gate-unprotected-fixture'

@@ -11,6 +11,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   const fullProofs = await readFile(new URL('../scripts/security/verify-full-controls.sh', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../docs/continuous-security-gate.md', import.meta.url), 'utf8');
   const gitleaksConfig = await readFile(new URL('../.gitleaks.toml', import.meta.url), 'utf8');
+  const authorizationBoundary = await readFile(new URL('../server/tests/Feature/AuthorizationBoundaryTest.php', import.meta.url), 'utf8');
 
   for (const required of ['pull_request:', 'schedule:', 'release:', 'security-fast', 'security-full', 'workflow_dispatch:', 'timeout-minutes:', 'fetch-depth: 0']) {
     assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -18,8 +19,10 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(workflow, /github\.event_name != 'pull_request'/);
   assert.match(fast, /gitleaks@sha256:/);
   assert.match(fast, /\.gitleaks\.toml/);
-  assert.match(gitleaksConfig, /deterministic, non-production key material/);
-  assert.doesNotMatch(gitleaksConfig, /regexes\s*=\s*\[\s*'.*'/);
+  assert.match(gitleaksConfig, /Exact deterministic public vector values/);
+  assert.match(gitleaksConfig, /regexTarget = "secret"/);
+  assert.doesNotMatch(gitleaksConfig, /paths\s*=/);
+  assert.doesNotMatch(gitleaksConfig, /artifacts\/security/);
   assert.match(fast, /trivy@sha256:/);
   assert.match(fast, /server/);
   assert.match(fast, /android-client/);
@@ -35,6 +38,11 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fullProofs, /openpaycongo-server\.cdx\.json/);
   assert.match(fullProofs, /openpaycongo-android-client\.cdx\.json/);
   assert.match(fullProofs, /vulnerable-composer/);
+  assert.match(authorizationBoundary, /storage\/not-signed\?upload=true/);
+  assert.match(authorizationBoundary, /assertForbidden\(\)/);
+  assert.match(authorizationBoundary, /#\[WithoutErrorHandler\]/);
+  assert.match(await readFile(new URL('../scripts/security/verify-secret-scanner.sh', import.meta.url), 'utf8'), /seeded secret appended to a deterministic vector/);
+  assert.doesNotMatch(authorizationBoundary, /file_put_contents|unlink|\.env/);
   assert.match(guide, /fail-closed/);
   assert.match(guide, /release blocker/);
   assert.doesNotMatch(fast, /curl\s+.*https?:\/\//i);

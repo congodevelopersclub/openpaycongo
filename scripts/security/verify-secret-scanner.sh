@@ -21,7 +21,7 @@ rm "${fixture}/synthetic-secret.env"
 git -C "${fixture}" add --all
 git -C "${fixture}" commit --quiet --message 'remove synthetic secret'
 
-if MSYS_NO_PATHCONV=1 docker run --rm --volume "${fixture}:/fixture:ro" --volume "${root}/.gitleaks.toml:/config/gitleaks.toml:ro" "${image}" \
+if MSYS_NO_PATHCONV=1 docker run --rm --volume "${fixture}:/fixture:ro" --volume "${root}/.gitleaks.toml:/config/gitleaks.toml:ro" --workdir /fixture "${image}" \
   git --config=/config/gitleaks.toml --log-opts=--all --redact --exit-code=1 /fixture > "${result}" 2>&1; then
   echo 'gitleaks did not reject the seeded synthetic secret in git history' >&2
   exit 1
@@ -33,4 +33,27 @@ if ! grep --quiet 'leaks found: 1' "${result}"; then
   exit 1
 fi
 
-echo 'seeded secret detection passed'
+vector_fixture="$(mktemp -d "${root}/artifacts/security/vector-secret-fixture.XXXXXX")"
+trap 'rm -rf "${fixture}" "${vector_fixture}"' EXIT
+mkdir -p "${vector_fixture}/docs"
+cp "${root}/docs/pairing-protocol.vector.json" "${vector_fixture}/docs/pairing-protocol.vector.json"
+cp "${root}/.gitleaks.toml" "${vector_fixture}/.gitleaks.toml"
+
+MSYS_NO_PATHCONV=1 docker run --rm --volume "${vector_fixture}:/fixture:ro" --workdir /fixture "${image}" \
+  dir --config=/fixture/.gitleaks.toml --redact --exit-code=1 /fixture > "${vector_fixture}/vector-clean-output.txt" 2>&1
+
+printf '%s%s\n' \
+  'vector_secret = security_gate_history_' 'aB3dE5fG7hI9jK1lM2nO4pQ6rS8tU0vW' >> "${vector_fixture}/docs/pairing-protocol.vector.json"
+if MSYS_NO_PATHCONV=1 docker run --rm --volume "${vector_fixture}:/fixture:ro" --workdir /fixture "${image}" \
+  dir --config=/fixture/.gitleaks.toml --redact --exit-code=1 /fixture > "${vector_fixture}/vector-seeded-output.txt" 2>&1; then
+  echo 'gitleaks did not reject a seeded secret appended to a deterministic vector' >&2
+  exit 1
+fi
+
+if ! grep --quiet 'leaks found: 1' "${vector_fixture}/vector-seeded-output.txt"; then
+  echo 'gitleaks failed without reporting the seeded vector finding' >&2
+  cat "${vector_fixture}/vector-seeded-output.txt" >&2
+  exit 1
+fi
+
+echo 'seeded history and vector secret detection passed'

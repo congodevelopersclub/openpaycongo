@@ -50,8 +50,8 @@ FROM source AS analyze
 RUN flutter analyze
 
 FROM source AS analyze-proof
-RUN printf '%s\n' 'this is deliberately invalid Dart' > lib/security_gate_invalid_fixture.dart \
-    && if flutter analyze; then echo 'Dart analyzer accepted the seeded syntax violation' >&2; exit 1; fi
+RUN set -eu; printf '%s\n' 'this is deliberately invalid Dart' > lib/security_gate_invalid_fixture.dart; set +e; output="$(flutter analyze 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'security_gate_invalid_fixture.dart'
 
 FROM source AS test
 RUN flutter test
