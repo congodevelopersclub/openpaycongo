@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
 
@@ -347,14 +348,7 @@ void main() {
         (PairingSessionState state) =>
             state is PairingSessionPending && state.session == newSession,
       );
-      final Future<void> restartStarted = telemetry.next(
-        PairingTelemetrySignal.started,
-      );
       bloc.add(const PairingSessionStarted());
-      await restartStarted;
-      expect(bloc.state, isA<PairingSessionLoading>());
-      expect(store.value, same(oldSession));
-
       store.releaseClear.complete();
       await newPending;
       await store.newSessionRestored.future;
@@ -399,6 +393,7 @@ void main() {
       bloc.add(const PairingSessionCancelled());
       await store.firstClearEntered.future;
       bloc.add(const PairingSessionStarted());
+      store.releaseFirstClear.complete();
       await gateway.secondBeginEntered.future;
       final Future<void> secondCancelled = telemetry.next(
         PairingTelemetrySignal.cancelled,
@@ -413,12 +408,11 @@ void main() {
         hasLength(2),
       );
 
-      gateway.completeSecond(second);
-      await gateway.secondBeginReturned.future;
       final Future<PairingSessionState> idle = bloc.stream.firstWhere(
         (PairingSessionState state) => state is PairingSessionIdle,
       );
-      store.releaseFirstClear.complete();
+      gateway.completeSecond(second);
+      await gateway.secondBeginReturned.future;
       await store.secondClearEntered.future;
       store.releaseSecondClear.complete();
       await idle;
@@ -437,6 +431,35 @@ void main() {
       await bloc.close();
     },
   );
+  test('later cancel invalidates a start waiting for cleanup', () async {
+    final _TwoStageDeferredClearStore store = _TwoStageDeferredClearStore();
+    final _Gateway gateway = _Gateway(_session(PairingPhase.pending));
+    final _Telemetry telemetry = _Telemetry();
+    final PairingSessionBloc bloc = PairingSessionBloc(
+      store: store,
+      gateway: gateway,
+      telemetry: telemetry,
+    );
+    bloc.add(const PairingSessionCancelled());
+    await store.firstClearEntered.future;
+    bloc.add(const PairingSessionStarted());
+    final Future<void> secondCancelled = telemetry.next(
+      PairingTelemetrySignal.cancelled,
+    );
+    bloc.add(const PairingSessionCancelled());
+    await secondCancelled;
+    final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+      (PairingSessionState state) => state is PairingSessionIdle,
+    );
+    store.releaseFirstClear.complete();
+    await store.secondClearEntered.future;
+    store.releaseSecondClear.complete();
+    await idle;
+    expect(gateway.calls, 0);
+    expect(store.value, isNull);
+    expect(telemetry.signals, isNot(contains(PairingTelemetrySignal.started)));
+    await bloc.close();
+  });
   test(
     'retry and recovery during cancel cleanup cannot revive a session',
     () async {
@@ -595,10 +618,12 @@ void main() {
       (PairingSessionState state) => state is PairingSessionPending,
     );
     bloc.add(const PairingSessionStarted());
+    await store.resumedClearEntered.future;
+    store.releaseResumedClear.complete();
     await pending;
     expect(bloc.state, isA<PairingSessionPending>());
     expect(store.value, same(replacement));
-    expect(store.clearCalls, 1);
+    expect(store.clearCalls, 2);
     expect(transitions.whereType<PairingSessionIdle>(), isEmpty);
     await subscription.cancel();
     await bloc.close();
@@ -633,6 +658,72 @@ void main() {
       await bloc.close();
     },
   );
+  test(
+    'failed clear followed by start timeout cannot revive stale pairing',
+    () async {
+      final PairingSession stale = _session(PairingPhase.pending);
+      final _FailOnceClearStore store = _FailOnceClearStore()..value = stale;
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: _Gateway(null, timeout: true),
+        telemetry: _Telemetry(),
+      );
+      final Future<PairingSessionState> firstOffline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(const PairingSessionCancelled());
+      await store.firstClearAttempt.future;
+      await firstOffline;
+      final Future<PairingSessionState> timeoutOffline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(const PairingSessionStarted());
+      await store.resumedClearEntered.future;
+      store.releaseResumedClear.complete();
+      await timeoutOffline;
+      expect(store.value, isNull);
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      bloc.add(const PairingSessionRecovered());
+      await idle;
+      await bloc.close();
+    },
+  );
+  test(
+    'failed clear followed by replacement save failure keeps stale pairing cleared',
+    () async {
+      final PairingSession stale = _session(PairingPhase.pending);
+      final _FailOnceClearFailingSaveStore store =
+          _FailOnceClearFailingSaveStore()..value = stale;
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: _Gateway(_session(PairingPhase.pending)),
+        telemetry: _Telemetry(),
+      );
+      final Future<PairingSessionState> firstOffline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(const PairingSessionCancelled());
+      await store.firstClearAttempt.future;
+      await firstOffline;
+      final Future<PairingSessionState> saveOffline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(const PairingSessionStarted());
+      await store.resumedClearEntered.future;
+      store.releaseResumedClear.complete();
+      await saveOffline;
+      expect(store.value, isNull);
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      bloc.add(const PairingSessionRecovered());
+      await idle;
+      expect(store.value, isNull);
+      await bloc.close();
+    },
+  );
   for (final PairingSessionEvent event in <PairingSessionEvent>[
     const PairingSessionStarted(),
     const PairingSessionRetryRequested(),
@@ -654,6 +745,59 @@ void main() {
       await offline;
       expect(bloc.state, isA<PairingSessionOffline>());
       expect(telemetry.signals, contains(PairingTelemetrySignal.offline));
+      await bloc.close();
+    });
+  }
+  for (final PairingSessionEvent event in <PairingSessionEvent>[
+    const PairingSessionRetryRequested(),
+    const PairingSessionRecovered(),
+  ]) {
+    test('typed load failure emits offline once for $event', () async {
+      final _FailingLoadStore store = _FailingLoadStore();
+      final _Telemetry telemetry = _Telemetry();
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: _Gateway(_session(PairingPhase.pending)),
+        telemetry: telemetry,
+      );
+      final Future<PairingSessionState> offline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(event);
+      await offline;
+      expect(bloc.state, isA<PairingSessionOffline>());
+      expect(
+        telemetry.signals.where(
+          (PairingTelemetrySignal signal) =>
+              signal == PairingTelemetrySignal.offline,
+        ),
+        hasLength(1),
+      );
+      await bloc.close();
+    });
+  }
+  for (final PairingSessionEvent event in <PairingSessionEvent>[
+    const PairingSessionRetryRequested(),
+    const PairingSessionRecovered(),
+  ]) {
+    test('unexpected load error reaches observer for $event', () async {
+      final _RecordingObserver observer = _RecordingObserver();
+      final BlocObserver previous = Bloc.observer;
+      Bloc.observer = observer;
+      addTearDown(() => Bloc.observer = previous);
+      final Completer<Object> uncaught = Completer<Object>();
+      late final PairingSessionBloc bloc;
+      runZonedGuarded(() {
+        bloc = PairingSessionBloc(
+          store: _UnexpectedLoadStore(),
+          gateway: _Gateway(_session(PairingPhase.pending)),
+          telemetry: _Telemetry(),
+        );
+        bloc.add(event);
+      }, (Object error, StackTrace _) => uncaught.complete(error));
+      await observer.error;
+      expect(await uncaught.future, isA<StateError>());
+      expect(bloc.state, isA<PairingSessionIdle>());
       await bloc.close();
     });
   }
@@ -872,7 +1016,7 @@ final class _TwoStageDeferredClearStore extends _Store {
   }
 }
 
-final class _FailOnceClearStore extends _Store {
+class _FailOnceClearStore extends _Store {
   final Completer<void> firstClearAttempt = Completer<void>();
   final Completer<void> resumedClearEntered = Completer<void>();
   final Completer<void> releaseResumedClear = Completer<void>();
@@ -904,6 +1048,36 @@ final class _FailingSaveStore extends _Store {
   @override
   Future<void> save(PairingSession session) async {
     throw const PairingSessionPersistenceException();
+  }
+}
+
+final class _FailOnceClearFailingSaveStore extends _FailOnceClearStore {
+  @override
+  Future<void> save(PairingSession session) async {
+    throw const PairingSessionPersistenceException();
+  }
+}
+
+final class _FailingLoadStore extends _Store {
+  @override
+  Future<PairingSession?> load() async {
+    throw const PairingSessionPersistenceException();
+  }
+}
+
+final class _UnexpectedLoadStore extends _Store {
+  @override
+  Future<PairingSession?> load() async => throw StateError('unexpected');
+}
+
+final class _RecordingObserver extends BlocObserver {
+  final Completer<void> _error = Completer<void>();
+  Future<void> get error => _error.future;
+
+  @override
+  void onError(BlocBase<Object?> bloc, Object error, StackTrace stackTrace) {
+    _error.complete();
+    super.onError(bloc, error, stackTrace);
   }
 }
 
