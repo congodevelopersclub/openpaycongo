@@ -18,8 +18,15 @@ final class OperationalQueueProbe implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public function __construct(public readonly string $probeId) {}
+
+    public static function cacheKey(string $probeId): string
+    {
+        return 'operational-queue-probe:'.$probeId;
+    }
+
     public function handle(Repository $cache): void
     {
-        $cache->put('operational-queue-probe', now()->toIso8601String(), now()->addMinutes(5));
+        $cache->put(self::cacheKey($this->probeId), 'consumed', now()->addMinutes(5));
     }
 }

@@ -19,7 +19,7 @@ them in the deployment secret manager or protected host environment instead.
 Generate a distinct Laravel key once for each environment:
 
 ```bash
-docker run --rm php:8.3-cli-alpine php -r 'echo "base64:".base64_encode(random_bytes(32)).PHP_EOL;'
+docker run --rm php:8.3-cli-alpine@sha256:afdf8b1fee58486ccc0dab5f30f634b86873d56dac985f71ba217945647c05ad php -r 'echo "base64:".base64_encode(random_bytes(32)).PHP_EOL;'
 ```
 
 Set that output and a strong PostgreSQL password in the protected deployment
@@ -30,8 +30,10 @@ do not expose the application port publicly.
 ```bash
 export OPENPAY_APP_KEY='base64:replace-with-the-generated-key'
 export OPENPAY_DB_PASSWORD='replace-with-a-secret-from-your-secret-manager'
+export DEPOSIT_LOOKUP_TOKEN_KEY='replace-with-a-distinct-secret-from-your-secret-manager'
 export OPENPAY_HTTP_BIND_ADDRESS='127.0.0.1'
 export OPENPAY_HTTP_PORT='8080'
+export OPENPAY_TRUSTED_PROXY_CIDRS='127.0.0.1/32'
 docker compose up --build -d
 curl --fail http://127.0.0.1:8080/healthz
 ```
@@ -46,15 +48,23 @@ Terminate TLS before the app with a maintained reverse proxy and certificate
 automation. Keep the app port private to that proxy, set
 `OPENPAY_APP_URL` to the public `https://` URL, and restrict PostgreSQL to the
 Compose network. Do not expose PostgreSQL or the unencrypted application port
-to the internet.
+to the internet. The shipped Caddy configuration trusts forwarded headers from
+loopback only.
+If a TLS proxy needs forwarded-header support, set
+`OPENPAY_TRUSTED_PROXY_CIDRS` to a space-separated list containing only that
+proxy's exact CIDR addresses (for example, `172.30.0.2/32`). The safe default
+is loopback-only. Never use `private_ranges` or a broad private network.
 
 ## Resources and routine checks
 
-For this four-process baseline, reserve at least 2 vCPU, 4 GiB RAM, and 20 GiB
-of durable database storage before application data, then alert on database
-volume capacity and host memory. Size storage and backup retention from the
-approved data-retention policy; this repository does not authorize a retention
-period.
+One clean idle Docker Compose smoke snapshot measured approximately 151 MiB
+total resident memory: app 52 MiB, queue 30 MiB, scheduler 27 MiB, and
+PostgreSQL 42 MiB. This is an idle observation, not a load or capacity result.
+For a light single-host installation, begin with 1 vCPU and 1 GiB RAM, then
+measure the actual workload and alert on host memory, queue latency, and
+PostgreSQL volume capacity. Size durable storage and backup retention from the
+approved data-retention policy; this repository does not authorize a fixed
+storage or retention period.
 
 Check service state and liveness after every deployment:
 
@@ -63,13 +73,13 @@ docker compose ps
 curl --fail http://127.0.0.1:8080/healthz
 ```
 
-The following synthetic probe proves the database queue worker consumes a job
-without placing customer data in logs or fixtures. It writes a five-minute
-operational cache marker only:
+The following synthetic probe proves the database queue worker consumes the
+fresh job dispatched by this invocation. It waits for that exact opaque marker,
+removes it when observed, and fails on timeout; a stale marker from another run
+cannot make it pass. It places no customer data in logs or fixtures:
 
 ```bash
-docker compose exec -T app php artisan openpay:queue-probe
-docker compose exec -T app php artisan openpay:queue-probe --assert-consumed
+docker compose exec -T app php artisan openpay:queue-probe --timeout=30
 ```
 
 ## Backup, restore, and upgrades

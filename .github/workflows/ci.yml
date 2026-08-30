@@ -25,12 +25,24 @@ jobs:
     env:
       OPENPAY_APP_KEY: base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
       OPENPAY_DB_PASSWORD: ci-compose-validation-only
+      DEPOSIT_LOOKUP_TOKEN_KEY: ci-compose-deposit-lookup-token-only
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Validate production Compose configuration
         run: docker compose config --quiet
+      - name: Reject missing production Compose secrets
+        run: |
+          set -euo pipefail
+          for secret in OPENPAY_APP_KEY OPENPAY_DB_PASSWORD DEPOSIT_LOOKUP_TOKEN_KEY; do
+            if env -u "$secret" docker compose config --quiet >/dev/null 2>&1; then
+              echo "Compose accepted a missing required secret."
+              exit 1
+            fi
+          done
       - name: Run canonical Laravel quality gates and tests in Docker
         run: docker build --target test -f server/Dockerfile .
+      - name: Build and contract-check the production image
+        run: docker build --target production-contract -f server/Dockerfile .
 
   postgres-migration:
     runs-on: ubuntu-latest

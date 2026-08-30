@@ -3,8 +3,10 @@ name: congo-openpay
 x-application-environment: &application-environment
   APP_ENV: production
   APP_DEBUG: "false"
-  APP_KEY: ${OPENPAY_APP_KEY:-}
+  APP_KEY: ${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}
+  DEPOSIT_LOOKUP_TOKEN_KEY: ${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}
   APP_URL: ${OPENPAY_APP_URL:-https://localhost}
+  OPENPAY_TRUSTED_PROXY_CIDRS: ${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
   LOG_CHANNEL: stderr
   LOG_LEVEL: warning
   DB_CONNECTION: pgsql
@@ -29,7 +31,7 @@ x-application: &application
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     environment:
       POSTGRES_DB: ${OPENPAY_DB_DATABASE:-openpay}
       POSTGRES_USER: ${OPENPAY_DB_USERNAME:-openpay}

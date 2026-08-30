@@ -35,6 +35,7 @@ FROM dependencies AS quality
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
 COPY compose.yaml /compose.yaml
+COPY .github/workflows/ci.yml /ci.yml
 RUN composer dump-autoload --no-interaction --optimize \
     && composer run lint \
     && composer run analyse
@@ -44,7 +45,7 @@ FROM quality AS test
 COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
 RUN composer test
 
-FROM composer:2.8 AS production-dependencies
+FROM composer:2.8@sha256:5248900ab8b5f7f880c2d62180e40960cd87f60149ec9a1abfd62ac72a02577c AS production-dependencies
 
 WORKDIR /app
 
@@ -54,9 +55,9 @@ RUN composer install --no-dev --no-interaction --prefer-dist --no-scripts
 COPY server/ ./
 RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
 
-FROM dunglas/frankenphp:1.12.7-php8.3-alpine AS production
+FROM dunglas/frankenphp:1.12.7-php8.3-alpine@sha256:049b8d8356efceb93c91ed42866de890534310bcef4ad4dde902029e4a0d20c3 AS production
 
-RUN install-php-extensions pdo_pgsql \
+RUN install-php-extensions pdo_pgsql pdo_mysql pdo_sqlite pcntl \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
     && addgroup -S -g 10001 openpay \
     && adduser -S -D -H -u 10001 -G openpay openpay
@@ -68,6 +69,8 @@ COPY server/docker/Caddyfile /etc/frankenphp/Caddyfile
 
 RUN mkdir -p /config/caddy /data/caddy bootstrap/cache storage/app storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/home/.config/psysh \
     && chown -R openpay:openpay /config/caddy /data/caddy bootstrap/cache storage
+
+RUN rm -rf tests phpunit.xml phpstan.neon pint.json .env .env.example
 
 ENV APP_ENV=production \
     APP_DEBUG=false \
@@ -81,3 +84,18 @@ USER openpay
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD php -r '$headers = @get_headers("http://127.0.0.1:8080/healthz"); exit(($headers[0] ?? "") === "HTTP/1.1 200 OK" ? 0 : 1);'
+
+FROM production AS production-contract
+
+RUN php -m | grep -qx pdo_pgsql \
+    && php -m | grep -qx pdo_mysql \
+    && php -m | grep -qx pdo_sqlite \
+    && php -m | grep -qx pcntl \
+    && test ! -e tests \
+    && test ! -e phpunit.xml \
+    && test ! -e phpstan.neon \
+    && test ! -e pint.json \
+    && test ! -e .env \
+    && test ! -e .env.example \
+    && test -f composer.json \
+    && test -f composer.lock
