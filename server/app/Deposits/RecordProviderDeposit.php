@@ -111,7 +111,11 @@ final class RecordProviderDeposit
             || ! $this->isBoundedIdentifier($transfer->customerLookupIdentifier)
             || ! $this->isBoundedIdentifier($transfer->providerReference)
             || ! $this->isBoundedIdentifier($transfer->senderIdentifier, true)
-            || ! $this->isBoundedIdentifier($transfer->receiverIdentifier, true)) {
+            || ! $this->isBoundedIdentifier($transfer->receiverIdentifier, true)
+            || ! $this->isBoundedCustomerPii($transfer->customerName, 255)
+            || ! $this->isBoundedCustomerPii($transfer->customerAddress, 2000)
+            || ! $this->isBoundedCustomerPii($transfer->customerPhone, 64)
+            || ! $this->isBoundedCustomerPii($transfer->customerEmail, 320)) {
             throw new InvalidArgumentException('Invalid provider transfer.');
         }
     }
@@ -128,6 +132,10 @@ final class RecordProviderDeposit
             providerOccurredAt: CarbonImmutable::parse(trim($transfer->providerOccurredAt))->utc()->toAtomString(),
             senderIdentifier: $transfer->senderIdentifier === null ? null : trim($transfer->senderIdentifier),
             receiverIdentifier: $transfer->receiverIdentifier === null ? null : trim($transfer->receiverIdentifier),
+            customerName: $transfer->customerName === null ? null : trim($transfer->customerName),
+            customerAddress: $transfer->customerAddress === null ? null : trim($transfer->customerAddress),
+            customerPhone: $transfer->customerPhone === null ? null : trim($transfer->customerPhone),
+            customerEmail: $transfer->customerEmail === null ? null : trim($transfer->customerEmail),
         );
     }
 
@@ -138,6 +146,11 @@ final class RecordProviderDeposit
         }
 
         return trim($value) !== '' && mb_strlen($value) <= 255 && ! preg_match('/[\x00-\x1F\x7F]/', $value);
+    }
+
+    private function isBoundedCustomerPii(?string $value, int $maximumLength): bool
+    {
+        return $value === null || (trim($value) !== '' && mb_strlen($value) <= $maximumLength && ! preg_match('/[\x00-\x1F\x7F]/', $value));
     }
 
     private function isStrictTimestamp(string $value): bool
@@ -202,10 +215,31 @@ final class RecordProviderDeposit
 
         $lookupId = $this->resolveLookupId('customer_lookup', $transfer->organizationId, $digests);
 
-        return Customer::query()->createOrFirst(
+        $customer = Customer::query()->createOrFirst(
             ['organization_id' => $transfer->organizationId, 'private_lookup_id' => $lookupId],
-            ['private_lookup_digest' => $this->activeDigest($digests), 'private_lookup_key_version' => $this->activeKeyId()],
+            [
+                'private_lookup_digest' => $this->activeDigest($digests),
+                'private_lookup_key_version' => $this->activeKeyId(),
+                'name' => $transfer->customerName,
+                'address' => $transfer->customerAddress,
+                'phone' => $transfer->customerPhone,
+                'email' => $transfer->customerEmail,
+            ],
         );
+
+        if (! $customer->wasRecentlyCreated) {
+            $customer->fill(array_filter([
+                'name' => $transfer->customerName,
+                'address' => $transfer->customerAddress,
+                'phone' => $transfer->customerPhone,
+                'email' => $transfer->customerEmail,
+            ], static fn (?string $value): bool => $value !== null));
+            if ($customer->isDirty()) {
+                $customer->save();
+            }
+        }
+
+        return $customer;
     }
 
     private function installation(ProviderTransfer $transfer): SourceInstallation

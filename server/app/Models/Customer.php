@@ -13,7 +13,23 @@ class Customer extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['organization_id', 'private_lookup_digest', 'private_lookup_id', 'private_lookup_key_version'];
+    protected $fillable = [
+        'organization_id', 'private_lookup_digest', 'private_lookup_id', 'private_lookup_key_version',
+        'name', 'address', 'phone', 'email',
+    ];
 
-    protected $hidden = ['private_lookup_digest', 'private_lookup_id', 'private_lookup_key_version'];
+    protected $hidden = [
+        'private_lookup_digest', 'private_lookup_id', 'private_lookup_key_version',
+        'name', 'address', 'phone', 'email',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'name' => 'encrypted',
+            'address' => 'encrypted',
+            'phone' => 'encrypted',
+            'email' => 'encrypted',
+        ];
+    }
 }

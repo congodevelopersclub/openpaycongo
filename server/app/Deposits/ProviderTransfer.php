@@ -14,5 +14,9 @@ final readonly class ProviderTransfer
         public string $providerOccurredAt,
         public ?string $senderIdentifier,
         public ?string $receiverIdentifier,
+        public ?string $customerName = null,
+        public ?string $customerAddress = null,
+        public ?string $customerPhone = null,
+        public ?string $customerEmail = null,
     ) {}
 }
