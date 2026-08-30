@@ -14,7 +14,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->uuid('organization_id');
             $table->char('private_lookup_digest', 64);
-            $table->timestamps();
+            self::wideTimestamps($table);
             $table->unique(['organization_id', 'private_lookup_digest']);
         });
 
@@ -22,7 +22,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->uuid('organization_id');
             $table->char('installation_digest', 64);
-            $table->timestamps();
+            self::wideTimestamps($table);
             $table->unique(['organization_id', 'installation_digest']);
         });
 
@@ -38,11 +38,11 @@ return new class extends Migration
             $table->text('provider_reference')->nullable();
             $table->char('provider_reference_digest', 64)->nullable();
             $table->dateTime('provider_occurred_at')->nullable();
-            $table->timestampTz('received_at');
+            $table->dateTime('received_at');
             $table->text('sender_identifier')->nullable();
             $table->text('receiver_identifier')->nullable();
             $table->char('idempotency_digest', 64);
-            $table->timestamps();
+            self::wideTimestamps($table);
             $table->unique(['organization_id', 'provider_reference_digest']);
             $table->unique(['organization_id', 'idempotency_digest']);
         });
@@ -60,8 +60,8 @@ return new class extends Migration
             $table->unsignedBigInteger('debit_minor')->default(0);
             $table->unsignedBigInteger('credit_minor')->default(0);
             $table->char('currency', 3);
-            $table->timestampTz('recorded_at');
-            $table->timestamps();
+            $table->dateTime('recorded_at');
+            self::wideTimestamps($table);
             $table->index(['organization_id', 'account', 'currency']);
         });
     }
@@ -72,5 +72,11 @@ return new class extends Migration
         Schema::dropIfExists('deposits');
         Schema::dropIfExists('source_installations');
         Schema::dropIfExists('customers');
+    }
+
+    private static function wideTimestamps(Blueprint $table): void
+    {
+        $table->dateTime('created_at')->nullable();
+        $table->dateTime('updated_at')->nullable();
     }
 };

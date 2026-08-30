@@ -13,7 +13,7 @@ RUN apk add --no-cache libpq=18.6-r0 \
         pkgconf=2.5.1-r0 \
         postgresql18-dev=18.6-r0 \
         re2c=4.5.1-r0 \
-    && docker-php-ext-install pdo_pgsql \
+    && docker-php-ext-install pdo_pgsql pdo_mysql \
     && apk del .build-deps
 
 RUN echo 'memory_limit=512M' > "$PHP_INI_DIR/conf.d/zz-quality-memory-limit.ini"

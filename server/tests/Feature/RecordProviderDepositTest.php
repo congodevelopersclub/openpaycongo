@@ -293,6 +293,25 @@ final class RecordProviderDepositTest extends TestCase
         self::assertSame('2040-01-01 00:00:00', DB::table('deposits')->where('id', $result->deposit->id)->value('provider_occurred_at'));
     }
 
+    public function test_financial_table_instants_use_portable_wide_datetime_definitions(): void
+    {
+        $migration = file_get_contents(database_path('migrations/2026_08_30_000000_create_deposit_ledger_tables.php'));
+
+        self::assertIsString($migration);
+        foreach ([
+            "\$table->dateTime('provider_occurred_at')->nullable();",
+            "\$table->dateTime('received_at');",
+            "\$table->dateTime('recorded_at');",
+            "\$table->dateTime('created_at')->nullable();",
+            "\$table->dateTime('updated_at')->nullable();",
+        ] as $declaration) {
+            self::assertStringContainsString($declaration, $migration);
+        }
+
+        self::assertSame(4, substr_count($migration, 'self::wideTimestamps($table);'));
+        self::assertSame(0, preg_match('/\\b(?:timestamp|timestampTz|timestamps|timestampsTz)\\s*\\(/', $migration));
+    }
+
     public function test_provider_occurrence_that_normalizes_before_year_1000_is_rejected_before_writes(): void
     {
         $this->expectException(InvalidArgumentException::class);
