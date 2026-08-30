@@ -109,6 +109,11 @@ it is not an advisory and must never be submitted to GitHub.
 For a confirmed Critical or High issue affecting a release candidate or
 supported artifact:
 
+These steps do not create release, rollback, or emergency authority. Until a
+repository administrator documents approval of an emergency-release authority
+for the incident under the release-protection decision, release owners may
+prepare evidence only.
+
 1. The incident coordinator opens a private record, assigns the triage and
    release owners, and freezes promotion of affected candidate artifacts.
 2. The triage owner confirms scope with the minimum safe reproduction and
@@ -118,12 +123,13 @@ supported artifact:
    preparing a patch: revoke or rotate the credential, recover protected keys,
    restore a trusted release identity, and rebuild from a restored trust root.
    Do not publish through a possibly compromised path.
-4. For immediate containment, the release owner may authorize a rollback before
-   a patch exists only after identifying the rollback artifact, recording why it
-   predates the affected artifact and contains the incident, and verifying
-   ordinary release authority—or restored authority if step 3 invoked the
-   compromise response. The coordinator records the rollback decision and user
-   communication in the private record.
+4. For immediate containment, the release owner may execute a rollback before
+   a patch exists only under that documented administrator approval, after
+   identifying the rollback artifact, recording why it predates the affected
+   artifact and contains the incident, and verifying ordinary release
+   authority—or restored authority if step 3 invoked the compromise response.
+   The coordinator records the rollback decision and user communication in the
+   private record.
 5. The release owner prepares the smallest remediation, with a regression test
    where safe, and reviews affected trust boundaries and dependencies.
 6. Build, test, scan, and identify the patched artifacts using the normal
@@ -132,7 +138,8 @@ supported artifact:
 7. After the artifact evidence is available, the incident coordinator prepares
    a private advisory draft, links the fix and minimal regression evidence,
    and the release owner records the patched-release date.
-8. The release owner authorizes the patched release only after
+8. A patched release may proceed only under documented administrator release
+   authority and after
    verifying ordinary release authority—or, if step 3 invoked the compromise
    response, after the restored authority is verified under the repository's
    approved release authority. The coordinator then records user communication
