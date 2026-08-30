@@ -102,7 +102,50 @@ jobs:
           docker run --rm --network host --env PGPASSWORD=openpay postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 \
             psql --host=127.0.0.1 --port=5432 --username=openpay --dbname=openpaycongo --tuples-only --no-align \
             --command "select constraint_name || ':' || constraint_type from information_schema.table_constraints where table_schema = 'public' and table_name = 'deposits' and constraint_name in ('deposits_reverses_deposit_id_foreign', 'deposits_reverses_deposit_id_unique') order by constraint_name" \
-            | grep -Fx 'deposits_reverses_deposit_id_unique:UNIQUE'
+             | grep -Fx 'deposits_reverses_deposit_id_unique:UNIQUE'
+
+  deposit-concurrency:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: PostgreSQL 16
+            image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+            connection: pgsql
+            port: 5432
+          - name: MySQL 8
+            image: mysql:8.4
+            connection: mysql
+            port: 3306
+          - name: MariaDB 11
+            image: mariadb:11.8
+            connection: mariadb
+            port: 3306
+    name: Deposit concurrency - ${{ matrix.name }}
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_DB: openpaycongo
+          POSTGRES_USER: openpay
+          POSTGRES_PASSWORD: openpay
+          MYSQL_DATABASE: openpaycongo
+          MYSQL_USER: openpay
+          MYSQL_PASSWORD: openpay
+          MYSQL_ROOT_PASSWORD: root-openpay
+        ports:
+          - 5432:5432
+          - 3306:3306
+        options: >-
+          --health-cmd "pg_isready -U openpay -d openpaycongo || mysqladmin ping -h localhost -uopenpay -popenpay"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Build PHP 8.3 database runtime
+        run: docker build --target quality --tag openpaycongo-server-concurrency -f server/Dockerfile .
+      - name: Force provider deposit races
+        run: bash server/tests/Support/run_provider_deposit_concurrency_matrix.sh openpaycongo-server-concurrency ${{ matrix.connection }} ${{ matrix.port }}
 
   flutter:
     runs-on: ubuntu-latest

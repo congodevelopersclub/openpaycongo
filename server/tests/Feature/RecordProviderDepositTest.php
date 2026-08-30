@@ -9,6 +9,7 @@ use App\Deposits\RecordResult;
 use App\Deposits\ReversalResult;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
+use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -288,6 +289,17 @@ final class RecordProviderDepositTest extends TestCase
         } finally {
             self::assertDatabaseCount('deposits', 0);
         }
+    }
+
+    public function test_private_lookup_aliases_are_append_only(): void
+    {
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $alias = PrivateLookupAlias::query()->firstOrFail();
+
+        $this->assertImmutable(fn () => $alias->delete());
+
+        self::assertDatabaseHas('private_lookup_aliases', ['id' => $alias->id]);
+        self::assertSame($deposit->id, Deposit::query()->firstOrFail()->id);
     }
 
     public function test_an_unsupported_currency_is_rejected_before_any_database_write(): void

@@ -3,15 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 
-class PrivateLookupAlias extends Model
+class PrivateLookupAlias extends ImmutableFinancialModel
 {
     use HasUuids;
 
     public $incrementing = false;
 
-    public $timestamps = false;
+    public const UPDATED_AT = null;
 
     protected $keyType = 'string';
 

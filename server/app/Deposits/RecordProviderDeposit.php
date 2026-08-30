@@ -266,28 +266,36 @@ final class RecordProviderDeposit
     private function resolveLookupId(string $purpose, string $organizationId, array $digests): string
     {
         ksort($digests);
-        $firstDigest = reset($digests);
-        if ($firstDigest === false) {
+        if ($digests === []) {
             throw new LogicException('Deposit lookup-token key ring is not configured.');
         }
 
-        $first = PrivateLookupAlias::query()->createOrFirst(
-            ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $firstDigest],
-            ['lookup_id' => (string) Str::uuid(), 'created_at' => CarbonImmutable::now()],
-        );
+        $lookupIds = PrivateLookupAlias::query()->where('organization_id', $organizationId)->where('purpose', $purpose)
+            ->whereIn('digest', array_values($digests))->pluck('lookup_id')->unique()->values();
+        if ($lookupIds->count() > 1) {
+            throw new LogicException('Deposit lookup aliases are inconsistent.');
+        }
+        $lookupId = $lookupIds->first() ?? (string) Str::uuid();
+        $createdWithoutExistingAlias = $lookupIds->isEmpty();
 
-        foreach ($digests as $digest) {
+        foreach ($digests as $index => $digest) {
             $alias = PrivateLookupAlias::query()->createOrFirst(
                 ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $digest],
-                ['lookup_id' => $first->lookup_id, 'created_at' => CarbonImmutable::now()],
+                ['lookup_id' => $lookupId, 'created_at' => CarbonImmutable::now()],
             );
 
-            if ($alias->lookup_id !== $first->lookup_id) {
+            if ($alias->lookup_id !== $lookupId) {
+                if ($index === array_key_first($digests) && $createdWithoutExistingAlias) {
+                    $lookupId = $alias->lookup_id;
+
+                    continue;
+                }
+
                 throw new LogicException('Deposit lookup aliases are inconsistent.');
             }
         }
 
-        return $first->lookup_id;
+        return $lookupId;
     }
 
     /** @return array<string, string> */
