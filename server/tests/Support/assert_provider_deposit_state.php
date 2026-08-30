@@ -13,11 +13,14 @@ $app->make(Kernel::class)->bootstrap();
 
 $organizationId = '00000000-0000-4000-8000-000000000165';
 $deposits = Deposit::query()->where('organization_id', $organizationId)->get();
+$expectedDeposits = (int) (getenv('DEPOSIT_TEST_EXPECTED_DEPOSITS') ?: 1);
+$expectedLedgerEntries = (int) (getenv('DEPOSIT_TEST_EXPECTED_LEDGER_ENTRIES') ?: 2);
+$expectedCredit = (int) (getenv('DEPOSIT_TEST_EXPECTED_CREDIT_MINOR') ?: 12500);
 
-if ($deposits->count() !== 1
+if ($deposits->count() !== $expectedDeposits
     || Customer::query()->where('organization_id', $organizationId)->count() !== 1
     || SourceInstallation::query()->where('organization_id', $organizationId)->count() !== 1
-    || LedgerEntry::query()->where('deposit_id', $deposits->sole()->id)->count() !== 2
-    || (int) LedgerEntry::query()->where('deposit_id', $deposits->sole()->id)->sum('credit_minor') !== 12500) {
+    || LedgerEntry::query()->whereIn('deposit_id', $deposits->pluck('id'))->count() !== $expectedLedgerEntries
+    || (int) LedgerEntry::query()->whereIn('deposit_id', $deposits->pluck('id'))->sum('credit_minor') !== $expectedCredit) {
     throw new RuntimeException('Provider deposit concurrency state is not exact.');
 }

@@ -115,11 +115,11 @@ jobs:
             connection: pgsql
             port: 5432
           - name: MySQL 8
-            image: mysql:8.4
+            image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb # 8.4.11
             connection: mysql
             port: 3306
           - name: MariaDB 11
-            image: mariadb:11.8
+            image: mariadb:11.8@sha256:2439dcd7d14010ecd1ff7a4e1c5abe8e208c34fe35290744deeeaac3569043c3 # 11.8
             connection: mariadb
             port: 3306
     name: Deposit concurrency - ${{ matrix.name }}
