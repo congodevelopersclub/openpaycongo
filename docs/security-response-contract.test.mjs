@@ -18,11 +18,17 @@ const requiredTabletopFields = [
 ];
 
 const sensitiveTabletopFields = [
-  /^\s*(?:raw\s+sms|sms\s+body)\s*:/im,
-  /^\s*(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
-  /^\s*(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
-  /^\s*(?:authorization|bearer|jwt|access\s+token)\s*:/im,
-  /^\s*(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
+  /^\s*(?:[-*+]\s*)?(?:raw\s+sms|sms\s+body)\s*:/im,
+  /^\s*(?:[-*+]\s*)?(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
+  /^\s*(?:[-*+]\s*)?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
+  /^\s*(?:[-*+]\s*)?(?:authorization|bearer|jwt|access\s+token)\s*:/im,
+  /^\s*(?:[-*+]\s*)?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
+  /\b(?:raw\s+sms|sms\s+body)\b\s+(?:is|was|contains)\b/i,
+  /\b(?:phone(?:\s+number)?|customer\s+(?:name|reference)|payment\s+(?:amount|reference)|account\s+(?:number|balance))\b\s+(?:is|was|equals)\b/i,
+  /\b(?:authorization|bearer|jwt|access\s+token)\b\s+(?:is|was)\b/i,
+  /\b(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\b\s+(?:is|was)\b/i,
+  /\+\d{7,15}\b/,
+  /\b(?:10|127|192)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
 ];
 
 function assertSyntheticTabletop(fixture) {
@@ -82,13 +88,19 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
   assert.doesNotMatch(fixture, /(@|ghp_|github_pat_|AKIA|-----BEGIN|password\s*[:=])/i);
 
   const mutations = [
-    'Raw SMS: synthetic message text',
-    'Phone number: +243000000000',
-    'Customer name: Synthetic Customer',
-    'Payment amount: 123',
-    'Authorization: Bearer synthetic-token-value',
-    'JWT: synthetic-token-value',
-    'Internal host: 10.0.0.1',
+    '- Raw SMS: synthetic message text',
+    '- Phone number: +243000000000',
+    '- Customer name: Synthetic Customer',
+    '- Payment amount: 123',
+    '- Authorization: Bearer synthetic-token-value',
+    '- JWT: synthetic-token-value',
+    '- Internal host: 10.0.0.1',
+    'The raw SMS body contains synthetic message text.',
+    'The phone number is +243000000000.',
+    'The customer name is Synthetic Customer.',
+    'The payment amount is 123.',
+    'The authorization is Bearer synthetic-token-value.',
+    'The internal host is 10.0.0.1.',
   ];
 
   for (const mutation of mutations) {
