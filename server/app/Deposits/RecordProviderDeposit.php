@@ -160,6 +160,11 @@ final class RecordProviderDeposit
 
     private function isStrictTimestamp(string $value): bool
     {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-](?<hours>\d{2}):(?<minutes>\d{2}))$/D', $value, $offset) !== 1
+            || (isset($offset['hours']) && ((int) $offset['hours'] > 23 || (int) $offset['minutes'] > 59))) {
+            return false;
+        }
+
         $timestamp = DateTimeImmutable::createFromFormat(DATE_ATOM, $value);
         $errors = DateTimeImmutable::getLastErrors();
 

@@ -3,11 +3,10 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Deposit extends Model
+class Deposit extends ImmutableFinancialModel
 {
     use HasUuids;
 
@@ -24,16 +23,6 @@ class Deposit extends Model
     protected $hidden = [
         'provider_reference', 'provider_reference_digest', 'sender_identifier', 'receiver_identifier', 'idempotency_digest',
     ];
-
-    protected static function booted(): void
-    {
-        static::updating(static function (): never {
-            throw new \LogicException('Deposits are immutable.');
-        });
-        static::deleting(static function (): never {
-            throw new \LogicException('Deposits are immutable.');
-        });
-    }
 
     protected function casts(): array
     {

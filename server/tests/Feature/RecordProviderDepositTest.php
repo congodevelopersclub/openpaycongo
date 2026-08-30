@@ -182,6 +182,48 @@ final class RecordProviderDepositTest extends TestCase
         self::assertDatabaseHas('ledger_entries', ['id' => $entry->id, 'account' => 'provider_receivable']);
     }
 
+    public function test_quiet_and_counter_eloquent_persistence_paths_cannot_mutate_financial_facts(): void
+    {
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $entry = $deposit->ledgerEntries()->firstOrFail();
+
+        $deposit->currency = 'USD';
+        $entry->account = 'tampered';
+        $this->assertImmutable(static fn (): bool => $deposit->saveQuietly());
+        $this->assertImmutable(static fn (): bool => $entry->updateQuietly(['account' => 'tampered']));
+        $this->assertImmutable(static fn (): ?bool => $deposit->deleteQuietly());
+        $this->assertImmutable(static fn (): ?bool => $entry->deleteQuietly());
+        $this->assertImmutable(static fn (): int => $deposit->increment('amount_minor'));
+        $this->assertImmutable(static fn (): int => $entry->decrement('credit_minor'));
+        $this->assertImmutable(static fn () => $deposit->forceDelete());
+        $this->assertImmutable(\Closure::bind(fn () => $this->incrementQuietly('amount_minor'), $deposit, $deposit::class));
+        $this->assertImmutable(\Closure::bind(fn () => $this->decrementQuietly('credit_minor'), $entry, $entry::class));
+        self::assertDatabaseHas('deposits', ['id' => $deposit->id, 'currency' => 'CDF', 'amount_minor' => 12500]);
+        self::assertDatabaseHas('ledger_entries', ['id' => $entry->id, 'account' => 'provider_receivable']);
+    }
+
+    public function test_rfc3339_offset_boundaries_are_validated_before_any_write(): void
+    {
+        foreach (['2026-08-30T01:00:00+23:59', '2026-08-30T01:00:00-23:59'] as $value) {
+            self::assertSame(RecordResult::Recorded, app(RecordProviderDeposit::class)->record($this->transfer(providerOccurredAt: $value, providerReference: Str::uuid()->toString()))->outcome);
+        }
+
+        foreach (['2026-08-30T01:00:00+24:00', '2026-08-30T01:00:00-24:00', '2026-08-30T01:00:00+23:60'] as $value) {
+            $depositsBefore = Deposit::query()->count();
+            $ledgerEntriesBefore = LedgerEntry::query()->count();
+
+            try {
+                app(RecordProviderDeposit::class)->record($this->transfer(providerOccurredAt: $value, providerReference: Str::uuid()->toString()));
+                self::fail('Invalid RFC3339 offsets must be rejected.');
+            } catch (InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+
+            self::assertSame($depositsBefore, Deposit::query()->count());
+            self::assertSame($ledgerEntriesBefore, LedgerEntry::query()->count());
+        }
+    }
+
     public function test_control_characters_are_rejected_before_they_can_make_an_ambiguous_idempotency_payload(): void
     {
         $transfer = $this->transfer(providerReference: "provider\nreference");
