@@ -17,5 +17,6 @@ test('threat model separates verified repository facts from pending maintainer a
   assert.match(model, /simultaneous device and server loss/i);
   assert.match(model, /not production-ready/i);
   assert.match(model, /not yet approved/i);
+  assert.match(model, /Critical and High findings.*release blockers/i);
   assert.doesNotMatch(model, /production credentials/i);
 });

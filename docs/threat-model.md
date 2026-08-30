@@ -51,7 +51,7 @@ No examples in this document contain personal data, usable credentials, private 
 | Lost/invalidate device key or corrupt journal is mistaken for healthy state | The mobile storage design uses recovery-required markers and reports recovery instead of a false record count. | Real-device power-loss and recovery rehearsal are still required. |
 | Secrets or raw SMS leak through public evidence | Repository documentation forbids raw SMS, credentials, and wallet databases; canonical events omit raw SMS. | Telemetry retention, exporter configuration, and incident-log access policy are not yet approved. |
 | Unsupported endpoint or local database is used with real data | README prohibits real payments and SMS. The removed legacy plaintext path must not be restored. | Maintainers must keep unsupported prototype storage out of supported releases. |
-| Vulnerable dependency or mutable build input reaches a release | CI pins actions and toolchains. | Blocking thresholds, exception expiry, advisory sources, SBOM/provenance, signing, and emergency revocation are not yet approved. |
+| Vulnerable dependency or mutable build input reaches a release | CI pins actions and toolchains; `SECURITY.md` makes confirmed Critical and High findings release blockers and defines response roles. | Exception expiry, advisory sources, SBOM/provenance, signing, and production release authority remain incomplete evidence. |
 
 ## Privacy lifecycle
 
@@ -73,8 +73,8 @@ The following are **not yet approved** and must be decided by maintainers before
 1. Accountable security, privacy, identity, release, and incident-response roles plus backup escalation.
 2. OAuth/OIDC issuer, claim matrix, audiences, client types, key rotation, token expiry, revocation, logout, outage behavior, and break-glass/recovery authority.
 3. Privacy basis, retention/deletion/export/backup/restore rules, telemetry and crash-data policy, audit access, and user-support process.
-4. Private vulnerability reporting route, acknowledgement target, coordinated disclosure process, and emergency rebuild/revocation authority.
-5. Vulnerability severity/exploitability thresholds, advisory sources, exception evidence/expiry, dependency cadence, SBOM/provenance/signing, and scanner-outage behavior.
+4. Enabling and verifying the GitHub private vulnerability-reporting route. `SECURITY.md` defines the response targets, coordinated disclosure, and emergency procedure, but the repository setting is currently disabled.
+5. Advisory sources, exception evidence/expiry, dependency cadence, SBOM/provenance/signing, and production release authority.
 6. Production hosting, deployment, artifact, and release approval authority.
 7. Canonical mobile storage ownership and a policy for preventing reintroduction of legacy plaintext prototype paths.
 
