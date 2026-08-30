@@ -194,14 +194,20 @@ final class PaymentRequestTest extends TestCase
 
     public function test_allocation_delivery_stays_recoverable_when_callback_handoff_fails(): void
     {
-        Event::fake([PaymentRequestAllocated::class]);
         Queue::fake();
         $customer = Customer::query()->create($this->customerAttributes());
         CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 1200]);
         $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'durable-delivery');
         $delivery = PaymentRequestAllocationDelivery::query()->where('payment_request_id', $request->id)->firstOrFail();
 
-        // A crash or enqueue failure before this queued job runs leaves the row untouched.
+        Event::listen(PaymentRequestAllocated::class, function (): void {
+            throw new \RuntimeException('simulated post-handoff crash');
+        });
+        try {
+            app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
+        } catch (\RuntimeException) {
+            // The callback was emitted, but the durable marker stays eligible for replay.
+        }
         self::assertNull($delivery->fresh()->dispatched_at);
 
         Event::fake([PaymentRequestAllocated::class]);
