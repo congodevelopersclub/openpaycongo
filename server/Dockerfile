@@ -140,12 +140,12 @@ FROM dependencies AS security-php-static-proof
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
-RUN set -eu; composer dump-autoload --no-interaction --optimize; printf '%s\n' '<?php' 'final class Broken {public function run(){}}' > app/SecurityGateBrokenFixture.php; set +e; output="$(composer run lint 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+RUN set -eu; composer dump-autoload --no-interaction --optimize; printf '%s\n' '<?php' '' 'declare(strict_types=1);' '' 'final class SecurityGateBrokenFixture' '{' '    public function run(): int' '    {' "        return 'not-an-int';" '    }' '}' > app/SecurityGateBrokenFixture.php; set +e; output="$(composer run analyse 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
     && printf '%s\n' "$output" | grep -q 'SecurityGateBrokenFixture.php'
 
 FROM dependencies AS security-authorization-proof
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
-RUN set -eu; : > .env; composer dump-autoload --no-interaction --optimize; printf '%s\n' "Route::get('/security-gate-unprotected-fixture', static fn () => response()->noContent());" >> routes/web.php; set +e; output="$(php artisan test --filter=AuthorizationBoundaryTest 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
-    && printf '%s\n' "$output" | grep -q 'security-gate-unprotected-fixture'
+RUN set -eu; : > .env; composer dump-autoload --no-interaction --optimize; printf '%s\n' "Route::get('/security-gate-lookalike-fixture', static fn () => response()->noContent())->middleware('auth.optional');" >> routes/web.php; set +e; output="$(php artisan test --filter=AuthorizationBoundaryTest 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'security-gate-lookalike-fixture'

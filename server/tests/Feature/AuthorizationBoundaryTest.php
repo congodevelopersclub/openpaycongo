@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Auth\Middleware\Authorize;
 use Tests\TestCase;
 
 final class AuthorizationBoundaryTest extends TestCase
@@ -43,9 +45,7 @@ final class AuthorizationBoundaryTest extends TestCase
             }
 
             self::assertTrue(
-                collect($route->gatherMiddleware())->contains(
-                    static fn (string $middleware): bool => str_starts_with($middleware, 'auth') || str_starts_with($middleware, 'can:'),
-                ),
+                collect($route->gatherMiddleware())->contains(static fn (string $middleware): bool => self::isExpectedBoundaryMiddleware($middleware)),
                 "Route [{$signature}] is neither in the reviewed anonymous inventory nor protected by authorization middleware.",
             );
         }
@@ -53,9 +53,31 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertSame(7, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
+    public function test_lookalike_middleware_aliases_do_not_count_as_authorization(): void
+    {
+        self::assertTrue(self::isExpectedBoundaryMiddleware('auth'));
+        self::assertTrue(self::isExpectedBoundaryMiddleware('auth:sanctum'));
+        self::assertTrue(self::isExpectedBoundaryMiddleware(Authenticate::class));
+        self::assertTrue(self::isExpectedBoundaryMiddleware('can:view,deposit'));
+        self::assertTrue(self::isExpectedBoundaryMiddleware(Authorize::class));
+        self::assertFalse(self::isExpectedBoundaryMiddleware('auth.optional'));
+        self::assertFalse(self::isExpectedBoundaryMiddleware('authorize-anything'));
+    }
+
     public function test_unsigned_framework_storage_routes_are_rejected(): void
     {
         $this->get('/storage/not-signed')->assertForbidden();
         $this->put('/storage/not-signed?upload=true')->assertForbidden();
+    }
+
+    private static function isExpectedBoundaryMiddleware(string $middleware): bool
+    {
+        return $middleware === 'auth'
+            || str_starts_with($middleware, 'auth:')
+            || $middleware === Authenticate::class
+            || str_starts_with($middleware, Authenticate::class.':')
+            || str_starts_with($middleware, 'can:')
+            || $middleware === Authorize::class
+            || str_starts_with($middleware, Authorize::class.':');
     }
 }

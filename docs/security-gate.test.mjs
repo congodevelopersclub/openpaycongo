@@ -51,6 +51,9 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fullProofs, /vulnerable-composer/);
   assert.match(authorizationBoundary, /storage\/not-signed\?upload=true/);
   assert.match(authorizationBoundary, /assertForbidden\(\)/);
+  assert.match(authorizationBoundary, /auth\.optional/);
+  assert.match(authorizationBoundary, /authorize-anything/);
+  assert.doesNotMatch(authorizationBoundary, /str_starts_with\(\$middleware, 'auth'\)/);
   assert.doesNotMatch(authorizationBoundary, /WithoutErrorHandler/);
   assert.match(await readFile(new URL('../scripts/security/verify-secret-scanner.sh', import.meta.url), 'utf8'), /seeded secret appended to a deterministic vector/);
   assert.doesNotMatch(authorizationBoundary, /file_put_contents|unlink|\.env/);
@@ -58,6 +61,9 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.doesNotMatch(serverDockerfile, /COPY\s+server\/\.env/);
   assert.match(serverDockerfile, /FROM quality AS test[\s\S]*?: > \.env[\s\S]*?composer test/);
   assert.match(serverDockerfile, /FROM dependencies AS security-authorization-proof[\s\S]*?: > \.env/);
+  assert.match(serverDockerfile, /security-gate-lookalike-fixture[\s\S]*?auth\.optional/);
+  assert.match(serverDockerfile, /FROM dependencies AS security-php-static-proof[\s\S]*?SecurityGateBrokenFixture[\s\S]*?composer run analyse/);
+  assert.doesNotMatch(serverDockerfile, /security-php-static-proof[\s\S]*?composer run lint/);
   assert.match(serverDockerfile, /FROM php83-platform-check AS dependencies/);
   assert.match(serverDockerfile, /docker-php-ext-install pdo_pgsql pdo_mysql/);
   assert.match(serverDockerfile, /FROM production AS production-contract/);
