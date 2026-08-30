@@ -4,6 +4,7 @@ use App\Events\CustomerCreditCreationPending;
 use App\Models\Deposit;
 use App\Models\User;
 use App\Reconciliation\ReverseDeposit;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Event;
 
@@ -11,6 +12,10 @@ require __DIR__.'/../../vendor/autoload.php';
 
 $app = require __DIR__.'/../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
+$app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
+{
+    public function assertVerified(User $user): void {}
+});
 
 $barrier = (string) getenv('PAYMENT_REQUEST_TEST_BARRIER_DIRECTORY');
 $worker = (string) getenv('PAYMENT_REQUEST_TEST_WORKER');

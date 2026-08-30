@@ -78,7 +78,7 @@ final class RecordProviderDeposit
                         'idempotency_digest' => $this->activeDigest($idempotencyDigests),
                         'idempotency_key_version' => $this->activeKeyId(),
                     ]);
-                    $this->appendEntries($deposit, $receivedAt, false);
+                    $this->appendEntries($deposit, $receivedAt);
                     event(new ProviderDepositRecorded($deposit->id));
 
                     return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
@@ -220,21 +220,17 @@ final class RecordProviderDeposit
         );
     }
 
-    private function appendEntries(Deposit $deposit, CarbonImmutable $recordedAt, bool $reverse, ?Deposit $original = null): void
+    private function appendEntries(Deposit $deposit, CarbonImmutable $recordedAt): void
     {
         $amount = (int) $deposit->amount_minor;
-        $entries = $reverse
-            ? [['account' => 'customer_credit', 'debit_minor' => $amount, 'credit_minor' => 0], ['account' => 'provider_receivable', 'debit_minor' => 0, 'credit_minor' => $amount]]
-            : [['account' => 'provider_receivable', 'debit_minor' => $amount, 'credit_minor' => 0], ['account' => 'customer_credit', 'debit_minor' => 0, 'credit_minor' => $amount]];
+        $entries = [['account' => 'provider_receivable', 'debit_minor' => $amount, 'credit_minor' => 0], ['account' => 'customer_credit', 'debit_minor' => 0, 'credit_minor' => $amount]];
 
-        $originalEntries = $original?->ledgerEntries()->get()->keyBy('account');
         foreach ($entries as $entry) {
             LedgerEntry::query()->create([
                 'deposit_id' => $deposit->id,
                 'organization_id' => $deposit->organization_id,
                 'currency' => $deposit->currency,
                 'recorded_at' => $recordedAt,
-                'reverses_ledger_entry_id' => $originalEntries?->get($entry['account'])?->id,
                 ...$entry,
             ]);
         }

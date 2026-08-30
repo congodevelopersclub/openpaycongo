@@ -7,11 +7,14 @@ use App\Deposits\RecordProviderDeposit;
 use App\Models\Customer;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
+use App\Models\FinancialCorrectionAudit;
 use App\Models\LedgerEntry;
 use App\Models\User;
 use App\Reconciliation\ReconcileDeposit;
 use App\Reconciliation\RepairMissingCustomerCredit;
 use App\Reconciliation\ReverseDeposit;
+use App\Security\FinancialOperatorMfaSession;
+use App\Security\UnavailableFinancialOperatorMfaSession;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -23,6 +26,15 @@ use Tests\TestCase;
 final class ReconciliationTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
+        {
+            public function assertVerified(User $user): void {}
+        });
+    }
 
     public function test_an_operator_can_reconcile_a_reversal_without_rewriting_history(): void
     {
@@ -65,6 +77,80 @@ final class ReconciliationTest extends TestCase
         self::assertDatabaseCount('financial_correction_audits', 1);
     }
 
+    public function test_repair_replay_requires_matching_intent_and_evidence(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $otherOperator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer('repair-replay'))->deposit;
+        CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
+        CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 0]);
+        $repair = app(RepairMissingCustomerCredit::class);
+
+        self::assertTrue($repair->repair($operator, $deposit, 'missing_credit_posting', 'confirmed')->repaired);
+        self::assertFalse($repair->repair($operator, $deposit, 'missing_credit_posting', 'confirmed')->repaired);
+
+        foreach ([[$otherOperator, 'missing_credit_posting', 'confirmed'], [$operator, 'other_reason', 'confirmed'], [$operator, 'missing_credit_posting', 'changed']] as [$actor, $reason, $detail]) {
+            try {
+                $repair->repair($actor, $deposit, $reason, $detail);
+                self::fail('A changed repair replay intent must be rejected.');
+            } catch (ValidationException) {
+                self::assertDatabaseCount('financial_correction_audits', 1);
+            }
+        }
+    }
+
+    public function test_repair_rejects_a_normal_existing_posting_without_correction_evidence(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer('normal-posting'))->deposit;
+        $credit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->firstOrFail();
+
+        $this->expectException(ValidationException::class);
+        try {
+            app(RepairMissingCustomerCredit::class)->repair($operator, $deposit, 'missing_credit_posting');
+        } finally {
+            self::assertDatabaseCount('customer_credit_postings', 1);
+            self::assertSame((int) $deposit->amount_minor, (int) $credit->fresh()->available_minor);
+            self::assertDatabaseCount('financial_correction_audits', 0);
+        }
+    }
+
+    public function test_repair_replay_rejects_missing_evidence_or_an_unreconciled_state_without_mutation(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $repair = app(RepairMissingCustomerCredit::class);
+
+        $withoutAudit = app(RecordProviderDeposit::class)->record($this->transfer('repair-audit-deleted'))->deposit;
+        CustomerCreditPosting::query()->where('deposit_id', $withoutAudit->id)->delete();
+        CustomerCredit::query()->where('customer_id', $withoutAudit->customer_id)->where('currency', $withoutAudit->currency)->update(['available_minor' => 0]);
+        $repair->repair($operator, $withoutAudit, 'missing_credit_posting', 'confirmed');
+        FinancialCorrectionAudit::query()->where('deposit_id', $withoutAudit->id)->delete();
+
+        try {
+            $repair->repair($operator, $withoutAudit, 'missing_credit_posting', 'confirmed');
+            self::fail('A replay missing its correction evidence must be rejected.');
+        } catch (ValidationException) {
+            self::assertDatabaseCount('customer_credit_postings', 1);
+            self::assertDatabaseCount('financial_correction_audits', 0);
+            self::assertSame((int) $withoutAudit->amount_minor, (int) CustomerCredit::query()->where('customer_id', $withoutAudit->customer_id)->value('available_minor'));
+        }
+
+        $unreconciled = app(RecordProviderDeposit::class)->record($this->transfer('repair-state-drift'))->deposit;
+        CustomerCreditPosting::query()->where('deposit_id', $unreconciled->id)->delete();
+        CustomerCredit::query()->where('customer_id', $unreconciled->customer_id)->where('currency', $unreconciled->currency)->update(['available_minor' => 0]);
+        $repair->repair($operator, $unreconciled, 'missing_credit_posting', 'confirmed');
+        CustomerCredit::query()->where('customer_id', $unreconciled->customer_id)->where('currency', $unreconciled->currency)->update(['available_minor' => 1]);
+
+        try {
+            $repair->repair($operator, $unreconciled, 'missing_credit_posting', 'confirmed');
+            self::fail('An unreconciled repair replay must be rejected.');
+        } catch (ValidationException) {
+            self::assertDatabaseCount('customer_credit_postings', 2);
+            self::assertDatabaseCount('financial_correction_audits', 1);
+            self::assertSame(1, (int) CustomerCredit::query()->where('customer_id', $unreconciled->customer_id)->value('available_minor'));
+        }
+    }
+
     public function test_a_non_operator_cannot_reverse_or_repair_financial_records(): void
     {
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
@@ -74,19 +160,26 @@ final class ReconciliationTest extends TestCase
         app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
     }
 
-    public function test_the_privileged_report_resource_exposes_only_reconciliation_state(): void
+    public function test_a_password_only_operator_cannot_invoke_correction_actions_directly(): void
     {
-        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $this->app->instance(FinancialOperatorMfaSession::class, new UnavailableFinancialOperatorMfaSession);
         $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer('password-only-action'))->deposit;
+        $credit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->firstOrFail();
 
-        $this->actingAs($operator)
-            ->getJson('/reconciliation/deposits/'.$deposit->id)
-            ->assertOk()
-            ->assertExactJson(['data' => ['is_reconciled' => true, 'discrepancies' => []]]);
-
-        $this->actingAs(User::factory()->create(['is_financial_operator' => false]))
-            ->getJson('/reconciliation/deposits/'.$deposit->id)
-            ->assertForbidden();
+        foreach ([
+            fn () => app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction'),
+            fn () => app(RepairMissingCustomerCredit::class)->repair($operator, $deposit, 'missing_credit_posting'),
+        ] as $action) {
+            try {
+                $action();
+                self::fail('A password-only operator must not invoke correction Actions directly.');
+            } catch (AuthorizationException) {
+                self::assertDatabaseCount('financial_correction_audits', 0);
+                self::assertDatabaseCount('customer_credit_postings', 1);
+                self::assertSame((int) $deposit->amount_minor, (int) $credit->fresh()->available_minor);
+            }
+        }
     }
 
     public function test_reconciliation_surfaces_missing_original_ledger_linkage_and_the_database_rejects_duplicates(): void
@@ -154,6 +247,32 @@ final class ReconciliationTest extends TestCase
         self::assertContains('reversal_ledger_linkage', app(ReconcileDeposit::class)->report($reversal)->discrepancies);
     }
 
+    public function test_reconciliation_rejects_same_sided_original_ledger_links_and_missing_audit_evidence(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
+
+        DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'customer_credit')->update(['debit_minor' => 0, 'credit_minor' => 12500]);
+        DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'provider_receivable')->update(['debit_minor' => 12500, 'credit_minor' => 0]);
+        DB::table('financial_correction_audits')->where('deposit_id', $reversal->id)->delete();
+
+        $discrepancies = app(ReconcileDeposit::class)->report($reversal)->discrepancies;
+
+        self::assertContains('reversal_ledger_linkage', $discrepancies);
+        self::assertContains('reversal_evidence', $discrepancies);
+    }
+
+    public function test_reversal_refuses_a_customer_credit_balance_drift(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 1]);
+
+        $this->expectException(ValidationException::class);
+        app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
+    }
+
     public function test_reversal_refuses_an_unreconciled_original_and_legacy_replay_without_evidence(): void
     {
         $operator = User::factory()->create(['is_financial_operator' => true]);
@@ -176,12 +295,65 @@ final class ReconciliationTest extends TestCase
         app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
     }
 
+    public function test_reversal_replay_requires_the_exact_original_intent_and_clean_evidence(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $otherOperator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer('exact-replay'))->deposit;
+        $action = app(ReverseDeposit::class);
+        $first = $action->reverse($operator, $deposit, 'provider_correction', 'operator-confirmed');
+
+        self::assertSame('reversed', $first->outcome->value);
+        self::assertSame('replayed', $action->reverse($operator, $deposit, 'provider_correction', 'operator-confirmed')->outcome->value);
+
+        foreach ([[$otherOperator, 'provider_correction', 'operator-confirmed'], [$operator, 'other_reason', 'operator-confirmed'], [$operator, 'provider_correction', 'changed-detail']] as [$actor, $reason, $detail]) {
+            try {
+                $action->reverse($actor, $deposit, $reason, $detail);
+                self::fail('A changed reversal replay intent must be rejected.');
+            } catch (ValidationException) {
+                self::assertDatabaseCount('financial_correction_audits', 1);
+            }
+        }
+
+        DB::table('ledger_entries')->where('deposit_id', $first->deposit->id)->where('account', 'customer_credit')->update(['debit_minor' => 1]);
+
+        $this->expectException(ValidationException::class);
+        $action->reverse($operator, $deposit, 'provider_correction', 'operator-confirmed');
+    }
+
+    public function test_reconciliation_evidence_migration_refuses_to_rollback_provisioned_operator_authorization(): void
+    {
+        User::factory()->create(['is_financial_operator' => true]);
+        $migration = require base_path('database/migrations/2026_09_02_000000_add_reconciliation_correction_evidence.php');
+
+        $this->expectException(\LogicException::class);
+        $migration->down();
+    }
+
     public function test_reconciliation_rejects_an_unknown_deposit_kind(): void
     {
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
         DB::table('deposits')->where('id', $deposit->id)->update(['kind' => 'unknown']);
 
         self::assertContains('unsupported_deposit_kind', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
+    }
+
+    public function test_reconciliation_rejects_a_customer_outside_the_deposit_organization(): void
+    {
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        DB::table('customers')->where('id', $deposit->customer_id)->update(['organization_id' => '00000000-0000-4000-8000-000000000099']);
+
+        self::assertContains('customer_scope_mismatch', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
+    }
+
+    public function test_reconciliation_requires_a_provider_credit_as_the_reversal_original(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
+        DB::table('deposits')->where('id', $deposit->id)->update(['kind' => 'provider_reversal']);
+
+        self::assertContains('reversal_evidence', app(ReconcileDeposit::class)->report($reversal)->discrepancies);
     }
 
     private function transfer(string $providerReference = 'reconciliation-provider-reference'): ProviderTransfer

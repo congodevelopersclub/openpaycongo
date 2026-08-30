@@ -6,8 +6,10 @@ use App\Deposits\DepositKind;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
+use App\Models\FinancialCorrectionAudit;
 use App\Models\LedgerEntry;
 use App\Models\PaymentRequest;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 final class ReconcileDeposit
@@ -23,8 +25,20 @@ final class ReconcileDeposit
 
     private function reportSnapshot(Deposit $deposit): ReconciliationReport
     {
+        // Every reconciliation read follows the mutation lock order: deposit, then
+        // customer credit. This keeps the ledger/posting aggregates on the same
+        // current view as the available-credit balance across supported dialects.
+        $credit = CustomerCredit::query()
+            ->where('customer_id', $deposit->customer_id)
+            ->where('currency', $deposit->currency)
+            ->lockForUpdate()
+            ->first();
+        $deposit->loadMissing('customer');
         $deposit->loadMissing('ledgerEntries.reversesLedgerEntry');
         $discrepancies = [];
+        if ($deposit->customer === null || $deposit->customer->organization_id !== $deposit->organization_id) {
+            $discrepancies[] = 'customer_scope_mismatch';
+        }
         $entries = $deposit->ledgerEntries;
         $supportedKind = in_array($deposit->kind, [DepositKind::ProviderCredit->value, DepositKind::ProviderReversal->value], true);
         if (! $supportedKind) {
@@ -60,7 +74,10 @@ final class ReconcileDeposit
         }
 
         if ($deposit->kind === DepositKind::ProviderReversal->value) {
-            if (! $this->hasMatchingOriginalDeposit($deposit) || $deposit->reversal_reason_code === null || $deposit->reversed_by_user_id === null) {
+            if (! $this->hasMatchingOriginalDeposit($deposit)
+                || $deposit->reversal_reason_code === null
+                || $deposit->reversed_by_user_id === null
+                || ! $this->hasMatchingCorrectionAudit($deposit)) {
                 $discrepancies[] = 'reversal_evidence';
             }
             if ($entries->contains(fn ($entry): bool => $entry->reverses_ledger_entry_id === null)
@@ -69,7 +86,6 @@ final class ReconcileDeposit
             }
         }
 
-        $credit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->lockForUpdate()->first();
         $posted = CustomerCreditPosting::query()
             ->whereHas('customerCredit', fn ($query) => $query->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency))
             ->sum('amount_minor');
@@ -112,8 +128,23 @@ final class ReconcileDeposit
             return $original !== null
                 && $original->deposit_id === $reversal->reverses_deposit_id
                 && $original->account === $entry->account
-                && (int) $original->debit_minor + (int) $original->credit_minor === (int) $entry->debit_minor + (int) $entry->credit_minor;
+                && (int) $original->debit_minor === (int) $entry->credit_minor
+                && (int) $original->credit_minor === (int) $entry->debit_minor;
         });
+    }
+
+    private function hasMatchingCorrectionAudit(Deposit $reversal): bool
+    {
+        $audit = FinancialCorrectionAudit::query()
+            ->where('deposit_id', $reversal->id)
+            ->where('correction', 'reverse_deposit')
+            ->first();
+
+        return $audit !== null
+            && $audit->organization_id === $reversal->organization_id
+            && (int) $audit->actor_user_id === (int) $reversal->reversed_by_user_id
+            && $audit->reason_code === $reversal->reversal_reason_code
+            && CarbonImmutable::parse($audit->recorded_at)->equalTo(CarbonImmutable::parse($reversal->received_at));
     }
 
     private function hasMatchingOriginalDeposit(Deposit $reversal): bool
@@ -121,6 +152,7 @@ final class ReconcileDeposit
         $original = $reversal->reversedDeposit;
 
         return $original !== null
+            && $original->kind === DepositKind::ProviderCredit->value
             && $original->organization_id === $reversal->organization_id
             && $original->customer_id === $reversal->customer_id
             && $original->currency === $reversal->currency

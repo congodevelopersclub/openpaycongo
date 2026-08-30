@@ -44,8 +44,13 @@ return new class extends Migration
     {
         if (DB::table('financial_correction_audits')->exists()
             || DB::table('deposits')->whereNotNull('reversed_by_user_id')->exists()
+            || DB::table('deposits')->whereNotNull('reversal_reason_code')->exists()
+            || DB::table('deposits')->whereNotNull('reversal_detail')->exists()
             || DB::table('ledger_entries')->whereNotNull('reverses_ledger_entry_id')->exists()) {
             throw new LogicException('Financial correction evidence cannot be removed once recorded.');
+        }
+        if (DB::table('users')->where('is_financial_operator', true)->exists()) {
+            throw new LogicException('Financial operator authorization cannot be removed once provisioned.');
         }
         Schema::dropIfExists('financial_correction_audits');
 

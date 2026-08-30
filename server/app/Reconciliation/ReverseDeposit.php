@@ -12,6 +12,7 @@ use App\Models\Deposit;
 use App\Models\FinancialCorrectionAudit;
 use App\Models\LedgerEntry;
 use App\Models\User;
+use App\Security\FinancialOperatorMfaSession;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -19,11 +20,15 @@ use Illuminate\Validation\ValidationException;
 
 final class ReverseDeposit
 {
-    public function __construct(private readonly ReconcileDeposit $reconciliation) {}
+    public function __construct(
+        private readonly ReconcileDeposit $reconciliation,
+        private readonly FinancialOperatorMfaSession $mfa,
+    ) {}
 
     public function reverse(User $actor, Deposit $deposit, string $reasonCode, ?string $detail = null): ReverseProviderDepositResult
     {
         Gate::forUser($actor)->authorize('correct', $deposit);
+        $this->mfa->assertVerified($actor);
         if (! preg_match('/^[a-z][a-z0-9_]{0,63}$/', $reasonCode) || ($detail !== null && mb_strlen($detail) > 1000)) {
             throw ValidationException::withMessages(['reason_code' => 'A bounded correction reason code is required.']);
         }
@@ -33,11 +38,10 @@ final class ReverseDeposit
             if ($original->kind !== DepositKind::ProviderCredit->value) {
                 throw ValidationException::withMessages(['deposit' => 'Deposit cannot be reversed.']);
             }
-            $originalDiscrepancies = $this->reconciliation->report($original)->discrepancies;
-            if (array_diff($originalDiscrepancies, ['customer_credit_balance']) !== []) {
+            if (! $this->reconciliation->report($original)->isReconciled) {
                 throw ValidationException::withMessages(['deposit' => 'Deposit must reconcile before reversal.']);
             }
-            $reversal = Deposit::query()->where('reverses_deposit_id', $original->id)->first();
+            $reversal = Deposit::query()->where('reverses_deposit_id', $original->id)->lockForUpdate()->first();
             if ($reversal === null) {
                 $recordedAt = CarbonImmutable::now();
                 $reversal = Deposit::query()->create([
@@ -72,12 +76,31 @@ final class ReverseDeposit
                     'detail' => $detail,
                     'recorded_at' => $recordedAt,
                 ]);
-            } elseif (! FinancialCorrectionAudit::query()->where('deposit_id', $reversal->id)->where('correction', 'reverse_deposit')->exists()) {
-                throw ValidationException::withMessages(['deposit' => 'Existing reversal is missing correction evidence.']);
+            } elseif (! $this->hasMatchingReplayIntent($reversal, $actor, $reasonCode, $detail)
+                || ! $this->reconciliation->report($reversal)->isReconciled) {
+                throw ValidationException::withMessages(['deposit' => 'Existing reversal does not match a reconciled correction intent.']);
             }
             $result = new ReverseProviderDepositResult($reversal->wasRecentlyCreated ? ReversalResult::Reversed : ReversalResult::Replayed, $reversal);
 
             return $result;
         }, attempts: 3);
+    }
+
+    private function hasMatchingReplayIntent(Deposit $reversal, User $actor, string $reasonCode, ?string $detail): bool
+    {
+        $audits = FinancialCorrectionAudit::query()
+            ->where('deposit_id', $reversal->id)
+            ->where('correction', 'reverse_deposit')
+            ->get();
+        $audit = $audits->first();
+
+        return $audit !== null
+            && $audits->count() === 1
+            && (int) $reversal->reversed_by_user_id === (int) $actor->id
+            && $reversal->reversal_reason_code === $reasonCode
+            && $reversal->reversal_detail === $detail
+            && (int) $audit->actor_user_id === (int) $actor->id
+            && $audit->reason_code === $reasonCode
+            && $audit->detail === $detail;
     }
 }
