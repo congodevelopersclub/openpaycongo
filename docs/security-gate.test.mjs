@@ -76,7 +76,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(serverDockerfile, /FROM dependencies AS security-php-static-proof[\s\S]*?SecurityGateBrokenFixture[\s\S]*?composer run analyse/);
   assert.doesNotMatch(serverDockerfile, /security-php-static-proof[\s\S]*?composer run lint/);
   assert.match(serverDockerfile, /FROM php83-platform-check AS dependencies/);
-  assert.match(serverDockerfile, /docker-php-ext-install pdo_pgsql pdo_mysql/);
+  assert.match(serverDockerfile, /docker-php-ext-install intl pdo_pgsql pdo_mysql zip/);
   assert.match(serverDockerfile, /FROM production AS production-contract/);
   const nginxDockerfile = await readFile(new URL('../server/docker/nginx.Dockerfile', import.meta.url), 'utf8');
   assert.match(nginxDockerfile, /FROM production AS production-contract/);

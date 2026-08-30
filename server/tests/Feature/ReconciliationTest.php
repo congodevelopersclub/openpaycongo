@@ -10,6 +10,7 @@ use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\FinancialCorrectionAudit;
 use App\Models\LedgerEntry;
+use App\Models\SourceInstallation;
 use App\Models\User;
 use App\Reconciliation\ReconcileDeposit;
 use App\Reconciliation\RepairMissingCustomerCredit;
@@ -19,6 +20,7 @@ use App\Security\UnavailableFinancialOperatorMfaSession;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -402,6 +404,24 @@ final class ReconciliationTest extends TestCase
         DB::table('deposits')->where('id', $wrongOriginalKind->id)->update(['kind' => 'unknown']);
 
         self::assertContains('reversal_evidence', $reconcile->report($wrongOriginalReversal)->discrepancies);
+
+        $wrongInstallationOriginal = app(RecordProviderDeposit::class)->record($this->transfer('wrong-reversal-installation'))->deposit;
+        $wrongInstallationReversal = $reverse->reverse($operator, $wrongInstallationOriginal, 'provider_correction')->deposit;
+        $otherInstallation = SourceInstallation::query()->create([
+            'organization_id' => $wrongInstallationOriginal->organization_id,
+            'installation_digest' => hash('sha256', 'wrong-reversal-installation'),
+            'installation_lookup_id' => 'wrong-reversal-installation',
+            'installation_key_version' => 'test',
+        ]);
+        DB::table('deposits')->where('id', $wrongInstallationReversal->id)->update(['source_installation_id' => $otherInstallation->id]);
+
+        self::assertContains('reversal_evidence', $reconcile->report($wrongInstallationReversal)->discrepancies);
+
+        $wrongAuditDetailOriginal = app(RecordProviderDeposit::class)->record($this->transfer('wrong-reversal-audit-detail'))->deposit;
+        $wrongAuditDetailReversal = $reverse->reverse($operator, $wrongAuditDetailOriginal, 'provider_correction', 'operator-confirmed')->deposit;
+        DB::table('financial_correction_audits')->where('deposit_id', $wrongAuditDetailReversal->id)->update(['detail' => Crypt::encryptString('tampered-detail')]);
+
+        self::assertContains('reversal_evidence', $reconcile->report($wrongAuditDetailReversal)->discrepancies);
     }
 
     private function assertCorrectionIsRejected(ReverseDeposit $reverse, User $operator, Deposit $deposit): void

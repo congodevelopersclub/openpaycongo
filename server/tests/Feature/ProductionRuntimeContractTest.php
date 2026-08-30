@@ -25,6 +25,8 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertIsString($nginxProxyMap);
         self::assertIsString($proxyRenderer);
         self::assertStringContainsString('php:8.3-fpm-alpine@sha256:', $dockerfile);
+        self::assertStringContainsString('FROM php83-platform-check AS production-dependencies', $dockerfile);
+        self::assertStringContainsString("COPY server/composer.json server/composer.lock ./\nRUN composer install --no-dev --no-interaction --prefer-dist --no-scripts\n\nCOPY server/ ./", $dockerfile);
         self::assertStringContainsString('pdo_pgsql pdo_mysql pdo_sqlite pcntl', $dockerfile);
         self::assertStringContainsString('FROM production AS production-contract', $dockerfile);
         self::assertStringNotContainsString('production-security-contract', $dockerfile);

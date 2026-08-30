@@ -144,6 +144,7 @@ final class ReconcileDeposit
             && $audit->organization_id === $reversal->organization_id
             && (int) $audit->actor_user_id === (int) $reversal->reversed_by_user_id
             && $audit->reason_code === $reversal->reversal_reason_code
+            && $audit->detail === $reversal->reversal_detail
             && CarbonImmutable::parse($audit->recorded_at)->equalTo(CarbonImmutable::parse($reversal->received_at));
     }
 
@@ -155,6 +156,7 @@ final class ReconcileDeposit
             && $original->kind === DepositKind::ProviderCredit->value
             && $original->organization_id === $reversal->organization_id
             && $original->customer_id === $reversal->customer_id
+            && $original->source_installation_id === $reversal->source_installation_id
             && $original->currency === $reversal->currency
             && (int) $original->amount_minor === (int) $reversal->amount_minor;
     }

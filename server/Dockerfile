@@ -66,7 +66,7 @@ RUN test -n "$TEST_FILTER" \
     && composer dump-autoload --no-interaction --optimize \
     && composer test -- --fail-on-empty-test-suite --filter="$TEST_FILTER"
 
-FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS production-dependencies
+FROM php83-platform-check AS production-dependencies
 
 WORKDIR /app
 
