@@ -140,12 +140,21 @@ final class PairingSessionBloc
       final PairingSession session = await gateway.begin();
       await _apply(session, emit, generation);
     } on TimeoutException {
-      if (generation == _generation) {
-        emit(const PairingSessionOffline());
-        telemetry.record(PairingTelemetrySignal.offline);
-      }
+      _emitOfflineIfCurrent(generation, emit);
+    } on PairingSessionPersistenceException {
+      _emitOfflineIfCurrent(generation, emit);
     } finally {
       if (_activeOperation == generation) _activeOperation = null;
+    }
+  }
+
+  void _emitOfflineIfCurrent(
+    int generation,
+    Emitter<PairingSessionState> emit,
+  ) {
+    if (generation == _generation) {
+      emit(const PairingSessionOffline());
+      telemetry.record(PairingTelemetrySignal.offline);
     }
   }
 
@@ -181,10 +190,9 @@ final class PairingSessionBloc
     try {
       await _apply(await gateway.refresh(session.sessionId), emit, generation);
     } on TimeoutException {
-      if (generation == _generation) {
-        emit(const PairingSessionOffline());
-        telemetry.record(PairingTelemetrySignal.offline);
-      }
+      _emitOfflineIfCurrent(generation, emit);
+    } on PairingSessionPersistenceException {
+      _emitOfflineIfCurrent(generation, emit);
     } finally {
       if (_activeOperation == generation) _activeOperation = null;
     }
@@ -224,6 +232,8 @@ final class PairingSessionBloc
     _activeOperation = generation;
     try {
       await _apply(session, emit, generation);
+    } on PairingSessionPersistenceException {
+      _emitOfflineIfCurrent(generation, emit);
     } finally {
       if (_activeOperation == generation) _activeOperation = null;
     }
@@ -331,7 +341,10 @@ final class PairingSessionBloc
   ) async {
     try {
       await pendingPersistence;
-      if (generation != _generation) return false;
+      if (generation != _generation) {
+        await _reconcileDurableSession();
+        return false;
+      }
       await _reconcileDurableSession(cancellationGeneration: generation);
       if (generation != _generation) return false;
       return true;

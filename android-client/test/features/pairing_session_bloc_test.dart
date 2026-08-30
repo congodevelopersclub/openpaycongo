@@ -603,6 +603,60 @@ void main() {
     await subscription.cancel();
     await bloc.close();
   });
+  test(
+    'superseding start timeout still clears the cancelled durable session',
+    () async {
+      final PairingSession stale = _session(PairingPhase.pending);
+      final _DeferredFirstSaveStore store = _DeferredFirstSaveStore(stale);
+      final _FirstThenTimeoutGateway gateway = _FirstThenTimeoutGateway(stale);
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: gateway,
+        telemetry: _Telemetry(),
+      );
+      bloc.add(const PairingSessionStarted());
+      await store.oldSaveEntered.future;
+      bloc.add(const PairingSessionCancelled());
+      bloc.add(const PairingSessionStarted());
+      final Future<PairingSessionState> offline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      store.releaseOldSave.complete();
+      await offline;
+      expect(store.value, isNull);
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      bloc.add(const PairingSessionRecovered());
+      await idle;
+      expect(bloc.state, isA<PairingSessionIdle>());
+      await bloc.close();
+    },
+  );
+  for (final PairingSessionEvent event in <PairingSessionEvent>[
+    const PairingSessionStarted(),
+    const PairingSessionRetryRequested(),
+    const PairingSessionRecovered(),
+  ]) {
+    test('typed persistence failure emits offline for $event', () async {
+      final PairingSession session = _session(PairingPhase.pending);
+      final _FailingSaveStore store = _FailingSaveStore()..value = session;
+      final _Telemetry telemetry = _Telemetry();
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: _Gateway(session),
+        telemetry: telemetry,
+      );
+      final Future<PairingSessionState> offline = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionOffline,
+      );
+      bloc.add(event);
+      await offline;
+      expect(bloc.state, isA<PairingSessionOffline>());
+      expect(telemetry.signals, contains(PairingTelemetrySignal.offline));
+      await bloc.close();
+    });
+  }
 }
 
 PairingSession _session(PairingPhase phase) => PairingSession(
@@ -844,6 +898,29 @@ final class _FailOnceClearStore extends _Store {
     loadCalls++;
     return super.load();
   }
+}
+
+final class _FailingSaveStore extends _Store {
+  @override
+  Future<void> save(PairingSession session) async {
+    throw const PairingSessionPersistenceException();
+  }
+}
+
+final class _FirstThenTimeoutGateway implements PairingSessionGateway {
+  _FirstThenTimeoutGateway(this.first);
+  final PairingSession first;
+  int calls = 0;
+
+  @override
+  Future<PairingSession> begin() async {
+    calls++;
+    if (calls == 1) return first;
+    throw TimeoutException('offline');
+  }
+
+  @override
+  Future<PairingSession> refresh(String sessionId) => begin();
 }
 
 final class _SequenceGateway implements PairingSessionGateway {
