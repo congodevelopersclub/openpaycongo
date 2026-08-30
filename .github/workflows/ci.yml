@@ -41,8 +41,12 @@ jobs:
           done
       - name: Run canonical Laravel quality gates and tests in Docker
         run: docker build --target test -f server/Dockerfile .
-      - name: Build and contract-check the production image
-        run: docker build --target production-contract -f server/Dockerfile .
+      - name: Build and contract-check the seeded production image
+        run: |
+          mkdir -p server/vendor server/node_modules
+          touch server/vendor/.openpay-host-dependency-marker
+          touch server/node_modules/.openpay-host-dependency-marker
+          docker build --target production-contract -f server/Dockerfile .
       - name: Build deployable FPM and nginx images
         run: |
           docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .

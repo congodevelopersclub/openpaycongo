@@ -35,6 +35,7 @@ FROM dependencies AS quality
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
 COPY compose.yaml /compose.yaml
+COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml
 RUN composer dump-autoload --no-interaction --optimize \
     && composer run lint \
@@ -82,7 +83,7 @@ RUN apk add --no-cache --upgrade \
 
 WORKDIR /var/www/html
 
-COPY --chown=www-data:www-data --from=production-dependencies /app ./
+COPY --from=production-dependencies /app ./
 
 RUN mkdir -p bootstrap/cache storage/app storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/home/.config/psysh \
     && chown -R www-data:www-data bootstrap/cache storage \
@@ -110,5 +111,10 @@ RUN php -m | grep -qx pdo_pgsql \
     && test ! -e pint.json \
     && test ! -e .env \
     && test ! -e .env.example \
+    && test ! -e node_modules \
+    && test ! -e vendor/.openpay-host-dependency-marker \
     && test -f composer.json \
-    && test -f composer.lock
+    && test -f composer.lock \
+    && test ! -w /var/www/html/vendor \
+    && test -w /var/www/html/storage \
+    && test -w /var/www/html/bootstrap/cache

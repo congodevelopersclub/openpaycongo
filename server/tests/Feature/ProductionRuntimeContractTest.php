@@ -29,6 +29,16 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringNotContainsString('production-security-contract', $dockerfile);
         self::assertStringContainsString('test -f composer.json', $dockerfile);
         self::assertStringContainsString('test -f composer.lock', $dockerfile);
+        self::assertStringNotContainsString('COPY --chown=www-data:www-data --from=production-dependencies /app ./', $dockerfile);
+        self::assertStringContainsString('test ! -e node_modules', $dockerfile);
+        self::assertStringContainsString('test ! -e vendor/.openpay-host-dependency-marker', $dockerfile);
+        self::assertStringContainsString('test ! -w /var/www/html/vendor', $dockerfile);
+        self::assertStringContainsString('test -w /var/www/html/storage', $dockerfile);
+        self::assertStringContainsString('test -w /var/www/html/bootstrap/cache', $dockerfile);
+        $dockerignore = file_get_contents('/dockerignore');
+        self::assertIsString($dockerignore);
+        self::assertStringContainsString('server/vendor', $dockerignore);
+        self::assertStringContainsString('server/node_modules', $dockerignore);
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
         self::assertStringContainsString('${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}', $compose);
         self::assertMatchesRegularExpression('/postgres:16-alpine@sha256:[a-f0-9]{64}/', $compose);
@@ -50,6 +60,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringNotContainsString('Request::HEADER_X_FORWARDED_HOST', $bootstrap);
         self::assertStringNotContainsString('Request::HEADER_X_FORWARDED_PORT', $bootstrap);
         self::assertStringContainsString('${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}', $compose);
+        self::assertSame(2, substr_count($compose, '${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}'));
         $workflow = file_get_contents('/ci.yml');
         self::assertIsString($workflow);
         self::assertStringContainsString('--target production-contract -f server/Dockerfile .', $workflow);
@@ -57,6 +68,8 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c', $workflow);
         self::assertStringContainsString('congo-openpay-fpm:ci', $workflow);
         self::assertStringContainsString('congo-openpay-nginx:ci', $workflow);
+        self::assertStringContainsString('server/vendor/.openpay-host-dependency-marker', $workflow);
+        self::assertStringContainsString('server/node_modules/.openpay-host-dependency-marker', $workflow);
         self::assertStringNotContainsString('production-security-contract', $workflow);
         self::assertMatchesRegularExpression('/^FROM (?!production(?:-contract)?\b)[^\s]+@sha256:[a-f0-9]{64}/m', $dockerfile);
         self::assertDoesNotMatchRegularExpression('/(?:php\s+-S|artisan\s+serve)/', $dockerfile.$compose);
