@@ -15,17 +15,18 @@ or copy it into a report.
 
 ## Tabletop path
 
-1. A triage owner acknowledges the private report within two business days and
-   records a provisional severity without publishing the report.
+1. A triage owner acknowledges the private report within two business days,
+   assigns provisional severe classification, freezes the synthetic candidate,
+   and records neither report details nor a public disclosure.
 2. The triage and release owners reproduce the synthetic claim with safe
-   evidence, decide the affected artifact is a release blocker for this
-   tabletop, and freeze only the synthetic candidate.
+   evidence and decide the affected artifact is a release blocker for this
+   tabletop.
 3. A maintainer prepares the smallest synthetic fix and a regression test that
    proves the boundary. The regression test contains no exploit payload.
-4. The release owner records a patched-release decision after Docker-backed
-   tests and scans identify the synthetic artifact.
-5. The coordinator prepares a private advisory draft with affected and patched
+4. The coordinator prepares a private advisory draft with affected and patched
    synthetic versions, mitigation, and reporter credit preference.
+5. The release owner records a patched-release decision after Docker-backed
+   tests and scans identify the synthetic artifact.
 6. The group agrees a coordinated disclosure date, then records the
    post-incident learning: update the threat model if the boundary or residual
    risk changed.

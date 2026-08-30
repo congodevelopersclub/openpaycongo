@@ -30,6 +30,11 @@ function assertSyntheticTabletop(fixture) {
   for (const field of sensitiveTabletopFields) {
     assert.doesNotMatch(fixture, field, `synthetic tabletop contains a prohibited field: ${field}`);
   }
+
+  assert.match(fixture, /1\. A triage owner[\s\S]*?assigns provisional severe classification, freezes the synthetic candidate/i);
+  const advisoryDraft = fixture.indexOf('4. The coordinator prepares a private advisory draft');
+  const releaseDecision = fixture.indexOf('5. The release owner records a patched-release decision');
+  assert.ok(advisoryDraft >= 0 && advisoryDraft < releaseDecision, 'private advisory draft must precede the patched-release decision');
 }
 
 test('security response policy is private, accountable, and release-blocking', async () => {
