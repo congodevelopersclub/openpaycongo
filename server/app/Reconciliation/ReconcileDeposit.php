@@ -8,10 +8,20 @@ use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PaymentRequest;
+use Illuminate\Support\Facades\DB;
 
 final class ReconcileDeposit
 {
     public function report(Deposit $deposit): ReconciliationReport
+    {
+        return DB::transaction(function () use ($deposit): ReconciliationReport {
+            $locked = Deposit::query()->lockForUpdate()->findOrFail($deposit->id);
+
+            return $this->reportSnapshot($locked);
+        }, attempts: 3);
+    }
+
+    private function reportSnapshot(Deposit $deposit): ReconciliationReport
     {
         $deposit->loadMissing('ledgerEntries.reversesLedgerEntry');
         $discrepancies = [];
@@ -46,7 +56,7 @@ final class ReconcileDeposit
         }
 
         if ($deposit->kind === DepositKind::ProviderReversal->value) {
-            if (! $this->hasMatchingOriginalDeposit($deposit) || $deposit->reversal_reason === null || $deposit->reversed_by_user_id === null) {
+            if (! $this->hasMatchingOriginalDeposit($deposit) || $deposit->reversal_reason_code === null || $deposit->reversed_by_user_id === null) {
                 $discrepancies[] = 'reversal_evidence';
             }
             if ($entries->contains(fn ($entry): bool => $entry->reverses_ledger_entry_id === null)
@@ -55,6 +65,7 @@ final class ReconcileDeposit
             }
         }
 
+        $credit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->lockForUpdate()->first();
         $posted = CustomerCreditPosting::query()
             ->whereHas('customerCredit', fn ($query) => $query->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency))
             ->sum('amount_minor');
@@ -63,8 +74,7 @@ final class ReconcileDeposit
             ->where('currency', $deposit->currency)
             ->where('status', 'charged')
             ->sum('amount_minor');
-        $available = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->value('available_minor');
-        if ($available === null || (int) $available !== (int) $posted - (int) $allocated) {
+        if ($credit === null || (int) $credit->available_minor !== (int) $posted - (int) $allocated) {
             $discrepancies[] = 'customer_credit_balance';
         }
 

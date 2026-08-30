@@ -13,6 +13,8 @@ use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
+use App\Models\User;
+use App\Reconciliation\ReverseDeposit;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -214,8 +216,12 @@ final class RecordProviderDepositTest extends TestCase
         $action = app(RecordProviderDeposit::class);
         $deposit = $action->record($this->transfer())->deposit;
 
-        $first = $action->reverse($deposit);
-        $replay = $action->reverse($deposit);
+        $reversal = app(ReverseDeposit::class);
+        $operator = User::factory()->create();
+        $operator->is_financial_operator = true;
+        $operator->save();
+        $first = $reversal->reverse($operator, $deposit, 'provider_correction');
+        $replay = $reversal->reverse($operator, $deposit, 'provider_correction');
 
         self::assertSame(ReversalResult::Reversed, $first->outcome);
         self::assertSame(ReversalResult::Replayed, $replay->outcome);
@@ -235,7 +241,10 @@ final class RecordProviderDepositTest extends TestCase
         $deposit->customer_id = Str::uuid()->toString();
         $deposit->source_installation_id = Str::uuid()->toString();
 
-        $reversal = $action->reverse($deposit)->deposit;
+        $operator = User::factory()->create();
+        $operator->is_financial_operator = true;
+        $operator->save();
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
 
         self::assertSame(12500, $reversal->amount_minor);
         self::assertSame('CDF', $reversal->currency);

@@ -2,7 +2,9 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use LogicException;
 
 return new class extends Migration
 {
@@ -13,7 +15,8 @@ return new class extends Migration
         });
 
         Schema::table('deposits', function (Blueprint $table): void {
-            $table->string('reversal_reason', 255)->nullable();
+            $table->string('reversal_reason_code', 64)->nullable();
+            $table->text('reversal_detail')->nullable();
             $table->foreignId('reversed_by_user_id')->nullable()->constrained('users');
         });
 
@@ -28,7 +31,8 @@ return new class extends Migration
             $table->uuid('organization_id');
             $table->foreignId('actor_user_id')->constrained('users');
             $table->string('correction', 64);
-            $table->string('reason', 255);
+            $table->string('reason_code', 64);
+            $table->text('detail')->nullable();
             $table->dateTime('recorded_at');
             $table->dateTime('created_at')->nullable();
             $table->dateTime('updated_at')->nullable();
@@ -39,6 +43,11 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::table('financial_correction_audits')->exists()
+            || DB::table('deposits')->whereNotNull('reversed_by_user_id')->exists()
+            || DB::table('ledger_entries')->whereNotNull('reverses_ledger_entry_id')->exists()) {
+            throw new LogicException('Financial correction evidence cannot be removed once recorded.');
+        }
         Schema::dropIfExists('financial_correction_audits');
 
         Schema::table('ledger_entries', function (Blueprint $table): void {
@@ -49,7 +58,7 @@ return new class extends Migration
 
         Schema::table('deposits', function (Blueprint $table): void {
             $table->dropForeign(['reversed_by_user_id']);
-            $table->dropColumn(['reversal_reason', 'reversed_by_user_id']);
+            $table->dropColumn(['reversal_reason_code', 'reversal_detail', 'reversed_by_user_id']);
         });
 
         Schema::table('users', function (Blueprint $table): void {

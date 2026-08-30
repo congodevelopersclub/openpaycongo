@@ -29,7 +29,7 @@ final class ReconciliationTest extends TestCase
         $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
 
-        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider-correction');
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
         $report = app(ReconcileDeposit::class)->report($reversal->deposit);
 
         self::assertTrue($report->isReconciled);
@@ -37,7 +37,7 @@ final class ReconciliationTest extends TestCase
         self::assertDatabaseHas('deposits', [
             'id' => $reversal->deposit->id,
             'reverses_deposit_id' => $deposit->id,
-            'reversal_reason' => 'provider-correction',
+            'reversal_reason_code' => 'provider_correction',
             'reversed_by_user_id' => $operator->id,
         ]);
         self::assertDatabaseHas('customer_credit_postings', [
@@ -71,7 +71,7 @@ final class ReconciliationTest extends TestCase
         $operator = User::factory()->create(['is_financial_operator' => false]);
 
         $this->expectException(AuthorizationException::class);
-        app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider-correction');
+        app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
     }
 
     public function test_the_privileged_report_resource_exposes_only_reconciliation_state(): void
@@ -93,7 +93,7 @@ final class ReconciliationTest extends TestCase
     {
         $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
-        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider-correction')->deposit;
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
         $entry = LedgerEntry::query()->where('deposit_id', $reversal->id)->firstOrFail();
 
         DB::table('ledger_entries')->where('id', $entry->id)->update(['reverses_ledger_entry_id' => null]);
@@ -139,7 +139,7 @@ final class ReconciliationTest extends TestCase
 
         self::assertContains('customer_credit_posting_scope', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
 
-        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider-correction')->deposit;
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
         DB::table('deposits')->where('id', $reversal->id)->update(['amount_minor' => 6000]);
         DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'customer_credit')->update(['debit_minor' => 6000]);
         DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'provider_receivable')->update(['credit_minor' => 6000]);

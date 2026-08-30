@@ -11,7 +11,6 @@ use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
-use App\Models\User;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Database\QueryException;
@@ -102,60 +101,6 @@ final class RecordProviderDeposit
         }
 
         throw new LogicException('Provider deposit recording retry limit was exhausted.');
-    }
-
-    public function reverse(Deposit $deposit, ?User $actor = null, ?string $reason = null): ReverseProviderDepositResult
-    {
-        for ($attempt = 1; $attempt <= 3; $attempt++) {
-            try {
-                return DB::transaction(function () use ($deposit, $actor, $reason): ReverseProviderDepositResult {
-                    $original = Deposit::query()->lockForUpdate()->find($deposit->id);
-                    if ($original === null || $original->kind !== DepositKind::ProviderCredit->value) {
-                        throw new InvalidArgumentException('Deposit cannot be reversed.');
-                    }
-
-                    $existing = Deposit::query()->where('reverses_deposit_id', $original->id)->first();
-                    if ($existing !== null) {
-                        return new ReverseProviderDepositResult(ReversalResult::Replayed, $existing);
-                    }
-
-                    $recordedAt = CarbonImmutable::now();
-                    $reversal = Deposit::query()->create([
-                        'organization_id' => $original->organization_id,
-                        'customer_id' => $original->customer_id,
-                        'source_installation_id' => $original->source_installation_id,
-                        'reverses_deposit_id' => $original->id,
-                        'reversal_reason' => $reason,
-                        'reversed_by_user_id' => $actor?->id,
-                        'kind' => DepositKind::ProviderReversal->value,
-                        'amount_minor' => $original->amount_minor,
-                        'currency' => $original->currency,
-                        'received_at' => $recordedAt,
-                        'idempotency_digest' => $this->activeDigest($this->digests('reversal', $original->organization_id, $original->id)),
-                        'idempotency_key_version' => $this->activeKeyId(),
-                    ]);
-                    $this->appendEntries($reversal, $recordedAt, true, $original);
-                    $this->debitCustomerCredit($reversal);
-
-                    return new ReverseProviderDepositResult(ReversalResult::Reversed, $reversal);
-                }, attempts: 3);
-            } catch (QueryException $exception) {
-                $existing = Deposit::query()->where('reverses_deposit_id', $deposit->id)->first();
-                if ($existing !== null) {
-                    return new ReverseProviderDepositResult(ReversalResult::Replayed, $existing);
-                }
-
-                if ($attempt < 3 && $this->isRetryableTransactionFailure($exception)) {
-                    usleep($attempt * 50_000);
-
-                    continue;
-                }
-
-                throw $exception;
-            }
-        }
-
-        throw new LogicException('Provider reversal retry limit was exhausted.');
     }
 
     private function assertValid(ProviderTransfer $transfer): void

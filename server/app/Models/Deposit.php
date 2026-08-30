@@ -16,13 +16,13 @@ class Deposit extends ImmutableFinancialModel
     protected $keyType = 'string';
 
     protected $fillable = [
-        'organization_id', 'customer_id', 'source_installation_id', 'reverses_deposit_id', 'reversal_reason', 'reversed_by_user_id', 'kind',
+        'organization_id', 'customer_id', 'source_installation_id', 'reverses_deposit_id', 'reversal_reason_code', 'reversal_detail', 'reversed_by_user_id', 'kind',
         'amount_minor', 'currency', 'provider_reference', 'provider_reference_digest', 'provider_reference_lookup_id', 'provider_reference_key_version', 'provider_occurred_at',
         'received_at', 'sender_identifier', 'receiver_identifier', 'idempotency_digest', 'idempotency_key_version',
     ];
 
     protected $hidden = [
-        'provider_reference', 'provider_reference_digest', 'provider_reference_lookup_id', 'provider_reference_key_version', 'sender_identifier', 'receiver_identifier', 'idempotency_digest', 'idempotency_key_version',
+        'provider_reference', 'provider_reference_digest', 'provider_reference_lookup_id', 'provider_reference_key_version', 'sender_identifier', 'receiver_identifier', 'reversal_detail', 'idempotency_digest', 'idempotency_key_version',
     ];
 
     protected function casts(): array
@@ -33,6 +33,7 @@ class Deposit extends ImmutableFinancialModel
             'received_at' => 'immutable_datetime',
             'sender_identifier' => 'encrypted',
             'receiver_identifier' => 'encrypted',
+            'reversal_detail' => 'encrypted',
         ];
     }
 

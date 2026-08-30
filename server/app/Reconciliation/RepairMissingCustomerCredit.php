@@ -22,14 +22,14 @@ final class RepairMissingCustomerCredit
         private readonly ReconcileDeposit $reconciliation,
     ) {}
 
-    public function repair(User $actor, Deposit $deposit, string $reason): CorrectionResult
+    public function repair(User $actor, Deposit $deposit, string $reasonCode, ?string $detail = null): CorrectionResult
     {
         Gate::forUser($actor)->authorize('correct', $deposit);
-        if (trim($reason) === '' || mb_strlen($reason) > 255) {
-            throw ValidationException::withMessages(['reason' => 'A bounded correction reason is required.']);
+        if (! preg_match('/^[a-z][a-z0-9_]{0,63}$/', $reasonCode) || ($detail !== null && mb_strlen($detail) > 1000)) {
+            throw ValidationException::withMessages(['reason_code' => 'A bounded correction reason code is required.']);
         }
 
-        return DB::transaction(function () use ($actor, $deposit, $reason): CorrectionResult {
+        return DB::transaction(function () use ($actor, $deposit, $reasonCode, $detail): CorrectionResult {
             $deposit = Deposit::query()->lockForUpdate()->findOrFail($deposit->id);
             if (CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->exists()) {
                 return new CorrectionResult(false);
@@ -62,7 +62,8 @@ final class RepairMissingCustomerCredit
                 'organization_id' => $deposit->organization_id,
                 'actor_user_id' => $actor->id,
                 'correction' => 'repair_missing_customer_credit',
-                'reason' => trim($reason),
+                'reason_code' => $reasonCode,
+                'detail' => $detail,
                 'recorded_at' => CarbonImmutable::now(),
             ]);
 

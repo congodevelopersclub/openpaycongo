@@ -13,11 +13,13 @@ class FinancialCorrectionAudit extends ImmutableFinancialModel
 
     protected $keyType = 'string';
 
-    protected $fillable = ['deposit_id', 'organization_id', 'actor_user_id', 'correction', 'reason', 'recorded_at'];
+    protected $fillable = ['deposit_id', 'organization_id', 'actor_user_id', 'correction', 'reason_code', 'detail', 'recorded_at'];
+
+    protected $hidden = ['detail'];
 
     protected function casts(): array
     {
-        return ['recorded_at' => 'immutable_datetime'];
+        return ['recorded_at' => 'immutable_datetime', 'detail' => 'encrypted'];
     }
 
     /** @return BelongsTo<Deposit, $this> */

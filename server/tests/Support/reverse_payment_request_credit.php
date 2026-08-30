@@ -1,8 +1,9 @@
 <?php
 
-use App\Deposits\RecordProviderDeposit;
 use App\Events\CustomerCreditCreationPending;
 use App\Models\Deposit;
+use App\Models\User;
+use App\Reconciliation\ReverseDeposit;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Event;
 
@@ -34,7 +35,8 @@ Event::listen(CustomerCreditCreationPending::class, function () use ($barrier, $
     }
 });
 
-$result = app(RecordProviderDeposit::class)->reverse(
-    Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID')),
-);
+$actor = User::query()->create(['name' => 'Test operator', 'email' => 'test-operator@example.test', 'password' => 'unused']);
+$actor->is_financial_operator = true;
+$actor->save();
+$result = app(ReverseDeposit::class)->reverse($actor, Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID')), 'provider_correction');
 echo $result->outcome->value.PHP_EOL;
