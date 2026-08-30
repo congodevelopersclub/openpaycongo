@@ -43,6 +43,13 @@ final class RecordProviderDeposit
         for ($attempt = 1; $attempt <= 3; $attempt++) {
             try {
                 return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests): RecordProviderDepositResult {
+                    $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true);
+                    if ($existing !== null) {
+                        return $this->replayResult($existing, $idempotencyDigests);
+                    }
+
+                    event(new ProviderDepositPreflightMissed);
+
                     $providerReferenceLookupId = $this->resolveLookupId('provider_reference', $transfer->organizationId, $providerReferenceDigests);
                     $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true, $providerReferenceLookupId);
                     if ($existing !== null) {

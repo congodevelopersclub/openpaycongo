@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Deposits\DepositKind;
+use App\Deposits\ProviderDepositPreflightMissed;
 use App\Deposits\ProviderTransfer;
 use App\Deposits\RecordProviderDeposit;
 use App\Deposits\RecordResult;
@@ -13,6 +14,7 @@ use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use LogicException;
@@ -58,6 +60,23 @@ final class RecordProviderDepositTest extends TestCase
         self::assertSame($first->deposit->id, $replay->deposit->id);
         self::assertDatabaseCount('deposits', 1);
         self::assertDatabaseCount('ledger_entries', 2);
+    }
+
+    public function test_a_new_provider_reference_dispatches_a_pii_free_preflight_marker_only_once(): void
+    {
+        Event::fake([ProviderDepositPreflightMissed::class]);
+
+        $action = app(RecordProviderDeposit::class);
+        $transfer = $this->transfer();
+        $action->record($transfer);
+        $action->record($transfer);
+
+        Event::assertDispatchedTimes(ProviderDepositPreflightMissed::class, 1);
+        Event::assertDispatched(ProviderDepositPreflightMissed::class, static function (ProviderDepositPreflightMissed $event): bool {
+            self::assertSame([], get_object_vars($event));
+
+            return true;
+        });
     }
 
     public function test_provider_identity_replays_after_lookup_key_rotation_without_a_second_credit(): void
