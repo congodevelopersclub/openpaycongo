@@ -16,6 +16,19 @@ Laravel tests can consume their canonical bytes without a competing backend.
 
 ## Reproducible Docker checks
 
+Use the repository-owned tier runner for ordinary work:
+
+```bash
+bash scripts/ci/fast-feedback.sh focused contracts docs/public-contract.test.mjs
+bash scripts/ci/fast-feedback.sh local laravel
+bash scripts/ci/fast-feedback.sh pr flutter
+```
+
+Run `bash scripts/ci/fast-feedback.sh` for the full tier and component catalog.
+Every command runs the relevant runtime in Docker. The pull-request tier is
+unconditional in CI; do not path-skip it. The direct Docker commands below are
+the component-level building blocks used by the runner.
+
 ```bash
 docker build --target test -f docs/Dockerfile .
 docker build --target test -f server/Dockerfile .
@@ -26,9 +39,8 @@ docker build --target artifact --output type=local,dest=android-client/build/ci 
 ```
 
 The Laravel server build runs Pint in check mode, Laravel-aware static analysis,
-and the Laravel test suite in that order. For an individual local check from
-within `server/`, run `composer run lint`, `composer run analyse`, or `composer
-run quality`.
+and the Laravel test suite in that order. Use the Docker-only tier runner for
+individual checks; do not treat host Composer output as verification.
 
 The Flutter APK is debug-signed CI output, not a distributable release. The
 Laravel runtime and PostgreSQL Compose instructions are in

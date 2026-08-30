@@ -56,6 +56,11 @@ RUN set -eu; printf '%s\n' 'this is deliberately invalid Dart' > lib/security_ga
 FROM source AS test
 RUN flutter test
 
+FROM source AS focused
+ARG TEST_PATH
+RUN set -eu; test -n "$TEST_PATH"; set +e; output="$(flutter test "$TEST_PATH" 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -eq 0 \
+    && printf '%s\n' "$output" | grep -Eq '\+[1-9][0-9]*: All tests passed!'
+
 FROM source AS native-test
 RUN flutter build apk --config-only --debug
 RUN cd android && ./gradlew :app:testDebugUnitTest

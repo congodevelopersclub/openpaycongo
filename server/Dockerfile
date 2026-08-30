@@ -37,6 +37,7 @@ COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml
+COPY scripts/ci/ /scripts/ci/
 RUN composer dump-autoload --no-interaction --optimize \
     && composer run lint \
     && composer run analyse
@@ -48,6 +49,19 @@ COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
 # environment overrides in phpunit.xml remain authoritative.
 RUN : > .env \
     && composer test
+
+FROM dependencies AS focused
+
+ARG TEST_FILTER
+COPY server/ ./
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+COPY compose.yaml /compose.yaml
+COPY .dockerignore /dockerignore
+COPY .github/workflows/ci.yml /ci.yml
+COPY scripts/ci/ /scripts/ci/
+RUN test -n "$TEST_FILTER" \
+    && : > .env \
+    && composer test -- --fail-on-empty-test-suite --filter="$TEST_FILTER"
 
 FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS production-dependencies
 
