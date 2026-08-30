@@ -3,6 +3,7 @@
 namespace App\PaymentRequests;
 
 use App\Deposits\DepositKind;
+use App\Events\CustomerCreditCreationPending;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
@@ -36,6 +37,7 @@ final class AllocatePendingPaymentRequests
                         ->lockForUpdate()
                         ->first();
                     if ($credit === null) {
+                        event(new CustomerCreditCreationPending($deposit->customer_id, $deposit->currency));
                         $credit = CustomerCredit::query()->create([
                             'customer_id' => $deposit->customer_id,
                             'currency' => $deposit->currency,

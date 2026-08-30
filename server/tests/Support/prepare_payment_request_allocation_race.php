@@ -30,6 +30,7 @@ foreach ([
         'id' => $id,
         'customer_id' => $customer->id,
         'idempotency_digest' => hash('sha256', $id),
+        'idempotency_key_version' => 'v1',
         'currency' => $currency,
         'amount_minor' => $amount,
         'remaining_minor' => $amount,
@@ -42,8 +43,8 @@ foreach ([
 
 $ids = [];
 foreach ([
-    ['00000000-0000-4000-8000-000000000221', 40],
-    ['00000000-0000-4000-8000-000000000222', 60],
+    ['00000000-0000-4000-8000-000000000221', 75],
+    ['00000000-0000-4000-8000-000000000222', 75],
 ] as [$id, $amount]) {
     $ids[] = Deposit::query()->forceCreate([
         'id' => $id,

@@ -16,10 +16,10 @@ class PaymentRequest extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'customer_id', 'idempotency_digest', 'currency', 'amount_minor', 'remaining_minor', 'status', 'expires_at', 'charged_at',
+        'customer_id', 'idempotency_digest', 'idempotency_key_version', 'currency', 'amount_minor', 'remaining_minor', 'status', 'expires_at', 'charged_at',
     ];
 
-    protected $hidden = ['idempotency_digest'];
+    protected $hidden = ['idempotency_digest', 'idempotency_key_version'];
 
     protected function casts(): array
     {

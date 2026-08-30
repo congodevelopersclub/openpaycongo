@@ -183,6 +183,63 @@ final class PaymentRequestTest extends TestCase
         self::assertSame(0, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
     }
 
+    public function test_customer_uuid_casing_cannot_bypass_idempotency(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 1200]);
+
+        $first = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'canonical-customer');
+        $replay = app(CreatePaymentRequest::class)->create(strtoupper($customer->id), 1200, 'CDF', 'canonical-customer');
+
+        self::assertSame($first->id, $replay->id);
+        self::assertDatabaseCount('payment_requests', 1);
+        self::assertSame(0, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+    }
+
+    public function test_idempotency_hmac_replays_across_key_rotation(): void
+    {
+        config()->set('payment_requests.idempotency_keys', [
+            'current' => str_repeat('c', 32),
+            'previous' => str_repeat('p', 32),
+        ]);
+        config()->set('payment_requests.idempotency_active_key_id', 'previous');
+        $customer = Customer::query()->create($this->customerAttributes());
+        $first = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'rotated-opaque-key');
+
+        config()->set('payment_requests.idempotency_active_key_id', 'current');
+        $replay = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'rotated-opaque-key');
+        $current = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'current-active-key');
+
+        config()->set('payment_requests.idempotency_active_key_id', 'previous');
+        $mixedActiveReplay = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'current-active-key');
+
+        self::assertSame($first->id, $replay->id);
+        self::assertSame($current->id, $mixedActiveReplay->id);
+        self::assertSame('previous', $first->idempotency_key_version);
+        self::assertSame('current', $current->idempotency_key_version);
+        self::assertNotSame(hash('sha256', 'rotated-opaque-key'), $first->idempotency_digest);
+        self::assertDatabaseCount('payment_requests', 2);
+    }
+
+    public function test_idempotency_replay_expires_a_due_pending_request(): void
+    {
+        $now = CarbonImmutable::parse('2026-08-30 12:00:00');
+        CarbonImmutable::setTestNow($now);
+        try {
+            $customer = Customer::query()->create($this->customerAttributes());
+            $first = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'expiring-replay');
+            CarbonImmutable::setTestNow($first->expires_at->addSecond());
+
+            $replay = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'expiring-replay');
+
+            self::assertSame($first->id, $replay->id);
+            self::assertSame(PaymentRequestStatus::Expired, $replay->status);
+            self::assertDatabaseCount('payment_requests', 1);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_an_idempotency_key_cannot_be_reused_with_a_changed_payload(): void
     {
         $customer = Customer::query()->create($this->customerAttributes());
@@ -209,9 +266,39 @@ final class PaymentRequestTest extends TestCase
             // The callback was emitted, but the durable marker stays eligible for replay.
         }
         self::assertNull($delivery->fresh()->dispatched_at);
+        self::assertNull($delivery->fresh()->claimed_at);
 
         Event::fake([PaymentRequestAllocated::class]);
         app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
+        app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
+
+        Event::assertDispatchedTimes(PaymentRequestAllocated::class, 1);
+        self::assertNotNull($delivery->fresh()->dispatched_at);
+        self::assertNull($delivery->fresh()->claimed_at);
+        self::assertNull($delivery->fresh()->claim_token);
+    }
+
+    public function test_allocation_delivery_claim_suppresses_a_duplicate_and_a_stale_claim_is_recoverable(): void
+    {
+        Event::fake([PaymentRequestAllocated::class]);
+        $customer = Customer::query()->create($this->customerAttributes());
+        $request = PaymentRequest::query()->create($this->pendingAttributes(
+            $customer->id,
+            '00000000-0000-4000-8000-000000000099',
+            1200,
+            CarbonImmutable::now()->addDay(),
+        ));
+        $delivery = PaymentRequestAllocationDelivery::query()->create([
+            'payment_request_id' => $request->id,
+            'claimed_at' => CarbonImmutable::now(),
+            'claim_token' => '00000000-0000-4000-8000-000000000098',
+        ]);
+
+        app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
+        Event::assertNotDispatched(PaymentRequestAllocated::class);
+
+        $delivery->claimed_at = CarbonImmutable::now()->subMinutes(6);
+        $delivery->save();
         app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
 
         Event::assertDispatchedTimes(PaymentRequestAllocated::class, 1);
@@ -236,6 +323,7 @@ final class PaymentRequestTest extends TestCase
             'id' => $id,
             'customer_id' => $customerId,
             'idempotency_digest' => hash('sha256', $id),
+            'idempotency_key_version' => 'v1',
             'currency' => 'CDF',
             'amount_minor' => $amount,
             'remaining_minor' => $amount,

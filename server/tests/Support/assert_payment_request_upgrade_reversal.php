@@ -18,6 +18,7 @@ $customerId = (string) Str::uuid();
 $installationId = (string) Str::uuid();
 $depositId = (string) Str::uuid();
 $reversalId = (string) Str::uuid();
+$lateDepositId = (string) Str::uuid();
 $now = now();
 DB::table('customers')->insert(['id' => $customerId, 'organization_id' => $organizationId, 'private_lookup_digest' => str_repeat('a', 64), 'created_at' => $now, 'updated_at' => $now]);
 DB::table('source_installations')->insert(['id' => $installationId, 'organization_id' => $organizationId, 'installation_digest' => str_repeat('b', 64), 'created_at' => $now, 'updated_at' => $now]);
@@ -29,10 +30,15 @@ foreach ([[$depositId, 'provider_receivable', 500, 0], [$depositId, 'customer_cr
 }
 
 Artisan::call('migrate', ['--force' => true]);
+DB::table('deposits')->insert(['id' => $lateDepositId, 'organization_id' => $organizationId, 'customer_id' => $customerId, 'source_installation_id' => $installationId, 'kind' => 'provider_credit', 'amount_minor' => 100, 'currency' => 'CDF', 'received_at' => $now, 'idempotency_digest' => hash('sha256', $lateDepositId), 'created_at' => $now, 'updated_at' => $now]);
+foreach ([['provider_receivable', 100, 0], ['customer_credit', 0, 100]] as [$account, $debit, $credit]) {
+    DB::table('ledger_entries')->insert(['id' => (string) Str::uuid(), 'deposit_id' => $lateDepositId, 'organization_id' => $organizationId, 'account' => $account, 'debit_minor' => $debit, 'credit_minor' => $credit, 'currency' => 'CDF', 'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
+}
 Artisan::call('payment-requests:recover-credit');
 
 $balance = DB::table('customer_credits')->where('customer_id', $customerId)->where('currency', 'CDF')->value('available_minor');
-$postings = DB::table('customer_credit_postings')->where('deposit_id', $depositId)->count();
-if ((int) $balance !== 0 || $postings !== 1) {
-    throw new RuntimeException('Historical reversal upgrade changed customer credit.');
+$postings = DB::table('customer_credit_postings')->whereIn('deposit_id', [$depositId, $reversalId, $lateDepositId]);
+if ((int) $balance !== 100 || $postings->count() !== 3 || (int) $postings->sum('amount_minor') !== 100) {
+    fwrite(STDERR, "Historical reversal upgrade changed customer credit.\n");
+    exit(1);
 }

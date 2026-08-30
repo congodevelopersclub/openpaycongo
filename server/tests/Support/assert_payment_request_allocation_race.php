@@ -19,17 +19,20 @@ $expected = [
 ];
 
 foreach ($expected as $id => [$status, $remaining]) {
-    $request = PaymentRequest::query()->findOrFail($id);
-    if ($request->status !== $status || (int) $request->remaining_minor !== $remaining) {
-        throw new RuntimeException("Unexpected allocation state for {$id}.");
+    $request = PaymentRequest::query()->find($id);
+    if ($request === null || $request->status !== $status || (int) $request->remaining_minor !== $remaining) {
+        fwrite(STDERR, "Unexpected allocation state for {$id}.\n");
+        exit(1);
     }
 }
 
-$customerId = PaymentRequest::query()->findOrFail('00000000-0000-4000-8000-000000000211')->customer_id;
-$credit = CustomerCredit::query()->where('customer_id', $customerId)->where('currency', 'CDF')->firstOrFail();
-if ((int) $credit->available_minor !== 0
-    || CustomerCredit::query()->where('customer_id', $customerId)->where('currency', 'USD')->exists()
+$first = PaymentRequest::query()->find('00000000-0000-4000-8000-000000000211');
+$credit = $first === null ? null : CustomerCredit::query()->where('customer_id', $first->customer_id)->where('currency', 'CDF')->first();
+if ($credit === null
+    || (int) $credit->available_minor !== 50
+    || CustomerCredit::query()->where('customer_id', $first->customer_id)->where('currency', 'USD')->exists()
     || CustomerCreditPosting::query()->where('customer_credit_id', $credit->id)->count() !== 2
-    || (int) CustomerCreditPosting::query()->where('customer_credit_id', $credit->id)->sum('amount_minor') !== 100) {
-    throw new RuntimeException('Concurrent allocation credit state is not exact.');
+    || (int) CustomerCreditPosting::query()->where('customer_credit_id', $credit->id)->sum('amount_minor') !== 150) {
+    fwrite(STDERR, "Concurrent allocation credit state is not exact.\n");
+    exit(1);
 }

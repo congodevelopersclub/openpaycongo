@@ -1,7 +1,9 @@
 <?php
 
+use App\Events\PaymentRequestCreationPreflightMissed;
 use App\PaymentRequests\CreatePaymentRequest;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Support\Facades\Event;
 
 require __DIR__.'/../../vendor/autoload.php';
 
@@ -22,6 +24,19 @@ if (is_string($barrierDirectory) && $barrierDirectory !== '') {
             throw new RuntimeException('Timed out waiting for payment request barrier.');
         }
         usleep(10_000);
+    }
+
+    if (getenv('PAYMENT_REQUEST_TEST_TRANSACTION_BARRIER') === '1') {
+        Event::listen(PaymentRequestCreationPreflightMissed::class, function () use ($barrierDirectory, $worker): void {
+            touch($barrierDirectory.'/'.$worker.'.transaction-ready');
+            $deadline = microtime(true) + 30;
+            while (! file_exists($barrierDirectory.'/transaction-release')) {
+                if (microtime(true) > $deadline) {
+                    throw new RuntimeException('Timed out waiting for payment request transaction barrier.');
+                }
+                usleep(10_000);
+            }
+        });
     }
 }
 

@@ -18,5 +18,6 @@ $available = CustomerCredit::query()->where('customer_id', $customerId)->where('
 if ($charged !== (int) getenv('PAYMENT_REQUEST_TEST_EXPECTED_CHARGED')
     || $pending !== (int) getenv('PAYMENT_REQUEST_TEST_EXPECTED_PENDING')
     || $available !== (int) getenv('PAYMENT_REQUEST_TEST_EXPECTED_AVAILABLE')) {
-    throw new RuntimeException('Payment request credit state is not exact.');
+    fwrite(STDERR, "Payment request credit state is not exact.\n");
+    exit(1);
 }

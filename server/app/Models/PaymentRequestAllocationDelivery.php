@@ -14,11 +14,11 @@ class PaymentRequestAllocationDelivery extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['payment_request_id', 'dispatched_at'];
+    protected $fillable = ['payment_request_id', 'claimed_at', 'claim_token', 'dispatched_at'];
 
     protected function casts(): array
     {
-        return ['dispatched_at' => 'immutable_datetime'];
+        return ['claimed_at' => 'immutable_datetime', 'dispatched_at' => 'immutable_datetime'];
     }
 
     /** @return BelongsTo<PaymentRequest, $this> */

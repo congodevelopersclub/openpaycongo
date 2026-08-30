@@ -2,6 +2,7 @@
 
 namespace App\Deposits;
 
+use App\Events\CustomerCreditCreationPending;
 use App\Events\ProviderDepositRecorded;
 use App\Models\Customer;
 use App\Models\CustomerCredit;
@@ -300,6 +301,7 @@ final class RecordProviderDeposit
             ->lockForUpdate()
             ->first();
         if ($credit === null) {
+            event(new CustomerCreditCreationPending($reversal->customer_id, $reversal->currency));
             $credit = CustomerCredit::query()->create([
                 'customer_id' => $reversal->customer_id,
                 'currency' => $reversal->currency,

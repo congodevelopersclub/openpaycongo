@@ -24,6 +24,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignUuid('customer_id')->constrained()->cascadeOnDelete();
             $table->char('idempotency_digest', 64);
+            $table->string('idempotency_key_version', 64);
             $table->string('currency', 3);
             $table->bigInteger('amount_minor');
             $table->unsignedBigInteger('remaining_minor');
@@ -49,55 +50,49 @@ return new class extends Migration
         Schema::create('payment_request_allocation_deliveries', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->foreignUuid('payment_request_id')->constrained()->cascadeOnDelete();
+            $table->dateTime('claimed_at')->nullable();
+            $table->uuid('claim_token')->nullable();
             $table->dateTime('dispatched_at')->nullable();
             $table->dateTime('created_at')->nullable();
             $table->dateTime('updated_at')->nullable();
             $table->unique('payment_request_id');
         });
 
-        $balances = DB::table('deposits')
+        // Balance and marker are derived from the same row and committed together.
+        // A deposit outside this cursor snapshot receives neither, so the scheduled
+        // recovery command can still identify and reconcile it after deployment.
+        $postings = DB::table('deposits')
             ->join('ledger_entries', 'ledger_entries.deposit_id', '=', 'deposits.id')
             ->where('ledger_entries.account', 'customer_credit')
-            ->select('deposits.customer_id', 'ledger_entries.currency')
+            ->select('deposits.id', 'deposits.customer_id', 'ledger_entries.currency')
             ->selectRaw('SUM(ledger_entries.credit_minor) AS credited_minor, SUM(ledger_entries.debit_minor) AS debited_minor')
-            ->groupBy('deposits.customer_id', 'ledger_entries.currency')
-            ->get();
+            ->groupBy('deposits.id', 'deposits.customer_id', 'ledger_entries.currency')
+            ->orderBy('deposits.id')
+            ->cursor();
 
-        foreach ($balances as $balance) {
-            $availableMinor = (int) $balance->credited_minor - (int) $balance->debited_minor;
-            if ($availableMinor !== 0) {
-                DB::table('customer_credits')->insert([
+        foreach ($postings as $posting) {
+            DB::transaction(function () use ($posting): void {
+                DB::table('customer_credits')->insertOrIgnore([
                     'id' => (string) Str::uuid(),
-                    'customer_id' => $balance->customer_id,
-                    'currency' => $balance->currency,
-                    'available_minor' => $availableMinor,
-                ]);
-            }
-        }
-
-        foreach (DB::table('deposits')->where('kind', 'provider_credit')->orderBy('id')->cursor() as $deposit) {
-            $credit = DB::table('customer_credits')
-                ->where('customer_id', $deposit->customer_id)
-                ->where('currency', $deposit->currency)
-                ->first();
-            if ($credit === null) {
-                $creditId = (string) Str::uuid();
-                DB::table('customer_credits')->insert([
-                    'id' => $creditId,
-                    'customer_id' => $deposit->customer_id,
-                    'currency' => $deposit->currency,
+                    'customer_id' => $posting->customer_id,
+                    'currency' => $posting->currency,
                     'available_minor' => 0,
                 ]);
-            } else {
-                $creditId = $credit->id;
-            }
-
-            DB::table('customer_credit_postings')->insert([
-                'id' => (string) Str::uuid(),
-                'deposit_id' => $deposit->id,
-                'customer_credit_id' => $creditId,
-                'amount_minor' => $deposit->amount_minor,
-            ]);
+                $creditId = DB::table('customer_credits')
+                    ->where('customer_id', $posting->customer_id)
+                    ->where('currency', $posting->currency)
+                    ->value('id');
+                $amountMinor = (int) $posting->credited_minor - (int) $posting->debited_minor;
+                $inserted = DB::table('customer_credit_postings')->insertOrIgnore([
+                    'id' => (string) Str::uuid(),
+                    'deposit_id' => $posting->id,
+                    'customer_credit_id' => $creditId,
+                    'amount_minor' => $amountMinor,
+                ]);
+                if ($inserted === 1 && $amountMinor !== 0) {
+                    DB::table('customer_credits')->where('id', $creditId)->increment('available_minor', $amountMinor);
+                }
+            });
         }
     }
 

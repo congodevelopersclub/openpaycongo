@@ -8,6 +8,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Throwable;
 
 class DispatchPaymentRequestAllocation implements ShouldQueue
 {
@@ -17,11 +19,20 @@ class DispatchPaymentRequestAllocation implements ShouldQueue
 
     public function handle(): void
     {
-        $paymentRequestId = DB::transaction(function (): ?string {
+        $claimToken = (string) Str::uuid();
+        $paymentRequestId = DB::transaction(function () use ($claimToken): ?string {
             $delivery = PaymentRequestAllocationDelivery::query()->lockForUpdate()->findOrFail($this->deliveryId);
             if ($delivery->dispatched_at !== null) {
                 return null;
             }
+            $now = CarbonImmutable::now();
+            if ($delivery->claimed_at !== null && CarbonImmutable::parse($delivery->claimed_at)->greaterThan($now->subMinutes(5))) {
+                return null;
+            }
+
+            $delivery->claimed_at = $now;
+            $delivery->claim_token = $claimToken;
+            $delivery->save();
 
             return $delivery->payment_request_id;
         });
@@ -29,15 +40,37 @@ class DispatchPaymentRequestAllocation implements ShouldQueue
             return;
         }
 
-        event(new PaymentRequestAllocated($paymentRequestId));
+        try {
+            event(new PaymentRequestAllocated($paymentRequestId));
+        } catch (Throwable $exception) {
+            $this->releaseClaim($claimToken);
 
-        DB::transaction(function (): void {
+            throw $exception;
+        }
+
+        DB::transaction(function () use ($claimToken): void {
             $delivery = PaymentRequestAllocationDelivery::query()->lockForUpdate()->findOrFail($this->deliveryId);
-            if ($delivery->dispatched_at !== null) {
+            if ($delivery->dispatched_at !== null || $delivery->claim_token !== $claimToken) {
                 return;
             }
 
             $delivery->dispatched_at = CarbonImmutable::now();
+            $delivery->claimed_at = null;
+            $delivery->claim_token = null;
+            $delivery->save();
+        });
+    }
+
+    private function releaseClaim(string $claimToken): void
+    {
+        DB::transaction(function () use ($claimToken): void {
+            $delivery = PaymentRequestAllocationDelivery::query()->lockForUpdate()->findOrFail($this->deliveryId);
+            if ($delivery->dispatched_at !== null || $delivery->claim_token !== $claimToken) {
+                return;
+            }
+
+            $delivery->claimed_at = null;
+            $delivery->claim_token = null;
             $delivery->save();
         });
     }
