@@ -18,14 +18,19 @@ No examples in this document contain personal data, usable credentials, private 
 - The pairing protocol binds an authenticated administrator ceremony to a bounded QR, uses protected ephemeral/private material, and requires `private, no-store` pairing responses. It explicitly does not protect a compromised hosting edge, administrator UI, or OAuth session ([ADR 004](adr-004-secure-device-enrollment.md)).
 - The canonical Laravel implementation and Android client are not evidence of release signing, deployable server image, or completed authentication lifecycle ([README](../README.md)).
 - **Prototype warning:** the canonical Laravel server does not yet establish production authentication, secret storage, telemetry retention, or deployment readiness. It must not process real data.
-- **Legacy Flutter encryption removal:** this change removes only the unused
-  plaintext `paymentdetail` SQLite helper and its empty encryption placeholder.
-  It does not erase any pre-existing database file. The native inbox is
-  encrypted, but the current durable payment outbox stores scope identifiers,
-  idempotency keys, and payment-envelope data in plaintext SQLite/JSON;
-  encrypting or safely migrating that storage remains a release blocker. Its
-  aggregate sync telemetry exposes only a count, never credentials, scope
-  identifiers, provider evidence, money, or idempotency material.
+- **Legacy Flutter encryption remediation:** the durable V2 payment outbox moves a V1 database from the
+  Android documents directory into `noBackupFilesDir`, writes a fresh V2
+  ciphertext database, then promotes it only after the encrypted copy closes.
+  Ciphertext uses versioned Android Keystore AES-GCM. SQLite retains only an opaque record identity, ciphertext, and
+  cipher version; scope, payment, provider, and idempotency fields are never
+  stored as SQLite columns or JSON. A key-loss, corruption, split migration,
+  or migration failure is recovery-required and never silently recreates or
+  selects an outbox. Moving the live V1 file does not retract an already-made
+  device or system backup snapshot. This is storage-boundary evidence only:
+  real-device interruption, Keystore, backup, and recovery UX validation still
+  gate release. Aggregate sync telemetry exposes only a count, never
+  credentials, scope identifiers, provider evidence, money, or idempotency
+  material.
 - Flutter console telemetry is checked in, but no repository evidence proves a production telemetry redaction/sink/retention policy ([Flutter telemetry](../android-client/lib/services/Telemetry/telemetry.dart)).
 - CI builds checked-in contract, Laravel, and Android paths in Docker; the Android debug artifact is retained for seven days and is not a release artifact ([CI workflow](../.github/workflows/ci.yml), [README](../README.md)).
 
