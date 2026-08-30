@@ -39,6 +39,12 @@ exploitability, affected supported artifacts, and known exploitation:
 advisory-feed, registry, or Docker failure is also not a clean result; it blocks
 the security evidence that depends on it.
 
+On receipt, a credible report that could be Critical or High receives a
+**provisional severe** classification. The release owner pauses promotion of an
+affected candidate until triage confirms the severity, rules it out, or records
+evidence that the candidate is not affected. The seven-calendar-day assessment
+target never authorizes promotion while that provisional pause remains active.
+
 ## Ownership and response targets
 
 The current maintainer rotation must assign these roles before accepting a

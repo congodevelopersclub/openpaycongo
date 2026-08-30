@@ -25,6 +25,8 @@ test('security response policy is private, accountable, and release-blocking', a
   assert.match(security, /Do not publish/i);
   assert.match(security, /Critical findings are release blockers/i);
   assert.match(security, /High findings are release blockers/i);
+  assert.match(security, /provisional severe/i);
+  assert.match(security, /pauses promotion of an\s+affected candidate/i);
   assert.match(security, /two business days/i);
   assert.match(security, /seven calendar\s+days/i);
   assert.match(security, /regression test/i);
