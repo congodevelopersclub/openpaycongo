@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
+import 'package:opencongopay/features/pairing/presentation/pairing_enrollment_bloc.dart';
 import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
 import 'package:opencongopay/features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
@@ -60,6 +61,7 @@ void main() {
     SmsGatewayPort? gateway,
     GemmaCapabilityEvidence capability = const GemmaRuntimePending(),
     PaymentLifecycleBloc? paymentLifecycle,
+    PairingEnrollmentBloc? pairingEnrollment,
     PairingSessionBloc? pairingSession,
     SyncCursorBloc? syncCursor,
   }) => MaterialApp(
@@ -67,6 +69,7 @@ void main() {
       gateway: gateway ?? _FakeGateway(),
       gemmaCapability: capability,
       paymentLifecycle: paymentLifecycle,
+      pairingEnrollment: pairingEnrollment,
       pairingSession: pairingSession,
       syncCursor: syncCursor,
     ),
@@ -104,6 +107,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Pairing awaits confirmation'), findsOneWidget);
+  });
+
+  testWidgets('app composition passes injected enrollment BLoC to its inbox', (
+    WidgetTester tester,
+  ) async {
+    final PairingEnrollmentBloc enrollment = PairingEnrollmentBloc(
+      store: _EnrollmentStore(),
+      transport: _EnrollmentTransport(),
+      telemetry: _EnrollmentTelemetry(),
+    );
+    addTearDown(enrollment.close);
+
+    await tester.pumpWidget(OpenCongoPayApp(pairingEnrollment: enrollment));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    enrollment.add(const PairingEnrollmentStarted());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pairing enrollment awaits confirmation'), findsOneWidget);
   });
 
   testWidgets('app composition passes injected sync BLoC to its inbox', (
@@ -675,6 +697,52 @@ final class _PairingGateway implements PairingSessionGateway {
 final class _PairingTelemetry implements PairingTelemetry {
   @override
   void record(PairingTelemetrySignal signal) {}
+}
+
+final class _EnrollmentStore implements PairingEnrollmentStore {
+  @override
+  Future<void> clear() async {}
+
+  @override
+  Future<PairingEnrollment?> load() async => null;
+
+  @override
+  Future<void> save(PairingEnrollment enrollment) async {}
+
+  @override
+  Future<PairingEnrollmentCleanup?> loadCleanup() async => null;
+
+  @override
+  Future<void> saveCleanup(PairingEnrollmentCleanup cleanup) async {}
+
+  @override
+  Future<void> clearCleanup() async {}
+}
+
+final class _EnrollmentTransport implements PairingEnrollmentTransport {
+  final PairingEnrollment enrollment = PairingEnrollment(
+    phase: PairingEnrollmentPhase.pendingConfirmation,
+    updatedAt: DateTime.utc(2026, 8, 30),
+  );
+
+  @override
+  Future<PairingEnrollment> begin() async => enrollment;
+
+  @override
+  Future<PairingEnrollment> recover(PairingEnrollment enrollment) async =>
+      this.enrollment;
+
+  @override
+  Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
+      this.enrollment;
+
+  @override
+  Future<void> discardTerminal() async {}
+}
+
+final class _EnrollmentTelemetry implements PairingEnrollmentTelemetryPort {
+  @override
+  void record(PairingEnrollmentTelemetry signal) {}
 }
 
 final class _SyncStore implements SyncCursorStore {

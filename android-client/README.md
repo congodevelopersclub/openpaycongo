@@ -25,6 +25,12 @@ The Android slice requests `RECEIVE_SMS` in context, blocks product access until
 - A contract-only sync cursor BLoC seam. `SyncCursorStore` persists an opaque
   checkpoint and `SyncCursorContract` reconciles it; neither accepts records,
   sender identities, SMS bodies, credentials, or a fabricated server protocol.
+- A contract-only pairing enrollment BLoC seam. `PairingEnrollmentStore`
+  persists only a redacted lifecycle result, while
+  `PairingEnrollmentTransport` owns the future ADR-004 authenticated
+  completion/status exchange. It must supply Keystore-backed secrets and the
+  documented Laravel contract; this prototype does not parse QR material,
+  manufacture credentials, or implement pairing HTTP.
 
 ## Known limitations
 
@@ -35,5 +41,8 @@ The Android slice requests `RECEIVE_SMS` in context, blocks product access until
 - The sync cursor seam has no server transport implementation yet. A future
   authenticated Laravel contract must supply it before it can represent server
   delivery or acknowledgement.
+- The pairing enrollment seam has no authenticated Laravel transport or secure
+  storage implementation yet. It cannot be used for real enrollment until the
+  documented `/v1/pairing/complete` and status contract are implemented.
 
 Read the repository [mobile PRD](../docs/prd-mobile.md), [architecture](../docs/architecture.md), and [reliability plan](../docs/reliability.md) before extending the app.

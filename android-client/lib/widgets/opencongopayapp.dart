@@ -10,6 +10,7 @@ import '../services/Config/config_service.dart';
 import '../services/Parsers/parser_store.dart';
 import '../features/payment_inbox/presentation/payment_inbox_screen.dart';
 import '../features/pairing/presentation/pairing_session_bloc.dart';
+import '../features/pairing/presentation/pairing_enrollment_bloc.dart';
 import '../features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import '../features/sms_gateway/infrastructure/platform_sms_gateway.dart';
 import '../features/sms_gateway/presentation/sms_permission_gate.dart';
@@ -19,11 +20,13 @@ class OpenCongoPayApp extends StatefulWidget {
   const OpenCongoPayApp({
     super.key,
     this.paymentLifecycle,
+    this.pairingEnrollment,
     this.pairingSession,
     this.syncCursor,
   });
 
   final PaymentLifecycle? paymentLifecycle;
+  final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
   final SyncCursorBloc? syncCursor;
 
@@ -55,6 +58,7 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
     PaymentInboxScreen(
       gateway: _smsGateway,
       paymentLifecycle: _paymentLifecycleBloc,
+      pairingEnrollment: widget.pairingEnrollment,
       pairingSession: widget.pairingSession,
       syncCursor: widget.syncCursor,
     ),
