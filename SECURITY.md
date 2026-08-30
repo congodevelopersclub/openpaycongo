@@ -124,10 +124,10 @@ supported artifact:
    Docker-backed release evidence; unavailable scanners or evidence fail the
    release decision visibly.
 6. The release owner authorizes the patched release or rollback only after
-   verifying ordinary release authority—or, if step 3 found compromise, after
-   the restored authority is verified under the repository's approved release
-   authority. The coordinator then records user communication and the advisory
-   decision.
+   verifying ordinary release authority—or, if step 3 invoked the compromise
+   response, after the restored authority is verified under the repository's
+   approved release authority. The coordinator then records user communication
+   and the advisory decision.
 7. After containment, conduct a blameless review and update this policy, the
    threat model, tests, or release controls when evidence shows a gap.
 

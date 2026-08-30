@@ -159,7 +159,7 @@ test('security response policy is private, accountable, and release-blocking', a
   assert.match(security, /repository credential, signing key, protected release identity/i);
   assert.match(security, /revoke or rotate the credential/i);
   assert.match(security, /rebuild from a restored trust root/i);
-  assert.match(security, /verifying ordinary release authority—or, if step 3 found compromise/i);
+  assert.match(security, /verifying ordinary release authority—or, if step 3 invoked the compromise\s+response/i);
   assert.match(security, /two business days/i);
   assert.match(security, /seven calendar\s+days/i);
   assert.match(security, /regression test/i);
