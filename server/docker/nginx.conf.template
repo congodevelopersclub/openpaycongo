@@ -10,6 +10,12 @@ server {
     real_ip_header X-Forwarded-For;
     real_ip_recursive on;
 
+    # Dotfiles are never public application assets. Preserve the conventional
+    # ACME path as the sole intentional exception.
+    location ~ /\.(?!well-known(?:/|$)) {
+        return 404;
+    }
+
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }

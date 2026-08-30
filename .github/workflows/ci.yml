@@ -47,10 +47,11 @@ jobs:
           touch server/vendor/.openpay-host-dependency-marker
           touch server/node_modules/.openpay-host-dependency-marker
           docker build --target production-contract -f server/Dockerfile .
+          docker build --target production-contract -f server/docker/nginx.Dockerfile .
       - name: Build deployable FPM and nginx images
         run: |
           docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
-          docker build --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
+          docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
       - name: Run pinned production image vulnerability scans
         run: |
           set -euo pipefail
