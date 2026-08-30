@@ -108,6 +108,14 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/node_modules/.openpay-host-dependency-marker', $runner);
         self::assertStringContainsString('--target production-contract -f server/docker/nginx.Dockerfile .', $runner);
         self::assertStringContainsString('php artisan config:cache', $runner);
+        self::assertStringContainsString('OPENPAY_PASSPORT_KEYS_PATH=/run/secrets', $runner);
+        self::assertStringContainsString('dst=/run/secrets,readonly', $runner);
+        self::assertStringContainsString('mktemp -d', $runner);
+        self::assertStringContainsString('openssl pkey -in /run/secrets/oauth-private.key -check -noout', $runner);
+        self::assertStringContainsString('openssl pkey -pubin -in /run/secrets/oauth-public.key -noout', $runner);
+        self::assertStringContainsString('php artisan config:show openpay > /tmp/openpay-openpay', $runner);
+        self::assertStringContainsString('passport_keys_path', $runner);
+        self::assertStringNotContainsString('passport:keys', $runner);
         self::assertStringContainsString('OPENPAY_PASSKEY_USER_HANDLE_SECRET', $runner);
         self::assertStringContainsString("export OPENPAY_PASSPORT_PRIVATE_KEY_FILE='/tmp/openpay-passport-private-key'", $runner);
         self::assertStringContainsString("export OPENPAY_PASSPORT_PUBLIC_KEY_FILE='/tmp/openpay-passport-public-key'", $runner);

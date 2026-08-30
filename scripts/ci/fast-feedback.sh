@@ -66,7 +66,7 @@ run_laravel_pr() (
     if env -u "$secret" docker compose config --quiet >/dev/null 2>&1; then die 'Compose accepted a missing required secret.'; fi
   done
   run_laravel_quality_and_tests
-  local marker directory
+  local marker directory passport_key_directory passport_private_key passport_public_key
   for marker in server/vendor/.openpay-host-dependency-marker server/node_modules/.openpay-host-dependency-marker; do
     if [[ ! -e "$marker" ]]; then
       directory="$(dirname "$marker")"
@@ -82,14 +82,35 @@ run_laravel_pr() (
   docker build --target production-contract -f server/docker/nginx.Dockerfile .
   docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
   docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
+  passport_key_directory="$(mktemp -d)"
+  passport_private_key="$passport_key_directory/oauth-private.key"
+  passport_public_key="$passport_key_directory/oauth-public.key"
+  created_markers+=("$passport_private_key" "$passport_public_key")
+  created_directories+=("$passport_key_directory")
+  # CI-only disposable files; deployed keys remain operator-provisioned.
+  docker run --rm --user "$(id -u):$(id -g)" \
+    --env APP_ENV=testing \
+    --mount "type=bind,src=$passport_key_directory,dst=/run/openpay-ci-keys" \
+    congo-openpay-fpm:ci sh -ceu '
+      umask 077
+      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /run/openpay-ci-keys/oauth-private.key >/dev/null 2>&1
+      openssl pkey -in /run/openpay-ci-keys/oauth-private.key -pubout -out /run/openpay-ci-keys/oauth-public.key >/dev/null 2>&1
+      chmod 0444 /run/openpay-ci-keys/oauth-private.key /run/openpay-ci-keys/oauth-public.key
+    '
   docker run --rm \
+    --mount "type=bind,src=$passport_key_directory,dst=/run/secrets,readonly" \
     --env APP_KEY="$OPENPAY_APP_KEY" \
+    --env OPENPAY_PASSPORT_KEYS_PATH=/run/secrets \
     --env OPENPAY_APP_URL="$OPENPAY_APP_URL" \
     --env OPENPAY_PASSKEY_RP_ID="$OPENPAY_PASSKEY_RP_ID" \
     --env OPENPAY_PASSKEY_ALLOWED_ORIGINS="$OPENPAY_PASSKEY_ALLOWED_ORIGINS" \
     --env OPENPAY_PASSKEY_USER_HANDLE_SECRET="$OPENPAY_PASSKEY_USER_HANDLE_SECRET" \
     congo-openpay-fpm:ci sh -ceu '
+      openssl pkey -in /run/secrets/oauth-private.key -check -noout
+      openssl pkey -pubin -in /run/secrets/oauth-public.key -noout
       php artisan config:cache
+      php artisan config:show openpay > /tmp/openpay-openpay
+      grep -Eq "passport_keys_path.*\\/run\\/secrets" /tmp/openpay-openpay
       php artisan config:show passkeys > /tmp/openpay-passkeys
       grep -Eq "relying_party_id.*openpay\.test" /tmp/openpay-passkeys
       grep -Eq "allowed_origins.*https:\/\/openpay\.test" /tmp/openpay-passkeys
