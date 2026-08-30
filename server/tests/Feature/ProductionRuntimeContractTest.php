@@ -43,6 +43,12 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('"~^1:https$" https;', $nginxProxyMap);
         self::assertStringContainsString('OPENPAY_TRUSTED_PROXY_CIDRS', $proxyRenderer);
         self::assertStringNotContainsString('private_ranges', $nginxTemplate.$proxyRenderer);
+        $bootstrap = file_get_contents(base_path('bootstrap/app.php'));
+        self::assertIsString($bootstrap);
+        self::assertStringContainsString('Request::HEADER_X_FORWARDED_FOR', $bootstrap);
+        self::assertStringContainsString('Request::HEADER_X_FORWARDED_PROTO', $bootstrap);
+        self::assertStringNotContainsString('Request::HEADER_X_FORWARDED_HOST', $bootstrap);
+        self::assertStringNotContainsString('Request::HEADER_X_FORWARDED_PORT', $bootstrap);
         self::assertStringContainsString('${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}', $compose);
         $workflow = file_get_contents('/ci.yml');
         self::assertIsString($workflow);

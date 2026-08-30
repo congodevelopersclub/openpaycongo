@@ -147,6 +147,25 @@ final class OperationalAnalyticsFixtureTest extends TestCase
             ->assertExactJson(['secure' => false]);
     }
 
+    public function test_forwarded_host_and_port_do_not_override_the_request(): void
+    {
+        Route::get('/_test/forwarded-authority', static fn (Request $request) => [
+            'host' => $request->getHost(),
+            'port' => $request->getPort(),
+        ]);
+
+        $this->withServerVariables([
+            'REMOTE_ADDR' => '127.0.0.1',
+            'HTTP_X_FORWARDED_HOST' => 'forged.example',
+            'HTTP_X_FORWARDED_PORT' => '444',
+        ])->getJson('/_test/forwarded-authority')
+            ->assertOk()
+            ->assertExactJson([
+                'host' => 'localhost',
+                'port' => 80,
+            ]);
+    }
+
     public function test_canonical_analytics_fixture_preserves_decimal_money_and_utc_bounds(): void
     {
         $fixture = app(CanonicalAnalyticsFixture::class)->response();

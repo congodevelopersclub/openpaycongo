@@ -57,7 +57,9 @@ is loopback-only. Never use `private_ranges` or a broad private network.
 nginx accepts `X-Forwarded-Proto` only from that rendered exact list and passes
 the original proxy peer to Laravel; Laravel trusts the same list. Therefore a
 direct client cannot forge HTTPS forwarding, while a configured TLS terminator
-can make Laravel's secure-request, URL, and cookie behavior accurate.
+can make Laravel's secure-request and cookie behavior accurate. This baseline
+does not trust forwarded host or port headers; set `OPENPAY_APP_URL` to the
+canonical public HTTPS URL instead.
 
 ## Resources and routine checks
 
