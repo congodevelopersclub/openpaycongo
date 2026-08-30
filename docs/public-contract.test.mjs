@@ -15,9 +15,19 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const asset = (relativePath) => new URL(relativePath, root);
 const readJson = async (relativePath) => JSON.parse(await readFile(asset(relativePath), 'utf8'));
 
-const postgresClientImages = (job) => (job.steps ?? [])
+const dockerInvocationLines = (job) => (job.steps ?? [])
   .flatMap((step) => (step.run ?? '').split('\n'))
-  .filter((line) => line.trimStart().startsWith('docker run '))
+  .filter((line) => /\bdocker\b/.test(line));
+
+const postgresClientImages = (job) => {
+  const lines = dockerInvocationLines(job);
+
+  for (const line of lines) {
+    assert.match(line.trimStart(), /^docker (?:build|run) /, `noncanonical Docker invocation: ${line.trim()}`);
+  }
+
+  return lines
+    .filter((line) => line.trimStart().startsWith('docker run '))
   .map((line) => {
     const arguments_ = line.trim().slice('docker run '.length).split(/\s+/);
     let index = 0;
@@ -41,6 +51,7 @@ const postgresClientImages = (job) => (job.steps ?? [])
 
     return image;
   });
+};
 
 const assertPostgresClientImages = (job, expected) => {
   assert.deepEqual(postgresClientImages(job), expected);
@@ -90,6 +101,13 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
   assert.throws(() => assertPostgresClientImages({
     steps: [{ run: `docker run --rm ${postgresImage} \\` }, { run: 'docker run --rm postgres:16-alpine \\' }],
   }, expectedPostgresClients), /Expected values to be strictly deep-equal/);
+  for (const invocation of [
+    `env PGPASSWORD=openpay docker run --rm ${postgresImage} \\`,
+    `command docker run --rm ${postgresImage} \\`,
+    `if true; then docker run --rm ${postgresImage} \\; fi`,
+  ]) {
+    assert.throws(() => postgresClientImages({ steps: [{ run: invocation }] }), /noncanonical Docker invocation/);
+  }
   assert.match(runs, /deposits_reverses_deposit_id_foreign:FOREIGN KEY/);
   assert.match(runs, /deposits_reverses_deposit_id_unique:UNIQUE/);
   assert.match(runs, /docker build[\s\S]*android-client/);
