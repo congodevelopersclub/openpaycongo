@@ -1,6 +1,8 @@
 # Continuous security gate
 
-The security workflow keeps pull requests fast while making deeper checks mandatory on `main`, the weekly schedule, and published or prereleased releases. A critical or high vulnerability makes its job fail; that failure is a release blocker.
+The security workflow keeps pull requests fast while making deeper checks mandatory on `main`, the weekly schedule, and `v*` candidate-tag pushes. Candidate tags must be scanned before a release is published. A critical or high vulnerability makes its job fail; that failure is a release blocker.
+
+GitHub Actions alone cannot prevent someone with release authority from publishing a tag before its candidate run finishes. Repository governance issue #10 must require the stable `security-fast` check on protected branches and define the candidate-tag/release publication boundary; until then, this workflow supplies evidence rather than an enforceable publication control.
 
 ## Repository activation required
 

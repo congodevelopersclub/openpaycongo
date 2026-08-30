@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\Authorize;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Tests\TestCase;
 
 final class AuthorizationBoundaryTest extends TestCase
@@ -45,7 +46,7 @@ final class AuthorizationBoundaryTest extends TestCase
             }
 
             self::assertTrue(
-                collect($route->gatherMiddleware())->contains(static fn (string $middleware): bool => self::isExpectedBoundaryMiddleware($middleware)),
+                collect($route->gatherMiddleware())->contains(fn (string $middleware): bool => $this->isExpectedBoundaryMiddleware($middleware)),
                 "Route [{$signature}] is neither in the reviewed anonymous inventory nor protected by authorization middleware.",
             );
         }
@@ -55,13 +56,25 @@ final class AuthorizationBoundaryTest extends TestCase
 
     public function test_lookalike_middleware_aliases_do_not_count_as_authorization(): void
     {
-        self::assertTrue(self::isExpectedBoundaryMiddleware('auth'));
-        self::assertTrue(self::isExpectedBoundaryMiddleware('auth:sanctum'));
-        self::assertTrue(self::isExpectedBoundaryMiddleware(Authenticate::class));
-        self::assertTrue(self::isExpectedBoundaryMiddleware('can:view,deposit'));
-        self::assertTrue(self::isExpectedBoundaryMiddleware(Authorize::class));
-        self::assertFalse(self::isExpectedBoundaryMiddleware('auth.optional'));
-        self::assertFalse(self::isExpectedBoundaryMiddleware('authorize-anything'));
+        $router = app('router');
+        $router->aliasMiddleware('auth', Authenticate::class);
+        $router->aliasMiddleware('can', Authorize::class);
+
+        self::assertTrue($this->isExpectedBoundaryMiddleware('auth'));
+        self::assertTrue($this->isExpectedBoundaryMiddleware('auth:sanctum'));
+        self::assertTrue($this->isExpectedBoundaryMiddleware(Authenticate::class));
+        self::assertTrue($this->isExpectedBoundaryMiddleware('can:view,deposit'));
+        self::assertTrue($this->isExpectedBoundaryMiddleware(Authorize::class));
+        self::assertFalse($this->isExpectedBoundaryMiddleware('auth.optional'));
+        self::assertFalse($this->isExpectedBoundaryMiddleware('authorize-anything'));
+
+        $router->aliasMiddleware('auth', TrimStrings::class);
+
+        try {
+            self::assertFalse($this->isExpectedBoundaryMiddleware('auth'));
+        } finally {
+            $router->aliasMiddleware('auth', Authenticate::class);
+        }
     }
 
     public function test_unsigned_framework_storage_routes_are_rejected(): void
@@ -70,14 +83,22 @@ final class AuthorizationBoundaryTest extends TestCase
         $this->put('/storage/not-signed?upload=true')->assertForbidden();
     }
 
-    private static function isExpectedBoundaryMiddleware(string $middleware): bool
+    private function isExpectedBoundaryMiddleware(string $middleware): bool
     {
-        return $middleware === 'auth'
+        $isAuthenticationForm = $middleware === 'auth'
             || str_starts_with($middleware, 'auth:')
             || $middleware === Authenticate::class
-            || str_starts_with($middleware, Authenticate::class.':')
-            || str_starts_with($middleware, 'can:')
+            || str_starts_with($middleware, Authenticate::class.':');
+        $isAuthorizationForm = str_starts_with($middleware, 'can:')
             || $middleware === Authorize::class
             || str_starts_with($middleware, Authorize::class.':');
+
+        if (! $isAuthenticationForm && ! $isAuthorizationForm) {
+            return false;
+        }
+
+        return collect(app('router')->resolveMiddleware([$middleware]))
+            ->map(static fn (string $resolved): string => explode(':', $resolved, 2)[0])
+            ->contains(static fn (string $resolved): bool => $resolved === Authenticate::class || $resolved === Authorize::class);
     }
 }

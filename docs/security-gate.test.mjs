@@ -15,7 +15,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   const dockerignore = await readFile(new URL('../.dockerignore', import.meta.url), 'utf8');
   const serverDockerfile = await readFile(new URL('../server/Dockerfile', import.meta.url), 'utf8');
 
-  for (const required of ['pull_request:', 'schedule:', 'release:', 'security-fast', 'security-full', 'workflow_dispatch:', 'timeout-minutes:', 'fetch-depth: 0']) {
+  for (const required of ['pull_request:', 'schedule:', "tags: ['v*']", 'security-fast', 'security-full', 'workflow_dispatch:', 'timeout-minutes:', 'fetch-depth: 0']) {
     assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.match(workflow, /github\.event_name != 'pull_request'/);
@@ -75,6 +75,8 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(guide, /congo-openpay-nginx:security/);
   assert.match(guide, /fail-closed/);
   assert.match(guide, /release blocker/);
+  assert.match(guide, /candidate-tag pushes/);
+  assert.match(guide, /Repository governance issue #10/);
   assert.match(guide, /Docker build context excludes `server\/\.env`/);
   assert.doesNotMatch(fast, /curl\s+.*https?:\/\//i);
 });
