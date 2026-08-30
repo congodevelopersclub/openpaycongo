@@ -21,6 +21,13 @@ final class PaymentSyncRequest {
   final OutboxScope scope;
   final PaymentSyncCredential credential;
   final List<PaymentOutboxItem> items;
+
+  /// Safe for aggregate operational telemetry only. It deliberately excludes
+  /// credentials, installation/customer scope, provider evidence, money, and
+  /// idempotency material.
+  Map<String, Object> redactedTelemetry() => <String, Object>{
+    'item_count': items.length,
+  };
 }
 
 final class PaymentSyncResponse {
