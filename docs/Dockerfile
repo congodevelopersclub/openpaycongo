@@ -12,16 +12,21 @@ WORKDIR /workspace
 COPY docs/ ./docs/
 COPY CONTRIBUTING.md SECURITY.md /workspace/
 COPY .dockerignore /workspace/.dockerignore
+COPY .gitleaks.toml /workspace/.gitleaks.toml
 COPY .github/workflows/ci.yml /workspace/.github/workflows/ci.yml
+COPY .github/workflows/security.yml /workspace/.github/workflows/security.yml
 COPY .github/PULL_REQUEST_TEMPLATE.md /workspace/.github/PULL_REQUEST_TEMPLATE.md
 COPY .github/ISSUE_TEMPLATE/bug_report.md /workspace/.github/ISSUE_TEMPLATE/bug_report.md
 COPY README.md /workspace/README.md
 COPY scripts/upgrade-quiescent.sh /workspace/scripts/upgrade-quiescent.sh
 COPY server/Dockerfile /workspace/server/Dockerfile
+COPY server/docker/nginx.Dockerfile /workspace/server/docker/nginx.Dockerfile
 COPY server/composer.json /workspace/server/composer.json
 COPY server/phpstan.neon /workspace/server/phpstan.neon
+COPY server/tests/Feature/AuthorizationBoundaryTest.php /workspace/server/tests/Feature/AuthorizationBoundaryTest.php
 COPY android-client/Dockerfile.ci /workspace/android-client/Dockerfile.ci
 COPY android-client/android/app/build.gradle /workspace/android-client/android/app/build.gradle
 COPY android-client/android/app/src/main/AndroidManifest.xml /workspace/android-client/android/app/src/main/AndroidManifest.xml
+COPY scripts/security/ /workspace/scripts/security/
 WORKDIR /workspace/docs
 RUN npm test

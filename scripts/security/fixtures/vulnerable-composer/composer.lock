@@ -1,0 +1,6 @@
+{
+  "packages": [
+    {"name": "symfony/http-foundation", "version": "v2.7.0"}
+  ],
+  "packages-dev": []
+}

@@ -44,7 +44,10 @@ RUN composer dump-autoload --no-interaction --optimize \
 FROM quality AS test
 
 COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
-RUN composer test
+# This file exists only in the disposable test image. PHPUnit's explicit
+# environment overrides in phpunit.xml remain authoritative.
+RUN : > .env \
+    && composer test
 
 FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS production-dependencies
 
@@ -118,3 +121,31 @@ RUN php -m | grep -qx pdo_pgsql \
     && test ! -w /var/www/html/vendor \
     && test -w /var/www/html/storage \
     && test -w /var/www/html/bootstrap/cache
+
+# The fast gate builds the canonical `test` target first, so this audit cannot
+# become a narrower replacement for the whole-tree Pint, Larastan, and test suite.
+FROM php83-platform-check AS security
+
+RUN composer audit --locked --no-interaction
+
+FROM php83-platform-check AS security-composer-audit-proof
+
+WORKDIR /app
+
+COPY scripts/security/fixtures/vulnerable-composer/composer.lock ./composer.lock
+RUN set -eu; printf '%s\n' '{"name":"openpaycongo/security-audit-proof","require":{"symfony/http-foundation":"2.7.0"}}' > composer.json; set +e; output="$(composer audit --locked --no-interaction 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'CVE-2019-10913'
+
+FROM dependencies AS security-php-static-proof
+
+COPY server/ ./
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+RUN set -eu; composer dump-autoload --no-interaction --optimize; printf '%s\n' '<?php' '' 'declare(strict_types=1);' '' 'final class SecurityGateBrokenFixture' '{' '    public function run(): int' '    {' "        return 'not-an-int';" '    }' '}' > app/SecurityGateBrokenFixture.php; set +e; output="$(composer run analyse 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'SecurityGateBrokenFixture.php'
+
+FROM dependencies AS security-authorization-proof
+
+COPY server/ ./
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+RUN set -eu; : > .env; composer dump-autoload --no-interaction --optimize; printf '%s\n' "Route::get('/security-gate-lookalike-fixture', static fn () => response()->noContent())->middleware('auth.optional');" >> routes/web.php; set +e; output="$(php artisan test --filter=AuthorizationBoundaryTest 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+    && printf '%s\n' "$output" | grep -q 'security-gate-lookalike-fixture'

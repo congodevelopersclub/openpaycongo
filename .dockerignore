@@ -1,5 +1,6 @@
 *
 !.dockerignore
+!.gitleaks.toml
 !CONTRIBUTING.md
 !SECURITY.md
 !README.md
@@ -14,6 +15,7 @@ server/node_modules
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/ci.yml
+!.github/workflows/security.yml
 !.github/PULL_REQUEST_TEMPLATE.md
 !.github/ISSUE_TEMPLATE/
 !.github/ISSUE_TEMPLATE/*
@@ -26,6 +28,9 @@ server/.env.*
 !server/.env.example
 server/storage/*
 !server/storage/**/.gitignore
+!scripts/
+!scripts/security/
+!scripts/security/**
 !android-client/
 android-client/*
 !android-client/Dockerfile.ci
@@ -39,4 +44,5 @@ android-client/android/app/src/*
 !android-client/android/app/src/main/
 android-client/android/app/src/main/*
 !android-client/android/app/src/main/AndroidManifest.xml
+server/.env
 docs/node_modules
