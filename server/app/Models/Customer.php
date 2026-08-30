@@ -13,7 +13,7 @@ class Customer extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['organization_id', 'private_lookup_digest'];
+    protected $fillable = ['organization_id', 'private_lookup_digest', 'private_lookup_key_version'];
 
-    protected $hidden = ['private_lookup_digest'];
+    protected $hidden = ['private_lookup_digest', 'private_lookup_key_version'];
 }

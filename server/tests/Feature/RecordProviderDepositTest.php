@@ -55,6 +55,36 @@ final class RecordProviderDepositTest extends TestCase
 
         self::assertSame(RecordResult::Replayed, $replay->outcome);
         self::assertSame($first->deposit->id, $replay->deposit->id);
+        self::assertSame('previous', $replay->deposit->provider_reference_key_version);
+        self::assertSame('previous', $replay->deposit->idempotency_key_version);
+        self::assertDatabaseCount('deposits', 1);
+        self::assertDatabaseCount('ledger_entries', 2);
+    }
+
+    public function test_provider_identity_replays_after_lookup_key_rotation_without_a_second_credit(): void
+    {
+        config([
+            'deposits.lookup_token_key' => 'previous-deposit-lookup-key-material-32',
+            'deposits.lookup_token_keys' => ['previous' => 'previous-deposit-lookup-key-material-32'],
+            'deposits.lookup_token_active_key_id' => 'previous',
+        ]);
+
+        $transfer = $this->transfer();
+        $first = app(RecordProviderDeposit::class)->record($transfer);
+
+        config([
+            'deposits.lookup_token_key' => 'current-deposit-lookup-key-material-32',
+            'deposits.lookup_token_keys' => [
+                'current' => 'current-deposit-lookup-key-material-32',
+                'previous' => 'previous-deposit-lookup-key-material-32',
+            ],
+            'deposits.lookup_token_active_key_id' => 'current',
+        ]);
+
+        $replay = app(RecordProviderDeposit::class)->record($transfer);
+
+        self::assertSame(RecordResult::Replayed, $replay->outcome);
+        self::assertSame($first->deposit->id, $replay->deposit->id);
         self::assertDatabaseCount('deposits', 1);
         self::assertDatabaseCount('ledger_entries', 2);
     }
@@ -242,6 +272,21 @@ final class RecordProviderDepositTest extends TestCase
         } finally {
             self::assertDatabaseCount('deposits', 0);
             config(['deposits.lookup_token_key' => 'testing-deposit-lookup-key-material-32']);
+        }
+    }
+
+    public function test_an_invalid_lookup_key_ring_fails_before_any_database_write(): void
+    {
+        config([
+            'deposits.lookup_token_keys' => ['current' => 'too-short'],
+            'deposits.lookup_token_active_key_id' => 'current',
+        ]);
+
+        $this->expectException(LogicException::class);
+        try {
+            app(RecordProviderDeposit::class)->record($this->transfer());
+        } finally {
+            self::assertDatabaseCount('deposits', 0);
         }
     }
 
