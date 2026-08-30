@@ -81,6 +81,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(guide, /release blocker/);
   assert.match(guide, /candidate-tag pushes/);
   assert.match(guide, /Repository governance issue #10/);
+  assert.match(guide, /including any generated security artifacts present under it/);
   assert.match(guide, /Docker build context excludes `server\/\.env`/);
   assert.doesNotMatch(fast, /curl\s+.*https?:\/\//i);
 });
