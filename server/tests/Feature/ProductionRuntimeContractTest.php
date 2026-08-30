@@ -19,6 +19,7 @@ final class ProductionRuntimeContractTest extends TestCase
 
         self::assertIsString($dockerfile);
         self::assertIsString($compose);
+        $compose = str_replace("\r\n", "\n", $compose);
         self::assertIsString($nginxDockerfile);
         self::assertIsString($nginxTemplate);
         self::assertIsString($nginxProxyMap);

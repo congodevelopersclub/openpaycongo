@@ -16,6 +16,6 @@ MSYS_NO_PATHCONV=1 docker run --rm --volume "${root}:/repo:ro" --volume "${trivy
 MSYS_NO_PATHCONV=1 docker run --rm --volume "${root}:/repo:ro" --volume "${trivy_cache}:/root/.cache/trivy" --workdir /repo "${trivy_image}" \
   fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 android-client
 
-docker build --target test -f "${root}/server/Dockerfile" "${root}"
-docker build --target security -f "${root}/server/Dockerfile" "${root}"
-docker build --target analyze -f "${root}/android-client/Dockerfile.ci" "${root}/android-client"
+docker build --progress=quiet --target test -f "${root}/server/Dockerfile" "${root}"
+docker build --progress=quiet --target security -f "${root}/server/Dockerfile" "${root}"
+docker build --progress=quiet --target analyze -f "${root}/android-client/Dockerfile.ci" "${root}/android-client"

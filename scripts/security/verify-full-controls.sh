@@ -9,14 +9,21 @@ vulnerable_image="alpine@sha256:c75ac27b49326926b803b9ed43bf088bc220d22556de1bc5
 
 server_sbom="${artifacts}/openpaycongo-server.cdx.json"
 mobile_sbom="${artifacts}/openpaycongo-android-client.cdx.json"
+fpm_sbom="${artifacts}/openpaycongo-fpm-production.cdx.json"
+nginx_sbom="${artifacts}/openpaycongo-nginx-production.cdx.json"
 
 test -s "${server_sbom}"
 test -s "${mobile_sbom}"
-grep --quiet '"bomFormat": "CycloneDX"' "${server_sbom}"
-grep --quiet '"bomFormat": "CycloneDX"' "${mobile_sbom}"
+test -s "${fpm_sbom}"
+test -s "${nginx_sbom}"
+for sbom in "${server_sbom}" "${mobile_sbom}" "${fpm_sbom}" "${nginx_sbom}"; do
+  grep --extended-regexp --quiet '"bomFormat"[[:space:]]*:[[:space:]]*"CycloneDX"' "${sbom}"
+done
 grep --quiet 'laravel/framework' "${server_sbom}"
 grep --quiet 'local_auth' "${mobile_sbom}"
-if grep --quiet 'scripts/security/fixtures\|vulnerable-composer\|vulnerable-flutter' "${server_sbom}" "${mobile_sbom}"; then
+grep --quiet 'laravel/framework' "${fpm_sbom}"
+grep --quiet 'nginx' "${nginx_sbom}"
+if grep --quiet 'scripts/security/fixtures\|vulnerable-composer\|vulnerable-flutter' "${server_sbom}" "${mobile_sbom}" "${fpm_sbom}" "${nginx_sbom}"; then
   echo 'SBOM included a controlled security fixture outside an application dependency tree' >&2
   exit 1
 fi
@@ -24,7 +31,7 @@ fi
 result="$(mktemp)"
 trap 'rm -f "${result}"' EXIT
 
-if MSYS_NO_PATHCONV=1 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock --volume "${trivy_cache}:/root/.cache/trivy" "${trivy_image}" \
+if MSYS_NO_PATHCONV=1 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock:ro --volume "${trivy_cache}:/root/.cache/trivy" "${trivy_image}" \
   image --scanners vuln --quiet --severity HIGH,CRITICAL --exit-code 1 "${vulnerable_image}" >"${result}" 2>&1; then
   echo 'Container scanner accepted the pinned vulnerable image fixture' >&2
   cat "${result}" >&2
@@ -39,4 +46,4 @@ fi
 
 cat "${result}"
 
-echo 'SBOM generation and container scanner rejected their controlled checks'
+echo 'Source and production SBOM generation plus container scanning rejected their controlled checks'

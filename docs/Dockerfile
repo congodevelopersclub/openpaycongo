@@ -20,6 +20,7 @@ COPY .github/ISSUE_TEMPLATE/bug_report.md /workspace/.github/ISSUE_TEMPLATE/bug_
 COPY README.md /workspace/README.md
 COPY scripts/upgrade-quiescent.sh /workspace/scripts/upgrade-quiescent.sh
 COPY server/Dockerfile /workspace/server/Dockerfile
+COPY server/docker/nginx.Dockerfile /workspace/server/docker/nginx.Dockerfile
 COPY server/composer.json /workspace/server/composer.json
 COPY server/phpstan.neon /workspace/server/phpstan.neon
 COPY server/tests/Feature/AuthorizationBoundaryTest.php /workspace/server/tests/Feature/AuthorizationBoundaryTest.php

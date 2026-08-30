@@ -33,7 +33,12 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(history, /git --config=.*--log-opts=--all --redact --exit-code=1/);
   assert.match(fast, /dir --config=.*--redact --exit-code=1/);
   assert.match(full, /cyclonedx-json/);
-  assert.match(full, /image --severity HIGH,CRITICAL --exit-code 1/);
+  assert.match(full, /image --scanners vuln --severity HIGH,CRITICAL --exit-code 1/);
+  assert.match(full, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro/);
+  assert.match(fullProofs, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro/);
+  for (const productionArtifact of ['congo-openpay-fpm:security', 'congo-openpay-nginx:security', 'openpaycongo-server-test:security', 'openpaycongo-fpm-production.cdx.json', 'openpaycongo-nginx-production.cdx.json']) {
+    assert.match(full, new RegExp(productionArtifact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
   assert.match(workflow, /actions\/upload-artifact@[\s\S]*?\n\s+if: always\(\)[\s\S]*?if-no-files-found: error/);
   for (const control of ['vulnerable-composer', 'vulnerable-flutter', 'security-composer-audit-proof', 'security-php-static-proof', 'security-authorization-proof', 'analyze-proof']) {
     assert.match(proofs, new RegExp(control));
@@ -41,6 +46,8 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fullProofs, /alpine@sha256:/);
   assert.match(fullProofs, /openpaycongo-server\.cdx\.json/);
   assert.match(fullProofs, /openpaycongo-android-client\.cdx\.json/);
+  assert.match(fullProofs, /openpaycongo-fpm-production\.cdx\.json/);
+  assert.match(fullProofs, /openpaycongo-nginx-production\.cdx\.json/);
   assert.match(fullProofs, /vulnerable-composer/);
   assert.match(authorizationBoundary, /storage\/not-signed\?upload=true/);
   assert.match(authorizationBoundary, /assertForbidden\(\)/);
@@ -49,12 +56,17 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.doesNotMatch(authorizationBoundary, /file_put_contents|unlink|\.env/);
   assert.match(dockerignore, /^server\/\.env$/m);
   assert.doesNotMatch(serverDockerfile, /COPY\s+server\/\.env/);
-  assert.match(serverDockerfile, /FROM quality AS test[\s\S]*?cp \.env\.example \.env[\s\S]*?composer test/);
-  assert.match(serverDockerfile, /FROM dependencies AS security-authorization-proof[\s\S]*?cp \.env\.example \.env/);
+  assert.match(serverDockerfile, /FROM quality AS test[\s\S]*?: > \.env[\s\S]*?composer test/);
+  assert.match(serverDockerfile, /FROM dependencies AS security-authorization-proof[\s\S]*?: > \.env/);
   assert.match(serverDockerfile, /FROM php83-platform-check AS dependencies/);
   assert.match(serverDockerfile, /docker-php-ext-install pdo_pgsql pdo_mysql/);
+  assert.match(serverDockerfile, /FROM production AS production-contract/);
+  const nginxDockerfile = await readFile(new URL('../server/docker/nginx.Dockerfile', import.meta.url), 'utf8');
+  assert.match(nginxDockerfile, /FROM production AS production-contract/);
   assert.doesNotMatch(serverDockerfile, /composer-security-base|apk upgrade --no-cache/);
   assert.match(guide, /PostgreSQL and MySQL PDO extensions/);
+  assert.match(guide, /congo-openpay-fpm:security/);
+  assert.match(guide, /congo-openpay-nginx:security/);
   assert.match(guide, /fail-closed/);
   assert.match(guide, /release blocker/);
   assert.match(guide, /Docker build context excludes `server\/\.env`/);
