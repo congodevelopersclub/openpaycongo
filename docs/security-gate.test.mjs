@@ -24,6 +24,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fast, /\.gitleaks\.toml/);
   assert.match(gitleaksConfig, /Exact deterministic public vector values/);
   assert.match(gitleaksConfig, /regexTarget = "secret"/);
+  assert.match(gitleaksConfig, /\^96cca119fadda9490c972d89459c944df15ba4c1afdad5806d9148ee99e73888\$/);
   assert.doesNotMatch(gitleaksConfig, /paths\s*=/);
   assert.doesNotMatch(gitleaksConfig, /artifacts\/security/);
   assert.match(fast, /trivy@sha256:/);
@@ -33,6 +34,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(history, /git --config=.*--log-opts=--all --redact --exit-code=1/);
   assert.match(fast, /dir --config=.*--redact --exit-code=1/);
   assert.match(full, /cyclonedx-json/);
+  assert.match(full, /bash "\$\{root\}\/scripts\/security\/security-fast\.sh"/);
   assert.match(full, /image --scanners vuln --severity HIGH,CRITICAL --exit-code 1/);
   assert.match(full, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro/);
   assert.match(fullProofs, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro/);

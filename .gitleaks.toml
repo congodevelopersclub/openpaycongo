@@ -10,12 +10,12 @@ useDefault = true
 description = "Exact deterministic public vector values"
 regexTarget = "secret"
 regexes = [
-  '''96cca119fadda9490c972d89459c944df15ba4c1afdad5806d9148ee99e73888''',
-  '''9663aa1da97e848a914a436d04163dfbb89178f107f1b5b77ed3854203382854''',
-  '''ZQcgbrXWTD1bjhYfpisscx_IkpKxBdpRYVaK3gc5Ypo''',
-  '''zM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6us''',
-  '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8''',
-  '''ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8''',
+  '''^96cca119fadda9490c972d89459c944df15ba4c1afdad5806d9148ee99e73888$''',
+  '''^9663aa1da97e848a914a436d04163dfbb89178f107f1b5b77ed3854203382854$''',
+  '''^ZQcgbrXWTD1bjhYfpisscx_IkpKxBdpRYVaK3gc5Ypo$''',
+  '''^zM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6us$''',
+  '''^AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8$''',
+  '''^ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8$''',
 ]
 
 [[rules]]

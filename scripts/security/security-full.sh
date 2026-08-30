@@ -10,7 +10,7 @@ test_image="openpaycongo-server-test:security"
 fpm_image="congo-openpay-fpm:security"
 nginx_image="congo-openpay-nginx:security"
 
-"${root}/scripts/security/security-fast.sh"
+bash "${root}/scripts/security/security-fast.sh"
 mkdir -p "${artifacts}"
 
 docker build --progress=quiet --target test --tag "${test_image}" -f "${root}/server/Dockerfile" "${root}"
