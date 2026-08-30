@@ -150,6 +150,8 @@ jobs:
         run: docker build --target quality --tag openpaycongo-server-concurrency -f server/Dockerfile .
       - name: Force provider deposit races
         run: bash server/tests/Support/run_provider_deposit_concurrency_matrix.sh openpaycongo-server-concurrency ${{ matrix.connection }} ${{ matrix.port }}
+      - name: Force payment-request credit races
+        run: bash server/tests/Support/run_payment_request_concurrency_matrix.sh openpaycongo-server-concurrency ${{ matrix.connection }} ${{ matrix.port }}
 
   flutter:
     runs-on: ubuntu-latest

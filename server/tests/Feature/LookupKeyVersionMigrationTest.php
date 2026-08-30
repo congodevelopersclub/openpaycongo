@@ -26,7 +26,7 @@ final class LookupKeyVersionMigrationTest extends TestCase
         $installationId = (string) Str::uuid();
         $depositId = (string) Str::uuid();
 
-        $this->artisan('migrate:rollback', ['--step' => 1])->assertExitCode(0);
+        $this->artisan('migrate:rollback', ['--step' => 2])->assertExitCode(0);
 
         DB::table('customers')->insert([
             'id' => $customerId,
@@ -64,6 +64,9 @@ final class LookupKeyVersionMigrationTest extends TestCase
         ]);
 
         $this->artisan('migrate', ['--force' => true])->assertExitCode(0);
+
+        self::assertSame(12500, DB::table('customer_credits')->where('customer_id', $customerId)->where('currency', 'CDF')->value('available_minor'));
+        self::assertDatabaseHas('customer_credit_postings', ['deposit_id' => $depositId]);
 
         foreach ([
             ['customers', 'private_lookup_id', 'customer_lookup', $this->digest('customer_lookup', $organizationId, $customerIdentifier, $previousKey)],

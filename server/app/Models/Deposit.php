@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Deposit extends ImmutableFinancialModel
 {
@@ -57,5 +58,11 @@ class Deposit extends ImmutableFinancialModel
     public function ledgerEntries(): HasMany
     {
         return $this->hasMany(LedgerEntry::class);
+    }
+
+    /** @return HasOne<CustomerCreditPosting, $this> */
+    public function customerCreditPosting(): HasOne
+    {
+        return $this->hasOne(CustomerCreditPosting::class);
     }
 }

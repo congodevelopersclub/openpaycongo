@@ -2,7 +2,11 @@
 
 namespace App\Deposits;
 
+use App\Events\CustomerCreditCreationPending;
+use App\Events\ProviderDepositRecorded;
 use App\Models\Customer;
+use App\Models\CustomerCredit;
+use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
@@ -78,6 +82,7 @@ final class RecordProviderDeposit
                         'idempotency_key_version' => $this->activeKeyId(),
                     ]);
                     $this->appendEntries($deposit, $receivedAt, false);
+                    event(new ProviderDepositRecorded($deposit->id));
 
                     return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
                 }, attempts: 3);
@@ -100,43 +105,54 @@ final class RecordProviderDeposit
 
     public function reverse(Deposit $deposit): ReverseProviderDepositResult
     {
-        try {
-            return DB::transaction(function () use ($deposit): ReverseProviderDepositResult {
-                $original = Deposit::query()->lockForUpdate()->find($deposit->id);
-                if ($original === null || $original->kind !== DepositKind::ProviderCredit->value) {
-                    throw new InvalidArgumentException('Deposit cannot be reversed.');
-                }
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            try {
+                return DB::transaction(function () use ($deposit): ReverseProviderDepositResult {
+                    $original = Deposit::query()->lockForUpdate()->find($deposit->id);
+                    if ($original === null || $original->kind !== DepositKind::ProviderCredit->value) {
+                        throw new InvalidArgumentException('Deposit cannot be reversed.');
+                    }
 
-                $existing = Deposit::query()->where('reverses_deposit_id', $original->id)->first();
+                    $existing = Deposit::query()->where('reverses_deposit_id', $original->id)->first();
+                    if ($existing !== null) {
+                        return new ReverseProviderDepositResult(ReversalResult::Replayed, $existing);
+                    }
+
+                    $recordedAt = CarbonImmutable::now();
+                    $reversal = Deposit::query()->create([
+                        'organization_id' => $original->organization_id,
+                        'customer_id' => $original->customer_id,
+                        'source_installation_id' => $original->source_installation_id,
+                        'reverses_deposit_id' => $original->id,
+                        'kind' => DepositKind::ProviderReversal->value,
+                        'amount_minor' => $original->amount_minor,
+                        'currency' => $original->currency,
+                        'received_at' => $recordedAt,
+                        'idempotency_digest' => $this->activeDigest($this->digests('reversal', $original->organization_id, $original->id)),
+                        'idempotency_key_version' => $this->activeKeyId(),
+                    ]);
+                    $this->appendEntries($reversal, $recordedAt, true);
+                    $this->debitCustomerCredit($reversal);
+
+                    return new ReverseProviderDepositResult(ReversalResult::Reversed, $reversal);
+                }, attempts: 3);
+            } catch (QueryException $exception) {
+                $existing = Deposit::query()->where('reverses_deposit_id', $deposit->id)->first();
                 if ($existing !== null) {
                     return new ReverseProviderDepositResult(ReversalResult::Replayed, $existing);
                 }
 
-                $recordedAt = CarbonImmutable::now();
-                $reversal = Deposit::query()->create([
-                    'organization_id' => $original->organization_id,
-                    'customer_id' => $original->customer_id,
-                    'source_installation_id' => $original->source_installation_id,
-                    'reverses_deposit_id' => $original->id,
-                    'kind' => DepositKind::ProviderReversal->value,
-                    'amount_minor' => $original->amount_minor,
-                    'currency' => $original->currency,
-                    'received_at' => $recordedAt,
-                    'idempotency_digest' => $this->activeDigest($this->digests('reversal', $original->organization_id, $original->id)),
-                    'idempotency_key_version' => $this->activeKeyId(),
-                ]);
-                $this->appendEntries($reversal, $recordedAt, true);
+                if ($attempt < 3 && $this->isRetryableTransactionFailure($exception)) {
+                    usleep($attempt * 50_000);
 
-                return new ReverseProviderDepositResult(ReversalResult::Reversed, $reversal);
-            }, attempts: 3);
-        } catch (QueryException $exception) {
-            $existing = Deposit::query()->where('reverses_deposit_id', $deposit->id)->first();
-            if ($existing !== null) {
-                return new ReverseProviderDepositResult(ReversalResult::Replayed, $existing);
+                    continue;
+                }
+
+                throw $exception;
             }
-
-            throw $exception;
         }
+
+        throw new LogicException('Provider reversal retry limit was exhausted.');
     }
 
     private function assertValid(ProviderTransfer $transfer): void
@@ -277,6 +293,33 @@ final class RecordProviderDeposit
         }
     }
 
+    private function debitCustomerCredit(Deposit $reversal): void
+    {
+        $credit = CustomerCredit::query()
+            ->where('customer_id', $reversal->customer_id)
+            ->where('currency', $reversal->currency)
+            ->lockForUpdate()
+            ->first();
+        if ($credit === null) {
+            event(new CustomerCreditCreationPending($reversal->customer_id, $reversal->currency));
+            $credit = CustomerCredit::query()->create([
+                'customer_id' => $reversal->customer_id,
+                'currency' => $reversal->currency,
+                'available_minor' => 0,
+            ]);
+            $credit = CustomerCredit::query()->whereKey($credit->id)->lockForUpdate()->firstOrFail();
+        }
+
+        $amount = (int) $reversal->amount_minor;
+        $credit->available_minor = (int) $credit->available_minor - $amount;
+        $credit->save();
+        CustomerCreditPosting::query()->create([
+            'deposit_id' => $reversal->id,
+            'customer_credit_id' => $credit->id,
+            'amount_minor' => -$amount,
+        ]);
+    }
+
     /** @param array<string, string> $digests */
     private function resolveLookupId(string $purpose, string $organizationId, array $digests): string
     {
@@ -290,27 +333,26 @@ final class RecordProviderDeposit
         if ($lookupIds->count() > 1) {
             throw new LogicException('Deposit lookup aliases are inconsistent.');
         }
+
         $lookupId = $lookupIds->first() ?? (string) Str::uuid();
-        $createdWithoutExistingAlias = $lookupIds->isEmpty();
-
-        foreach ($digests as $index => $digest) {
-            $alias = PrivateLookupAlias::query()->createOrFirst(
-                ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $digest],
-                ['lookup_id' => $lookupId, 'created_at' => CarbonImmutable::now()],
-            );
-
-            if ($alias->lookup_id !== $lookupId) {
-                if ($index === array_key_first($digests) && $createdWithoutExistingAlias) {
-                    $lookupId = $alias->lookup_id;
-
-                    continue;
-                }
-
-                throw new LogicException('Deposit lookup aliases are inconsistent.');
-            }
+        foreach ($digests as $digest) {
+            DB::table('private_lookup_aliases')->insertOrIgnore([
+                'id' => (string) Str::uuid(),
+                'organization_id' => $organizationId,
+                'purpose' => $purpose,
+                'digest' => $digest,
+                'lookup_id' => $lookupId,
+                'created_at' => CarbonImmutable::now(),
+            ]);
         }
 
-        return $lookupId;
+        $resolvedIds = PrivateLookupAlias::query()->where('organization_id', $organizationId)->where('purpose', $purpose)
+            ->whereIn('digest', array_values($digests))->pluck('lookup_id')->unique()->values();
+        if ($resolvedIds->count() !== 1) {
+            throw new LogicException('Deposit lookup aliases are inconsistent.');
+        }
+
+        return $resolvedIds->first();
     }
 
     private function isRetryableTransactionFailure(QueryException $exception): bool
