@@ -118,3 +118,33 @@ RUN php -m | grep -qx pdo_pgsql \
     && test ! -w /var/www/html/vendor \
     && test -w /var/www/html/storage \
     && test -w /var/www/html/bootstrap/cache
+
+# The fast gate builds the canonical `test` target first, so this audit cannot
+# become a narrower replacement for the whole-tree Pint, Larastan, and test suite.
+FROM php83-platform-check AS security
+
+RUN composer audit --locked --no-interaction
+
+FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS security-composer-audit-proof
+
+WORKDIR /app
+
+COPY scripts/security/fixtures/vulnerable-composer/composer.lock ./composer.lock
+RUN printf '%s\n' '{"name":"openpaycongo/security-audit-proof","require":{"symfony/http-foundation":"2.7.0"}}' > composer.json \
+    && if composer audit --locked --no-interaction; then echo 'Composer audit accepted the seeded vulnerable lockfile' >&2; exit 1; fi
+
+FROM dependencies AS security-php-static-proof
+
+COPY server/ ./
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+RUN composer dump-autoload --no-interaction --optimize \
+    && printf '%s\n' '<?php' 'final class Broken {public function run(){}}' > app/SecurityGateBrokenFixture.php \
+    && if composer run lint; then echo 'Canonical Pint accepted the seeded formatting violation' >&2; exit 1; fi
+
+FROM dependencies AS security-authorization-proof
+
+COPY server/ ./
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+RUN composer dump-autoload --no-interaction --optimize \
+    && printf '%s\n' "Route::get('/security-gate-unprotected-fixture', static fn () => response()->noContent());" >> routes/web.php \
+    && if php artisan test --filter=AuthorizationBoundaryTest; then echo 'Authorization route inventory accepted an unreviewed public application route' >&2; exit 1; fi

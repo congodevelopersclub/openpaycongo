@@ -12,7 +12,9 @@ WORKDIR /workspace
 COPY docs/ ./docs/
 COPY CONTRIBUTING.md SECURITY.md /workspace/
 COPY .dockerignore /workspace/.dockerignore
+COPY .gitleaks.toml /workspace/.gitleaks.toml
 COPY .github/workflows/ci.yml /workspace/.github/workflows/ci.yml
+COPY .github/workflows/security.yml /workspace/.github/workflows/security.yml
 COPY .github/PULL_REQUEST_TEMPLATE.md /workspace/.github/PULL_REQUEST_TEMPLATE.md
 COPY .github/ISSUE_TEMPLATE/bug_report.md /workspace/.github/ISSUE_TEMPLATE/bug_report.md
 COPY README.md /workspace/README.md
@@ -23,5 +25,6 @@ COPY server/phpstan.neon /workspace/server/phpstan.neon
 COPY android-client/Dockerfile.ci /workspace/android-client/Dockerfile.ci
 COPY android-client/android/app/build.gradle /workspace/android-client/android/app/build.gradle
 COPY android-client/android/app/src/main/AndroidManifest.xml /workspace/android-client/android/app/src/main/AndroidManifest.xml
+COPY scripts/security/ /workspace/scripts/security/
 WORKDIR /workspace/docs
 RUN npm test

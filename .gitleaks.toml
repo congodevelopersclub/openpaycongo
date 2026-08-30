@@ -1,0 +1,18 @@
+# Keep Gitleaks' built-in rules; this file adds only narrowly scoped exclusions.
+[extend]
+useDefault = true
+
+# These public protocol vectors contain deterministic, non-production key material.
+# Keep the exclusion path-scoped: all other files, including future fixtures, remain scanned.
+[allowlist]
+paths = [
+  '''docs/pairing-key-schedule\.vector\.json''',
+  '''docs/pairing-protocol\.vector\.json''',
+  '''docs/pairing-response-plaintext\.(invalid|valid)\.json''',
+  '''^artifacts/security/''',
+]
+
+[[rules]]
+id = "security-gate-history-proof"
+description = "Synthetic history-only secret used to prove Git-aware scanning"
+regex = '''security_gate_history_[A-Za-z0-9]{32}'''
