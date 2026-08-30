@@ -27,8 +27,9 @@ abstract class ImmutableFinancialModel extends Model
 
     /**
      * This is the non-suppressible Eloquent boundary for increment(), decrement(),
-     * and their quiet variants. Raw query-builder writes remain an operational
-     * authority boundary enforced by database roles or triggers, not this model.
+     * and their quiet variants. Raw query-builder and direct SQL writes are
+     * outside this model guard and must be restricted by deployment database
+     * privileges or triggers.
      */
     protected function incrementOrDecrement($column, $amount, $extra, $method): int
     {
