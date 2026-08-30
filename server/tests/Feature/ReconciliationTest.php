@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Deposits\ProviderTransfer;
 use App\Deposits\RecordProviderDeposit;
+use App\Models\Customer;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\LedgerEntry;
@@ -16,6 +17,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 final class ReconciliationTest extends TestCase
@@ -111,6 +113,41 @@ final class ReconciliationTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    public function test_repair_rejects_a_missing_posting_when_the_credit_balance_is_not_exactly_short(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
+
+        $this->expectException(ValidationException::class);
+        app(RepairMissingCustomerCredit::class)->repair($operator, $deposit, 'missing-credit-posting');
+    }
+
+    public function test_reconciliation_surfaces_mis_scoped_postings_and_partial_reversals(): void
+    {
+        $operator = User::factory()->create(['is_financial_operator' => true]);
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $other = Customer::query()->create([
+            'organization_id' => $deposit->organization_id,
+            'private_lookup_digest' => hash('sha256', 'other-customer'),
+        ]);
+        $otherCredit = CustomerCredit::query()->create(['customer_id' => $other->id, 'currency' => $deposit->currency, 'available_minor' => 0]);
+        CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->update(['customer_credit_id' => $otherCredit->id]);
+        CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 0]);
+
+        self::assertContains('customer_credit_posting_scope', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
+
+        $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider-correction')->deposit;
+        DB::table('deposits')->where('id', $reversal->id)->update(['amount_minor' => 6000]);
+        DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'customer_credit')->update(['debit_minor' => 6000]);
+        DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'provider_receivable')->update(['credit_minor' => 6000]);
+        DB::table('customer_credit_postings')->where('deposit_id', $reversal->id)->update(['amount_minor' => -6000]);
+        CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => -6000]);
+
+        self::assertContains('reversal_evidence', app(ReconcileDeposit::class)->report($reversal)->discrepancies);
+        self::assertContains('reversal_ledger_linkage', app(ReconcileDeposit::class)->report($reversal)->discrepancies);
     }
 
     private function transfer(): ProviderTransfer

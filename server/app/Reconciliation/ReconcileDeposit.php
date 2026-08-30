@@ -35,13 +35,18 @@ final class ReconcileDeposit
             DepositKind::ProviderReversal->value => -(int) $deposit->amount_minor,
             default => null,
         };
-        $posting = CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->first();
+        $posting = CustomerCreditPosting::query()->with('customerCredit')->where('deposit_id', $deposit->id)->first();
         if ($expectedPosting !== null && ($posting === null || (int) $posting->amount_minor !== $expectedPosting)) {
             $discrepancies[] = 'customer_credit_posting';
         }
+        if ($posting !== null && ($posting->customerCredit === null
+            || $posting->customerCredit->customer_id !== $deposit->customer_id
+            || $posting->customerCredit->currency !== $deposit->currency)) {
+            $discrepancies[] = 'customer_credit_posting_scope';
+        }
 
         if ($deposit->kind === DepositKind::ProviderReversal->value) {
-            if ($deposit->reversedDeposit === null || $deposit->reversal_reason === null || $deposit->reversed_by_user_id === null) {
+            if (! $this->hasMatchingOriginalDeposit($deposit) || $deposit->reversal_reason === null || $deposit->reversed_by_user_id === null) {
                 $discrepancies[] = 'reversal_evidence';
             }
             if ($entries->contains(fn ($entry): bool => $entry->reverses_ledger_entry_id === null)
@@ -86,7 +91,20 @@ final class ReconcileDeposit
 
             return $original !== null
                 && $original->deposit_id === $reversal->reverses_deposit_id
-                && $original->account === $entry->account;
+                && $original->account === $entry->account
+                && (int) $original->debit_minor === (int) $entry->debit_minor
+                && (int) $original->credit_minor === (int) $entry->credit_minor;
         });
+    }
+
+    private function hasMatchingOriginalDeposit(Deposit $reversal): bool
+    {
+        $original = $reversal->reversedDeposit;
+
+        return $original !== null
+            && $original->organization_id === $reversal->organization_id
+            && $original->customer_id === $reversal->customer_id
+            && $original->currency === $reversal->currency
+            && (int) $original->amount_minor === (int) $reversal->amount_minor;
     }
 }

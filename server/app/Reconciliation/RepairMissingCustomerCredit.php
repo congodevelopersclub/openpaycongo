@@ -3,9 +3,11 @@
 namespace App\Reconciliation;
 
 use App\Deposits\DepositKind;
+use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\FinancialCorrectionAudit;
+use App\Models\PaymentRequest;
 use App\Models\User;
 use App\PaymentRequests\AllocatePendingPaymentRequests;
 use Carbon\CarbonImmutable;
@@ -35,6 +37,22 @@ final class RepairMissingCustomerCredit
             $discrepancies = $this->reconciliation->report($deposit)->discrepancies;
             if ($deposit->kind !== DepositKind::ProviderCredit->value
                 || array_diff($discrepancies, ['customer_credit_posting', 'customer_credit_balance']) !== []) {
+                throw ValidationException::withMessages(['deposit' => 'This discrepancy cannot be repaired automatically.']);
+            }
+            $credit = CustomerCredit::query()
+                ->where('customer_id', $deposit->customer_id)
+                ->where('currency', $deposit->currency)
+                ->lockForUpdate()
+                ->first();
+            $posted = CustomerCreditPosting::query()
+                ->whereHas('customerCredit', fn ($query) => $query->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency))
+                ->sum('amount_minor');
+            $allocated = PaymentRequest::query()
+                ->where('customer_id', $deposit->customer_id)
+                ->where('currency', $deposit->currency)
+                ->where('status', 'charged')
+                ->sum('amount_minor');
+            if ($credit === null || (int) $credit->available_minor !== (int) $posted - (int) $allocated) {
                 throw ValidationException::withMessages(['deposit' => 'This discrepancy cannot be repaired automatically.']);
             }
 
