@@ -11,9 +11,10 @@ return [
      * coordinated operational change without introducing an APP_KEY fallback.
      * Rotation is two-phase: deploy the complete old+new ring everywhere while
      * the old key stays active, then flip the active id everywhere. Payment
-     * requests are retained, so every key version referenced by a retained row
-     * must remain in the ring. Creation fails closed if a persisted version is
-     * removed; retirement requires an explicit row-retention/purge migration.
+     * requests are retained, so every secret fingerprint referenced by a retained
+     * row must remain represented in the ring. Creation fails closed if key material
+     * is removed or its secret changes under the same id; retirement requires an
+     * explicit row-retention/purge migration. Never rebind an existing key id.
      */
     'idempotency_key' => env('PAYMENT_REQUEST_IDEMPOTENCY_KEY', env('DEPOSIT_LOOKUP_TOKEN_KEY')),
     'idempotency_keys' => env('PAYMENT_REQUEST_IDEMPOTENCY_KEYS', env('DEPOSIT_LOOKUP_TOKEN_KEYS')),

@@ -27,11 +27,15 @@ final class CreatePaymentRequest
             throw new InvalidArgumentException('Invalid payment request.');
         }
 
-        $digests = $this->idempotencyDigests($customerId, $idempotencyKey);
-        $digest = $digests[$this->activeKeyId()];
+        $keyRing = $this->keyRing();
+        $activeKeyId = $this->activeKeyId();
+        $digests = $this->idempotencyDigests($customerId, $idempotencyKey, $keyRing);
+        $digest = $digests[$activeKeyId];
+        $activeKeyFingerprint = $this->keyFingerprint($keyRing[$activeKeyId]);
+        $configuredKeyFingerprints = array_values(array_map($this->keyFingerprint(...), $keyRing));
 
         try {
-            return DB::transaction(function () use ($customerId, $amountMinor, $currency, $digest, $digests): PaymentRequest {
+            return DB::transaction(function () use ($customerId, $amountMinor, $currency, $digest, $digests, $activeKeyFingerprint, $configuredKeyFingerprints): PaymentRequest {
                 $replay = PaymentRequest::query()->where('customer_id', $customerId)->whereIn('idempotency_digest', array_values($digests))->first();
                 if ($replay !== null) {
                     $replay = PaymentRequest::query()->lockForUpdate()->findOrFail($replay->id);
@@ -49,7 +53,7 @@ final class CreatePaymentRequest
                 if ($replay !== null) {
                     return $this->replayOrConflict($this->expireIfDue($replay), $amountMinor, $currency);
                 }
-                $this->assertPersistedKeyVersionsConfigured($customerId, array_keys($digests));
+                $this->assertPersistedKeyFingerprintsConfigured($customerId, $configuredKeyFingerprints);
 
                 $credit = CustomerCredit::query()
                     ->where('customer_id', $customerId)
@@ -85,7 +89,7 @@ final class CreatePaymentRequest
                         $credit->available_minor = (int) $credit->available_minor - $amountMinor;
                         $credit->save();
                         $request = PaymentRequest::query()->create([
-                            'customer_id' => $customerId, 'idempotency_digest' => $digest, 'idempotency_key_version' => $this->activeKeyId(), 'currency' => $currency,
+                            'customer_id' => $customerId, 'idempotency_digest' => $digest, 'idempotency_key_fingerprint' => $activeKeyFingerprint, 'currency' => $currency,
                             'amount_minor' => $amountMinor, 'remaining_minor' => 0, 'status' => PaymentRequestStatus::Charged,
                             'expires_at' => $now->addDays($this->expiryDays()), 'charged_at' => $now,
                         ]);
@@ -96,7 +100,7 @@ final class CreatePaymentRequest
                 }
 
                 return PaymentRequest::query()->create([
-                    'customer_id' => $customerId, 'idempotency_digest' => $digest, 'idempotency_key_version' => $this->activeKeyId(), 'currency' => $currency,
+                    'customer_id' => $customerId, 'idempotency_digest' => $digest, 'idempotency_key_fingerprint' => $activeKeyFingerprint, 'currency' => $currency,
                     'amount_minor' => $amountMinor, 'remaining_minor' => $amountMinor, 'status' => PaymentRequestStatus::Pending,
                     'expires_at' => $now->addDays($this->expiryDays()),
                 ]);
@@ -149,8 +153,11 @@ final class CreatePaymentRequest
         return $request;
     }
 
-    /** @return array<string, string> */
-    private function idempotencyDigests(string $customerId, string $key): array
+    /**
+     * @param  array<string, string>  $keyRing
+     * @return array<string, string>
+     */
+    private function idempotencyDigests(string $customerId, string $key, array $keyRing): array
     {
         $payload = json_encode([
             'version' => 'openpay.payment-request.idempotency.v1',
@@ -158,7 +165,7 @@ final class CreatePaymentRequest
             'key' => $key,
         ], JSON_THROW_ON_ERROR);
         $digests = [];
-        foreach ($this->keyRing() as $keyId => $secret) {
+        foreach ($keyRing as $keyId => $secret) {
             $digests[$keyId] = hash_hmac('sha256', $payload, $secret);
         }
 
@@ -172,15 +179,20 @@ final class CreatePaymentRequest
         return is_string($configured) && $configured !== '' ? $configured : 'v1';
     }
 
-    /** @param list<string> $configuredKeyIds */
-    private function assertPersistedKeyVersionsConfigured(string $customerId, array $configuredKeyIds): void
+    private function keyFingerprint(string $secret): string
     {
-        $missingVersionExists = PaymentRequest::query()
+        return hash_hmac('sha256', 'openpay.payment-request.idempotency-key-fingerprint.v1', $secret);
+    }
+
+    /** @param list<string> $configuredKeyFingerprints */
+    private function assertPersistedKeyFingerprintsConfigured(string $customerId, array $configuredKeyFingerprints): void
+    {
+        $unconfiguredFingerprintExists = PaymentRequest::query()
             ->where('customer_id', $customerId)
-            ->whereNotIn('idempotency_key_version', $configuredKeyIds)
+            ->whereNotIn('idempotency_key_fingerprint', $configuredKeyFingerprints)
             ->exists();
-        if ($missingVersionExists) {
-            throw new LogicException('Payment-request idempotency key ring cannot retire a persisted key version.');
+        if ($unconfiguredFingerprintExists) {
+            throw new LogicException('Payment-request idempotency key ring is missing persisted key material.');
         }
     }
 

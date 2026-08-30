@@ -24,7 +24,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignUuid('customer_id')->constrained()->cascadeOnDelete();
             $table->char('idempotency_digest', 64);
-            $table->string('idempotency_key_version', 64);
+            $table->char('idempotency_key_fingerprint', 64);
             $table->string('currency', 3);
             $table->bigInteger('amount_minor');
             $table->unsignedBigInteger('remaining_minor');

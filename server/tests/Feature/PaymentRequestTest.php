@@ -216,8 +216,9 @@ final class PaymentRequestTest extends TestCase
 
         self::assertSame($first->id, $replay->id);
         self::assertSame($current->id, $mixedActiveReplay->id);
-        self::assertSame('previous', $first->idempotency_key_version);
-        self::assertSame('current', $current->idempotency_key_version);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $first->idempotency_key_fingerprint);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $current->idempotency_key_fingerprint);
+        self::assertNotSame($first->idempotency_key_fingerprint, $current->idempotency_key_fingerprint);
         self::assertNotSame(hash('sha256', 'rotated-opaque-key'), $first->idempotency_digest);
         self::assertDatabaseCount('payment_requests', 2);
     }
@@ -238,9 +239,31 @@ final class PaymentRequestTest extends TestCase
 
         try {
             app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'retained-old-key');
-            self::fail('Removing a persisted idempotency key version must fail closed.');
+            self::fail('Removing persisted idempotency key material must fail closed.');
         } catch (LogicException $exception) {
-            self::assertSame('Payment-request idempotency key ring cannot retire a persisted key version.', $exception->getMessage());
+            self::assertSame('Payment-request idempotency key ring is missing persisted key material.', $exception->getMessage());
+        }
+
+        self::assertDatabaseCount('payment_requests', 1);
+        self::assertSame($first->id, PaymentRequest::query()->sole()->id);
+        self::assertSame(1200, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+    }
+
+    public function test_changing_a_persisted_key_secret_under_the_same_id_fails_closed(): void
+    {
+        config()->set('payment_requests.idempotency_keys', ['stable' => str_repeat('a', 32)]);
+        config()->set('payment_requests.idempotency_active_key_id', 'stable');
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 2400]);
+        $first = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'secret-drift-key');
+
+        config()->set('payment_requests.idempotency_keys', ['stable' => str_repeat('b', 32)]);
+
+        try {
+            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'secret-drift-key');
+            self::fail('Changing secret material under a persisted key id must fail closed.');
+        } catch (LogicException $exception) {
+            self::assertSame('Payment-request idempotency key ring is missing persisted key material.', $exception->getMessage());
         }
 
         self::assertDatabaseCount('payment_requests', 1);
@@ -350,7 +373,7 @@ final class PaymentRequestTest extends TestCase
             'id' => $id,
             'customer_id' => $customerId,
             'idempotency_digest' => hash('sha256', $id),
-            'idempotency_key_version' => 'v1',
+            'idempotency_key_fingerprint' => $this->paymentRequestKeyFingerprint(),
             'currency' => 'CDF',
             'amount_minor' => $amount,
             'remaining_minor' => $amount,
@@ -359,6 +382,16 @@ final class PaymentRequestTest extends TestCase
             'created_at' => $createdAt ?? $expiresAt,
             'updated_at' => $createdAt ?? $expiresAt,
         ];
+    }
+
+    private function paymentRequestKeyFingerprint(): string
+    {
+        $secret = config('payment_requests.idempotency_key');
+        if (! is_string($secret)) {
+            throw new LogicException('Payment-request test key is not configured.');
+        }
+
+        return hash_hmac('sha256', 'openpay.payment-request.idempotency-key-fingerprint.v1', $secret);
     }
 
     /** @return array<string, int|string|CarbonImmutable> */

@@ -30,7 +30,7 @@ foreach ([
         'id' => $id,
         'customer_id' => $customer->id,
         'idempotency_digest' => hash('sha256', $id),
-        'idempotency_key_version' => 'v1',
+        'idempotency_key_fingerprint' => hash_hmac('sha256', 'openpay.payment-request.idempotency-key-fingerprint.v1', 'testing-deposit-lookup-key-material-32'),
         'currency' => $currency,
         'amount_minor' => $amount,
         'remaining_minor' => $amount,
