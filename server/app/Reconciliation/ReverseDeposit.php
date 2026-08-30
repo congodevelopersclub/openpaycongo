@@ -48,7 +48,11 @@ final class ReverseDeposit
                 $customerCredit = CustomerCredit::query()->where('customer_id', $reversal->customer_id)->where('currency', $reversal->currency)->lockForUpdate()->first();
                 if ($customerCredit === null) {
                     event(new CustomerCreditCreationPending($reversal->customer_id, $reversal->currency));
-                    $customerCredit = CustomerCredit::query()->create(['customer_id' => $reversal->customer_id, 'currency' => $reversal->currency, 'available_minor' => 0]);
+                    $customerCredit = CustomerCredit::query()->createOrFirst(
+                        ['customer_id' => $reversal->customer_id, 'currency' => $reversal->currency],
+                        ['available_minor' => 0],
+                    );
+                    $customerCredit = CustomerCredit::query()->whereKey($customerCredit->id)->lockForUpdate()->firstOrFail();
                 }
                 $customerCredit->available_minor = (int) $customerCredit->available_minor - (int) $reversal->amount_minor;
                 $customerCredit->save();
