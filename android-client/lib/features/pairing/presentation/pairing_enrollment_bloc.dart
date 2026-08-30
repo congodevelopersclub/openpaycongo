@@ -148,6 +148,7 @@ final class PairingEnrollmentBloc
   int _generation = 0;
   int? _activeOperation;
   Future<void>? _activeWork;
+  Future<void>? _cleanupTransition;
   Future<void> _persistence = Future<void>.value();
   Future<void> _cleanup = Future<void>.value();
   PairingEnrollmentCleanup? _pendingCleanup;
@@ -297,6 +298,8 @@ final class PairingEnrollmentBloc
   ) async {
     final int generation = ++_generation;
     final Future<void>? activeWork = _activeWork;
+    final Completer<void> settled = Completer<void>();
+    _cleanupTransition = settled.future;
     telemetry.record(PairingEnrollmentTelemetry.cancelled);
     _activeOperation = generation;
     try {
@@ -311,6 +314,8 @@ final class PairingEnrollmentBloc
       }
       await _completeCleanup(generation, emit);
     } finally {
+      if (!settled.isCompleted) settled.complete();
+      if (_cleanupTransition == settled.future) _cleanupTransition = null;
       if (_activeOperation == generation) _activeOperation = null;
     }
   }
@@ -390,18 +395,24 @@ final class PairingEnrollmentBloc
 
   Future<bool> _failClosedFallback(int generation) async {
     if (generation != _generation) return false;
+    var disposed = false;
     try {
       await transport.discardTerminal();
-      if (generation != _generation) return false;
-      await _clear();
-      return generation == _generation;
+      disposed = true;
     } on TimeoutException {
-      return false;
+      // Removing durable state still prevents restart recovery.
     } on PairingEnrollmentUnavailableException {
-      return false;
+      // Removing durable state still prevents restart recovery.
+    } on PairingEnrollmentPersistenceException {
+      // Removing durable state still prevents restart recovery.
+    }
+    if (generation != _generation) return false;
+    try {
+      await _clear();
     } on PairingEnrollmentPersistenceException {
       return false;
     }
+    return disposed && generation == _generation;
   }
 
   Future<bool> _completeCleanup(
@@ -485,6 +496,8 @@ final class PairingEnrollmentBloc
 
   @override
   Future<void> close() async {
+    final Future<void>? cleanupTransition = _cleanupTransition;
+    if (cleanupTransition != null) await cleanupTransition;
     final int generation = ++_generation;
     final Future<void>? activeWork = _activeWork;
     try {
