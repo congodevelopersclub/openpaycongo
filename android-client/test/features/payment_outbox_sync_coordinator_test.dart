@@ -132,6 +132,24 @@ void main() {
     expect(storedSecond.nextAttemptAt, now.add(const Duration(minutes: 7)));
   });
 
+  test('sync telemetry is aggregate-only and excludes credential and payment evidence', () {
+    final PaymentEnvelope item = envelope('REF-PII-1001');
+    final PaymentSyncRequest request = PaymentSyncRequest(
+      scope: scope,
+      credential: const PaymentSyncCredential('credential-must-not-escape'),
+      items: <PaymentOutboxItem>[
+        PaymentOutboxItem(
+          envelope: item,
+          state: PaymentOutboxState.pending,
+          attempts: 0,
+          createdAt: now,
+        ),
+      ],
+    );
+
+    expect(request.redactedTelemetry(), <String, Object>{'item_count': 1});
+  });
+
   test('recovers an interrupted in-flight item and retries it with its stable key', () async {
     final MemoryOutboxRepository repository = MemoryOutboxRepository();
     final PaymentOutbox firstProcess = PaymentOutbox(repository);
