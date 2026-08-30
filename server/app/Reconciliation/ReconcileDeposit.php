@@ -102,8 +102,7 @@ final class ReconcileDeposit
             return $original !== null
                 && $original->deposit_id === $reversal->reverses_deposit_id
                 && $original->account === $entry->account
-                && (int) $original->debit_minor === (int) $entry->debit_minor
-                && (int) $original->credit_minor === (int) $entry->credit_minor;
+                && (int) $original->debit_minor + (int) $original->credit_minor === (int) $entry->debit_minor + (int) $entry->credit_minor;
         });
     }
 

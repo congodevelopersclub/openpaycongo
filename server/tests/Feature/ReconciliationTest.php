@@ -56,8 +56,8 @@ final class ReconciliationTest extends TestCase
         CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 0]);
 
         $repair = app(RepairMissingCustomerCredit::class);
-        $first = $repair->repair($operator, $deposit, 'missing-credit-posting');
-        $replay = $repair->repair($operator, $deposit, 'missing-credit-posting');
+        $first = $repair->repair($operator, $deposit, 'missing_credit_posting');
+        $replay = $repair->repair($operator, $deposit, 'missing_credit_posting');
 
         self::assertTrue($first->repaired);
         self::assertFalse($replay->repaired);
@@ -122,7 +122,7 @@ final class ReconciliationTest extends TestCase
         CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
 
         $this->expectException(ValidationException::class);
-        app(RepairMissingCustomerCredit::class)->repair($operator, $deposit, 'missing-credit-posting');
+        app(RepairMissingCustomerCredit::class)->repair($operator, $deposit, 'missing_credit_posting');
     }
 
     public function test_reconciliation_surfaces_mis_scoped_postings_and_partial_reversals(): void
