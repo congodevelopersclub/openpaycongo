@@ -108,6 +108,18 @@ final class PaymentRequestTest extends TestCase
         }
     }
 
+    public function test_recovery_idempotently_posts_a_committed_deposit_when_queue_enqueue_was_lost(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        $deposit = Deposit::query()->create($this->depositAttributes($customer->id, 500));
+
+        $this->artisan('payment-requests:recover-credit')->assertExitCode(0);
+        $this->artisan('payment-requests:recover-credit')->assertExitCode(0);
+
+        self::assertSame(500, CustomerCredit::query()->where('customer_id', $customer->id)->where('currency', 'CDF')->value('available_minor'));
+        self::assertDatabaseCount('customer_credit_postings', 1);
+    }
+
     public function test_expired_requests_never_consume_later_credit_and_all_or_nothing_policy_does_not_partially_charge(): void
     {
         $customer = Customer::query()->create($this->customerAttributes());
