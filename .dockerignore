@@ -19,6 +19,8 @@ server/node_modules
 !.github/ISSUE_TEMPLATE/*
 !.github/ISSUE_TEMPLATE/bug_report.md
 !compose.yaml
+!scripts/
+!scripts/upgrade-quiescent.sh
 server/.env
 server/.env.*
 !server/.env.example
