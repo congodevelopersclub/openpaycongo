@@ -59,6 +59,11 @@ final class _Store implements SyncCursorStore {
   Future<void> save(SyncCursor cursor) async {
     value = cursor;
   }
+
+  @override
+  Future<void> clear() async {
+    value = null;
+  }
 }
 
 final class _ControlledContract implements SyncCursorContract {

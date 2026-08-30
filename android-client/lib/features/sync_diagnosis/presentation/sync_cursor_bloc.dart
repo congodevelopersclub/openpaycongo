@@ -8,6 +8,7 @@ final class SyncCursor {
 abstract interface class SyncCursorStore {
   Future<SyncCursor?> load();
   Future<void> save(SyncCursor cursor);
+  Future<void> clear();
 }
 
 /// A server contract seam. The application supplies the actual transport later.
@@ -129,12 +130,18 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
     return attempt;
   }
 
+  Future<void> _clear() {
+    final Future<void> attempt = _persistence.then((_) => store.clear());
+    _persistence = attempt.catchError((Object _) {});
+    return attempt;
+  }
+
   Future<void> _retry(
     SyncCursorRetryRequested event,
     Emitter<SyncCursorState> emit,
   ) async {
     telemetry.record(SyncCursorTelemetrySignal.retryRequested);
-    await _sync(const SyncCursorStarted(), emit);
+    await _sync(event, emit);
   }
 
   Future<void> _sync(
@@ -152,6 +159,10 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
       if (generation != _generation) return;
       final SyncCursor? next = reconciliation.cursor;
       if (next == null) {
+        if (current != null) {
+          await _clear();
+          if (generation != _generation) return;
+        }
         if (reconciliation.health == SyncCursorHealth.degraded) {
           emit(const SyncCursorDegraded(null));
           telemetry.record(SyncCursorTelemetrySignal.degraded);

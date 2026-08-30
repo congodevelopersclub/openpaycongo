@@ -153,6 +153,22 @@ void main() {
     await bloc.close();
   });
 
+  test(
+    'empty reconciliation clears a persisted cursor before restart',
+    () async {
+      final _Store store = _Store()..value = SyncCursor('cursor-old');
+      final SyncCursorBloc bloc = SyncCursorBloc(
+        store: store,
+        contract: _Contract(null),
+        telemetry: _Telemetry(),
+      );
+      bloc.add(const SyncCursorStarted());
+      await bloc.stream.firstWhere((state) => state is SyncCursorEmpty);
+      expect(store.value, isNull);
+      await bloc.close();
+    },
+  );
+
   test('unexpected contract errors are not mapped to offline', () async {
     final _ObservingBlocObserver observer = _ObservingBlocObserver();
     final BlocObserver previous = Bloc.observer;
@@ -186,6 +202,11 @@ final class _Store implements SyncCursorStore {
   Future<void> save(SyncCursor cursor) async {
     saves++;
     value = cursor;
+  }
+
+  @override
+  Future<void> clear() async {
+    value = null;
   }
 }
 
@@ -248,6 +269,9 @@ final class _UnexpectedStore implements SyncCursorStore {
 
   @override
   Future<void> save(SyncCursor cursor) async {}
+
+  @override
+  Future<void> clear() async {}
 }
 
 final class _FailFirstSaveStore extends _Store {

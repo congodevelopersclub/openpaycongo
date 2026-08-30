@@ -683,6 +683,9 @@ final class _SyncStore implements SyncCursorStore {
 
   @override
   Future<void> save(SyncCursor cursor) async {}
+
+  @override
+  Future<void> clear() async {}
 }
 
 final class _SyncContract implements SyncCursorContract {
