@@ -111,6 +111,8 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('OPENPAY_PASSPORT_KEYS_PATH=/run/secrets', $runner);
         self::assertStringContainsString('dst=/run/secrets,readonly', $runner);
         self::assertStringContainsString('mktemp -d', $runner);
+        self::assertStringContainsString('chmod 0755 "$passport_key_directory"', $runner);
+        self::assertStringContainsString('chmod 0444 /run/openpay-ci-keys/oauth-private.key /run/openpay-ci-keys/oauth-public.key', $runner);
         self::assertStringContainsString('openssl pkey -in /run/secrets/oauth-private.key -check -noout', $runner);
         self::assertStringContainsString('openssl pkey -pubin -in /run/secrets/oauth-public.key -noout', $runner);
         self::assertStringContainsString('php artisan config:show openpay > /tmp/openpay-openpay', $runner);

@@ -83,6 +83,7 @@ run_laravel_pr() (
   docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
   docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
   passport_key_directory="$(mktemp -d)"
+  chmod 0755 "$passport_key_directory"
   passport_private_key="$passport_key_directory/oauth-private.key"
   passport_public_key="$passport_key_directory/oauth-public.key"
   created_markers+=("$passport_private_key" "$passport_public_key")
