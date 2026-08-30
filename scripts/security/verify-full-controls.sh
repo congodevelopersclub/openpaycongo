@@ -30,7 +30,7 @@ fi
 
 result="$(mktemp)"
 failing_fast_gate="$(mktemp)"
-failure_artifacts="$(mktemp -d)"
+failure_artifacts="$(mktemp -d "${artifacts}/seeded-fast-gate.XXXXXX")"
 trap 'rm -f "${result}" "${failing_fast_gate}"; rm -rf "${failure_artifacts}"' EXIT
 
 if MSYS_NO_PATHCONV=1 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock:ro --volume "${trivy_cache}:/root/.cache/trivy" "${trivy_image}" \
@@ -49,14 +49,20 @@ fi
 cat "${result}"
 
 printf '%s\n' '#!/usr/bin/env bash' 'echo seeded-fast-gate-failure >&2' 'exit 42' >"${failing_fast_gate}"
-if OPENPAY_SECURITY_FAST_GATE="${failing_fast_gate}" OPENPAY_SECURITY_ARTIFACTS_DIR="${failure_artifacts}" \
-  bash "${root}/scripts/security/security-full.sh" >"${result}" 2>&1; then
-  echo 'Full security gate accepted a seeded fast-gate failure' >&2
+set +e
+OPENPAY_SECURITY_FAST_GATE="${failing_fast_gate}" OPENPAY_SECURITY_ARTIFACTS_DIR="${failure_artifacts}" \
+  bash "${root}/scripts/security/security-full.sh" >"${result}" 2>&1
+full_status=$?
+set -e
+
+if [ "${full_status}" -ne 42 ]; then
+  echo "Full security gate returned ${full_status}, not the seeded fast-gate status 42" >&2
   cat "${result}" >&2
   exit 1
 fi
 
 grep --quiet --fixed-strings 'seeded-fast-gate-failure' "${result}"
+grep --quiet --fixed-strings 'Fast security gate failed; retaining generated SBOMs before propagating its exit status' "${result}"
 for sbom in openpaycongo-server.cdx.json openpaycongo-android-client.cdx.json openpaycongo-fpm-production.cdx.json openpaycongo-nginx-production.cdx.json; do
   test -s "${failure_artifacts}/${sbom}"
 done

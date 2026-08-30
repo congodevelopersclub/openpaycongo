@@ -55,6 +55,9 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fullProofs, /vulnerable-composer/);
   assert.match(fullProofs, /seeded-fast-gate-failure/);
   assert.match(fullProofs, /OPENPAY_SECURITY_ARTIFACTS_DIR/);
+  assert.match(fullProofs, /full_status/);
+  assert.match(fullProofs, /-ne 42/);
+  assert.match(fullProofs, /retaining generated SBOMs/);
   assert.match(authorizationBoundary, /storage\/not-signed\?upload=true/);
   assert.match(authorizationBoundary, /assertForbidden\(\)/);
   assert.match(authorizationBoundary, /auth\.optional/);
@@ -86,7 +89,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(guide, /candidate-tag pushes/);
   assert.match(guide, /Repository governance issue #10/);
   assert.match(guide, /including any generated security artifacts present under it/);
-  assert.match(guide, /still generates all four SBOMs before returning that failure/);
+  assert.match(guide, /all four SBOMs before returning that exact failure status/);
   assert.match(guide, /Docker build context excludes `server\/\.env`/);
   assert.doesNotMatch(fast, /curl\s+.*https?:\/\//i);
 });
