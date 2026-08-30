@@ -152,6 +152,31 @@ final class OperationalAnalyticsFixtureTest extends TestCase
             ->assertExactJson(['secure' => true]);
     }
 
+    public function test_trusted_proxy_https_session_cookie_is_secure_http_only_and_lax(): void
+    {
+        config(['session.secure' => true]);
+
+        Route::middleware('web')->get('/_test/session-cookie', static function (Request $request) {
+            $request->session()->put('operational-cookie-test', true);
+
+            return response()->json(['status' => 'ok']);
+        });
+
+        $response = $this->withServerVariables([
+            'REMOTE_ADDR' => '127.0.0.1',
+            'HTTP_X_FORWARDED_PROTO' => 'https',
+        ])->getJson('/_test/session-cookie')
+            ->assertOk();
+
+        $cookie = collect($response->headers->getCookies())
+            ->first(static fn ($cookie): bool => $cookie->getName() === config('session.cookie'));
+
+        self::assertNotNull($cookie);
+        self::assertTrue($cookie->isSecure());
+        self::assertTrue($cookie->isHttpOnly());
+        self::assertSame('lax', $cookie->getSameSite());
+    }
+
     public function test_untrusted_forged_https_forwarding_is_not_recognized(): void
     {
         Route::get('/_test/untrusted-forwarded-scheme', static fn (Request $request) => ['secure' => $request->isSecure()]);

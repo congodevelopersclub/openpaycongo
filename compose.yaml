@@ -3,6 +3,7 @@ name: congo-openpay
 x-application-environment: &application-environment
   APP_ENV: production
   APP_DEBUG: "false"
+  SESSION_SECURE_COOKIE: "true"
   APP_KEY: ${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}
   DEPOSIT_LOOKUP_TOKEN_KEY: ${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}
   APP_URL: ${OPENPAY_APP_URL:-https://localhost}

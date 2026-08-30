@@ -49,7 +49,10 @@ Terminate TLS before the app with a maintained reverse proxy and certificate
 automation. Keep the app port private to that proxy, set
 `OPENPAY_APP_URL` to the public `https://` URL, and restrict PostgreSQL to the
 Compose network. Do not expose PostgreSQL or the unencrypted application port
-to the internet. nginx trusts forwarded headers from loopback only by default.
+to the internet. Production sets `SESSION_SECURE_COOKIE=true` for the shared
+PHP, queue, and scheduler environment, so a browser session requires this TLS
+terminator and is never sent over HTTP. nginx trusts forwarded headers from
+loopback only by default.
 If a TLS proxy needs forwarded-header support, set
 `OPENPAY_TRUSTED_PROXY_CIDRS` to a space-separated list containing only that
 proxy's exact CIDR addresses (for example, `172.30.0.2/32`). The safe default
