@@ -215,7 +215,7 @@ final class RecordProviderDeposit
 
         $lookupId = $this->resolveLookupId('customer_lookup', $transfer->organizationId, $digests);
 
-        return Customer::query()->createOrFirst(
+        $customer = Customer::query()->createOrFirst(
             ['organization_id' => $transfer->organizationId, 'private_lookup_id' => $lookupId],
             [
                 'private_lookup_digest' => $this->activeDigest($digests),
@@ -226,6 +226,20 @@ final class RecordProviderDeposit
                 'email' => $transfer->customerEmail,
             ],
         );
+
+        if (! $customer->wasRecentlyCreated) {
+            $customer->fill(array_filter([
+                'name' => $transfer->customerName,
+                'address' => $transfer->customerAddress,
+                'phone' => $transfer->customerPhone,
+                'email' => $transfer->customerEmail,
+            ], static fn (?string $value): bool => $value !== null));
+            if ($customer->isDirty()) {
+                $customer->save();
+            }
+        }
+
+        return $customer;
     }
 
     private function installation(ProviderTransfer $transfer): SourceInstallation

@@ -102,4 +102,57 @@ final class PiiEncryptionCastsTest extends TestCase
             self::assertDatabaseCount('deposits', 0);
         }
     }
+
+    public function test_existing_customer_receives_supplied_pii_without_erasing_omitted_values(): void
+    {
+        $action = app(RecordProviderDeposit::class);
+        $organizationId = '00000000-0000-4000-8000-000000000169';
+
+        $first = $action->record(new ProviderTransfer(
+            organizationId: $organizationId,
+            installationIdentifier: 'test-installation-169',
+            customerLookupIdentifier: 'test-existing-customer-169',
+            providerReference: 'test-existing-customer-first-169',
+            amountMinor: 12500,
+            currency: 'CDF',
+            providerOccurredAt: '2026-08-31T00:00:00Z',
+            senderIdentifier: null,
+            receiverIdentifier: null,
+        ));
+        $updated = $action->record(new ProviderTransfer(
+            organizationId: $organizationId,
+            installationIdentifier: 'test-installation-169',
+            customerLookupIdentifier: 'test-existing-customer-169',
+            providerReference: 'test-existing-customer-second-169',
+            amountMinor: 12500,
+            currency: 'CDF',
+            providerOccurredAt: '2026-08-31T00:00:00Z',
+            senderIdentifier: null,
+            receiverIdentifier: null,
+            customerName: 'test-existing-customer-name-169',
+            customerEmail: 'test-existing-customer-email-169',
+        ));
+        $preserved = $action->record(new ProviderTransfer(
+            organizationId: $organizationId,
+            installationIdentifier: 'test-installation-169',
+            customerLookupIdentifier: 'test-existing-customer-169',
+            providerReference: 'test-existing-customer-third-169',
+            amountMinor: 12500,
+            currency: 'CDF',
+            providerOccurredAt: '2026-08-31T00:00:00Z',
+            senderIdentifier: null,
+            receiverIdentifier: null,
+        ));
+
+        $customer = $preserved->deposit->customer->fresh();
+
+        self::assertSame($first->deposit->customer_id, $updated->deposit->customer_id);
+        self::assertSame($updated->deposit->customer_id, $preserved->deposit->customer_id);
+        self::assertSame('test-existing-customer-name-169', $customer->name);
+        self::assertSame('test-existing-customer-email-169', $customer->email);
+        self::assertArrayNotHasKey('name', $customer->toArray());
+        self::assertArrayNotHasKey('email', $customer->toArray());
+        self::assertStringNotContainsString('test-existing-customer-name-169', (string) $customer->getRawOriginal('name'));
+        self::assertStringNotContainsString('test-existing-customer-email-169', (string) $customer->getRawOriginal('email'));
+    }
 }
