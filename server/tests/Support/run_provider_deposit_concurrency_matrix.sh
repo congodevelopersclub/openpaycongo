@@ -35,7 +35,7 @@ reset_database() {
 }
 
 assert_state() {
-  docker run "${base_args[@]}" --env DEPOSIT_TEST_EXPECTED_DEPOSITS="$1" --env DEPOSIT_TEST_EXPECTED_LEDGER_ENTRIES="$2" --env DEPOSIT_TEST_EXPECTED_CREDIT_MINOR="$3" "$image" php tests/Support/assert_provider_deposit_state.php
+  docker run "${base_args[@]}" --env DEPOSIT_TEST_EXPECTED_DEPOSITS="$1" --env DEPOSIT_TEST_EXPECTED_LEDGER_ENTRIES="$2" --env DEPOSIT_TEST_EXPECTED_CREDIT_MINOR="$3" --env DEPOSIT_TEST_EXPECTED_CUSTOMERS="$4" --env DEPOSIT_TEST_EXPECTED_INSTALLATIONS="$5" "$image" php tests/Support/assert_provider_deposit_state.php
 }
 
 run_pair() {
@@ -46,6 +46,7 @@ run_pair() {
   local second_active="$5"
   local second_sender="$6"
   local second_reference="$7"
+  local second_customer="${8:-}"
   local barrier="$barrier_root/$scenario"
   local barrier_volume="openpaycongo-deposit-race-$$-$scenario"
   mkdir "$barrier"
@@ -54,7 +55,7 @@ run_pair() {
 
   docker run "${base_args[@]}" --volume "$barrier_volume:/barrier" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" --env DEPOSIT_TEST_BARRIER_DIRECTORY=//barrier --env DEPOSIT_TEST_WORKER=first "$image" php tests/Support/record_provider_deposit.php >"$barrier/first.out" 2>&1 &
   local first_pid=$!
-  docker run "${base_args[@]}" --volume "$barrier_volume:/barrier" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$second_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$second_active" --env DEPOSIT_TEST_BARRIER_DIRECTORY=//barrier --env DEPOSIT_TEST_WORKER=second --env DEPOSIT_TEST_SENDER_IDENTIFIER="$second_sender" --env DEPOSIT_TEST_PROVIDER_REFERENCE="$second_reference" "$image" php tests/Support/record_provider_deposit.php >"$barrier/second.out" 2>&1 &
+  docker run "${base_args[@]}" --volume "$barrier_volume:/barrier" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$second_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$second_active" --env DEPOSIT_TEST_BARRIER_DIRECTORY=//barrier --env DEPOSIT_TEST_WORKER=second --env DEPOSIT_TEST_SENDER_IDENTIFIER="$second_sender" --env DEPOSIT_TEST_PROVIDER_REFERENCE="$second_reference" --env DEPOSIT_TEST_CUSTOMER_IDENTIFIER="$second_customer" "$image" php tests/Support/record_provider_deposit.php >"$barrier/second.out" 2>&1 &
   local second_pid=$!
 
   for _ in $(seq 1 300); do
@@ -80,19 +81,21 @@ run_pair() {
   local expected_deposits=1
   local expected_entries=2
   local expected_credit=12500
+  local expected_customers=1
   if [[ "$second_reference" != "" ]]; then
     expected_deposits=2
     expected_entries=4
     expected_credit=25000
+    [[ "$second_customer" != "" ]] && expected_customers=2
   fi
-  assert_state "$expected_deposits" "$expected_entries" "$expected_credit"
+  assert_state "$expected_deposits" "$expected_entries" "$expected_credit" "$expected_customers" 1
   if [[ "$second_reference" != "" ]]; then
     docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
     docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$second_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$second_active" --env DEPOSIT_TEST_PROVIDER_REFERENCE="$second_reference" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
   elif [[ "$second_sender" == "" ]]; then
     docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
   fi
-  assert_state "$expected_deposits" "$expected_entries" "$expected_credit"
+  assert_state "$expected_deposits" "$expected_entries" "$expected_credit" "$expected_customers" 1
 }
 
 previous='{"previous":"previous-deposit-lookup-key-material-32"}'
@@ -107,3 +110,5 @@ reset_database
 run_pair mixed-previous-current-ring "$full_ring" previous "$full_ring" current '' ''
 reset_database
 run_pair fresh-customer-installation "$full_ring" current "$full_ring" current '' fresh-customer-installation-provider-reference
+reset_database
+run_pair shared-installation-distinct-customers "$full_ring" current "$full_ring" current '' shared-installation-second-provider-reference second-concurrency-customer
