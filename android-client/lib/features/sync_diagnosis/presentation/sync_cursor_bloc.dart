@@ -124,7 +124,9 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
   Future<void> _persistence = Future<void>.value();
 
   Future<void> _save(SyncCursor cursor) {
-    return _persistence = _persistence.then((_) => store.save(cursor));
+    final Future<void> attempt = _persistence.then((_) => store.save(cursor));
+    _persistence = attempt.catchError((Object _) {});
+    return attempt;
   }
 
   Future<void> _retry(

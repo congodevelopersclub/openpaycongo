@@ -137,6 +137,22 @@ void main() {
     await bloc.close();
   });
 
+  test('a failed save does not poison a later durable delivery', () async {
+    final _FailFirstSaveStore store = _FailFirstSaveStore();
+    final SyncCursorBloc bloc = SyncCursorBloc(
+      store: store,
+      contract: _Contract(null),
+      telemetry: _Telemetry(),
+    );
+    bloc.add(SyncCursorDeliveryReceived(SyncCursor('cursor-failed')));
+    await bloc.stream.firstWhere((state) => state is SyncCursorOffline);
+    bloc.add(SyncCursorDeliveryReceived(SyncCursor('cursor-recovered')));
+    await bloc.stream.firstWhere((state) => state is SyncCursorSynced);
+    expect(store.value?.value, 'cursor-recovered');
+    expect(store.saves, 2);
+    await bloc.close();
+  });
+
   test('unexpected contract errors are not mapped to offline', () async {
     final _ObservingBlocObserver observer = _ObservingBlocObserver();
     final BlocObserver previous = Bloc.observer;
@@ -232,6 +248,15 @@ final class _UnexpectedStore implements SyncCursorStore {
 
   @override
   Future<void> save(SyncCursor cursor) async {}
+}
+
+final class _FailFirstSaveStore extends _Store {
+  @override
+  Future<void> save(SyncCursor cursor) async {
+    saves++;
+    if (saves == 1) throw const SyncCursorFailure();
+    value = cursor;
+  }
 }
 
 final class _ObservingBlocObserver extends BlocObserver {
