@@ -21,7 +21,13 @@ abstract interface class PairingEnrollmentStore {
   Future<PairingEnrollment?> load();
   Future<void> save(PairingEnrollment enrollment);
   Future<void> clear();
+  Future<PairingEnrollmentCleanup?> loadCleanup();
+  Future<void> saveCleanup(PairingEnrollmentCleanup cleanup);
+  Future<void> clearCleanup();
 }
+
+/// Redacted durable cleanup authority; it contains no pairing material.
+enum PairingEnrollmentCleanup { cancelled, terminalError }
 
 /// Authenticated transport seam for ADR-004's pairing completion/status flow.
 ///
@@ -142,7 +148,7 @@ final class PairingEnrollmentBloc
   int _generation = 0;
   int? _activeOperation;
   Future<void> _persistence = Future<void>.value();
-  _CleanupTarget? _pendingCleanup;
+  PairingEnrollmentCleanup? _pendingCleanup;
 
   Future<void> _start(
     PairingEnrollmentStarted event,
@@ -153,7 +159,11 @@ final class PairingEnrollmentBloc
       return;
     }
     final int generation = _generation;
-    if (!await _resumeCleanupIfNeeded(generation, emit)) return;
+    final _CleanupResume cleanup = await _restoreAndResumeCleanup(
+      generation,
+      emit,
+    );
+    if (cleanup == _CleanupResume.failed) return;
     if (generation != _generation) return;
     await _run(emit, transport.begin, started: true);
   }
@@ -163,8 +173,13 @@ final class PairingEnrollmentBloc
     Emitter<PairingEnrollmentState> emit,
   ) async {
     final int cleanupGeneration = _generation;
-    if (!await _resumeCleanupIfNeeded(cleanupGeneration, emit)) return;
+    final _CleanupResume cleanup = await _restoreAndResumeCleanup(
+      cleanupGeneration,
+      emit,
+    );
+    if (cleanup == _CleanupResume.failed) return;
     if (cleanupGeneration != _generation) return;
+    if (cleanup == _CleanupResume.resumed) return;
     if (_activeOperation != null) {
       telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
       return;
@@ -186,8 +201,13 @@ final class PairingEnrollmentBloc
     Emitter<PairingEnrollmentState> emit,
   ) async {
     final int cleanupGeneration = _generation;
-    if (!await _resumeCleanupIfNeeded(cleanupGeneration, emit)) return;
+    final _CleanupResume cleanup = await _restoreAndResumeCleanup(
+      cleanupGeneration,
+      emit,
+    );
+    if (cleanup == _CleanupResume.failed) return;
     if (cleanupGeneration != _generation) return;
+    if (cleanup == _CleanupResume.resumed) return;
     if (_activeOperation != null) {
       telemetry.record(PairingEnrollmentTelemetry.duplicateIgnored);
       return;
@@ -265,7 +285,13 @@ final class PairingEnrollmentBloc
     final int generation = ++_generation;
     _activeOperation = null;
     telemetry.record(PairingEnrollmentTelemetry.cancelled);
-    _pendingCleanup = _CleanupTarget.cancelled;
+    if (!await _installCleanup(
+      PairingEnrollmentCleanup.cancelled,
+      generation,
+      emit,
+    )) {
+      return;
+    }
     await _completeCleanup(generation, emit);
   }
 
@@ -280,23 +306,57 @@ final class PairingEnrollmentBloc
     int generation,
     Emitter<PairingEnrollmentState> emit,
   ) async {
-    _pendingCleanup = _CleanupTarget.terminalError;
+    if (generation != _generation) return;
+    if (!await _installCleanup(
+      PairingEnrollmentCleanup.terminalError,
+      generation,
+      emit,
+    )) {
+      return;
+    }
     await _completeCleanup(generation, emit);
   }
 
-  Future<bool> _resumeCleanupIfNeeded(
+  Future<_CleanupResume> _restoreAndResumeCleanup(
     int generation,
     Emitter<PairingEnrollmentState> emit,
   ) async {
-    if (_pendingCleanup == null) return true;
-    return _completeCleanup(generation, emit);
+    if (_pendingCleanup == null) {
+      await _persistence;
+      if (generation != _generation) return _CleanupResume.failed;
+      try {
+        _pendingCleanup = await store.loadCleanup();
+      } on PairingEnrollmentPersistenceException {
+        _offlineIfCurrent(generation, emit);
+        return _CleanupResume.failed;
+      }
+    }
+    if (_pendingCleanup == null) return _CleanupResume.none;
+    return await _completeCleanup(generation, emit)
+        ? _CleanupResume.resumed
+        : _CleanupResume.failed;
+  }
+
+  Future<bool> _installCleanup(
+    PairingEnrollmentCleanup target,
+    int generation,
+    Emitter<PairingEnrollmentState> emit,
+  ) async {
+    _pendingCleanup = target;
+    try {
+      await _queue(() => store.saveCleanup(target));
+      return generation == _generation;
+    } on PairingEnrollmentPersistenceException {
+      _offlineIfCurrent(generation, emit);
+      return false;
+    }
   }
 
   Future<bool> _completeCleanup(
     int generation,
     Emitter<PairingEnrollmentState> emit,
   ) async {
-    final _CleanupTarget? target = _pendingCleanup;
+    final PairingEnrollmentCleanup? target = _pendingCleanup;
     if (target == null) return true;
     try {
       await transport.discardTerminal();
@@ -304,11 +364,13 @@ final class PairingEnrollmentBloc
       await _clear();
       if (generation != _generation) return false;
       if (_pendingCleanup != target) return false;
+      await _queue(store.clearCleanup);
+      if (generation != _generation) return false;
       _pendingCleanup = null;
       switch (target) {
-        case _CleanupTarget.cancelled:
+        case PairingEnrollmentCleanup.cancelled:
           emit(const PairingEnrollmentIdle());
-        case _CleanupTarget.terminalError:
+        case PairingEnrollmentCleanup.terminalError:
           emit(const PairingEnrollmentError());
           telemetry.record(PairingEnrollmentTelemetry.error);
       }
@@ -361,4 +423,4 @@ final class PairingEnrollmentBloc
   }
 }
 
-enum _CleanupTarget { cancelled, terminalError }
+enum _CleanupResume { none, resumed, failed }

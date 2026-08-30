@@ -708,6 +708,15 @@ final class _EnrollmentStore implements PairingEnrollmentStore {
 
   @override
   Future<void> save(PairingEnrollment enrollment) async {}
+
+  @override
+  Future<PairingEnrollmentCleanup?> loadCleanup() async => null;
+
+  @override
+  Future<void> saveCleanup(PairingEnrollmentCleanup cleanup) async {}
+
+  @override
+  Future<void> clearCleanup() async {}
 }
 
 final class _EnrollmentTransport implements PairingEnrollmentTransport {

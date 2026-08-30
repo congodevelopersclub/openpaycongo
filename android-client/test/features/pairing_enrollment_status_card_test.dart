@@ -111,6 +111,7 @@ PairingEnrollment _enrollment(PairingEnrollmentPhase phase) =>
 
 final class _Store implements PairingEnrollmentStore {
   PairingEnrollment? value;
+  PairingEnrollmentCleanup? cleanup;
 
   @override
   Future<void> clear() async => value = null;
@@ -120,6 +121,16 @@ final class _Store implements PairingEnrollmentStore {
 
   @override
   Future<void> save(PairingEnrollment enrollment) async => value = enrollment;
+
+  @override
+  Future<PairingEnrollmentCleanup?> loadCleanup() async => cleanup;
+
+  @override
+  Future<void> saveCleanup(PairingEnrollmentCleanup cleanup) async =>
+      this.cleanup = cleanup;
+
+  @override
+  Future<void> clearCleanup() async => cleanup = null;
 }
 
 final class _Transport implements PairingEnrollmentTransport {
