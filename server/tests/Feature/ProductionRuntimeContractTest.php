@@ -41,11 +41,13 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/node_modules', $dockerignore);
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
         self::assertStringContainsString('${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}', $compose);
+        self::assertStringContainsString('DEPOSIT_LOOKUP_TOKEN_KEYS: ${DEPOSIT_LOOKUP_TOKEN_KEYS:-}', $compose);
+        self::assertStringContainsString('DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID: ${DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID:-}', $compose);
         self::assertStringContainsString('SESSION_SECURE_COOKIE: "true"', $compose);
         self::assertMatchesRegularExpression('/postgres:16-alpine@sha256:[a-f0-9]{64}/', $compose);
         self::assertStringContainsString('nginx:', $compose);
         self::assertStringContainsString('dockerfile: server/docker/nginx.Dockerfile', $compose);
-        self::assertMatchesRegularExpression('/nginx:\n    build:\n      context: \.\n      dockerfile: server\/docker\/nginx\.Dockerfile\n      target: production/', $compose);
+        self::assertMatchesRegularExpression('/nginx:\r?\n    build:\r?\n      context: \.\r?\n      dockerfile: server\/docker\/nginx\.Dockerfile\r?\n      target: production/', $compose);
         self::assertStringContainsString('dockerfile: server/Dockerfile', $compose);
         self::assertStringContainsString('php:9000', $nginxTemplate);
         self::assertStringContainsString('location ~ /\\.(?!well-known(?:/|$))', $nginxTemplate);

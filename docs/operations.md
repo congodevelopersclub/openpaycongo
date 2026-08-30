@@ -113,13 +113,14 @@ docker compose exec -T postgres psql -U "${OPENPAY_DB_USERNAME:-openpay}" -d ope
 ```
 
 For an upgrade: take and verify a backup, build or pull the reviewed image,
-apply migrations with the one-shot service, restart the long-running services,
-and repeat the liveness and queue checks. Keep the previous reviewed image tag
-available for rollback; database rollbacks require a tested restore plan, not
-destructive down migrations.
+then use the checked-in quiescent upgrade script. It stops nginx, PHP, queue,
+and scheduler before migration; if migration fails it exits nonzero with every
+writer still stopped. Lookup-key migration and rotation are not rolling
+upgrades: old writers must never run against the migrated schema. Keep the
+previous reviewed image tag available for rollback; database rollbacks require
+a tested restore plan, not destructive down migrations.
 
 ```bash
 docker compose build --pull
-docker compose run --rm migrate
-docker compose up -d --force-recreate php nginx queue scheduler
+sh scripts/upgrade-quiescent.sh
 ```

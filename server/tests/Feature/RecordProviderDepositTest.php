@@ -3,15 +3,18 @@
 namespace Tests\Feature;
 
 use App\Deposits\DepositKind;
+use App\Deposits\ProviderDepositPreflightMissed;
 use App\Deposits\ProviderTransfer;
 use App\Deposits\RecordProviderDeposit;
 use App\Deposits\RecordResult;
 use App\Deposits\ReversalResult;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
+use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use LogicException;
@@ -57,6 +60,66 @@ final class RecordProviderDepositTest extends TestCase
         self::assertSame($first->deposit->id, $replay->deposit->id);
         self::assertDatabaseCount('deposits', 1);
         self::assertDatabaseCount('ledger_entries', 2);
+    }
+
+    public function test_a_new_provider_reference_dispatches_a_pii_free_preflight_marker_only_once(): void
+    {
+        Event::fake([ProviderDepositPreflightMissed::class]);
+
+        $action = app(RecordProviderDeposit::class);
+        $transfer = $this->transfer();
+        $action->record($transfer);
+        $action->record($transfer);
+
+        Event::assertDispatchedTimes(ProviderDepositPreflightMissed::class, 1);
+        Event::assertDispatched(ProviderDepositPreflightMissed::class, static function (ProviderDepositPreflightMissed $event): bool {
+            self::assertSame([], get_object_vars($event));
+
+            return true;
+        });
+    }
+
+    public function test_provider_identity_replays_after_lookup_key_rotation_without_a_second_credit(): void
+    {
+        config([
+            'deposits.lookup_token_key' => 'previous-deposit-lookup-key-material-32',
+            'deposits.lookup_token_keys' => ['previous' => 'previous-deposit-lookup-key-material-32'],
+            'deposits.lookup_token_active_key_id' => 'previous',
+        ]);
+
+        $transfer = $this->transfer();
+        $first = app(RecordProviderDeposit::class)->record($transfer);
+
+        config([
+            'deposits.lookup_token_key' => 'current-deposit-lookup-key-material-32',
+            'deposits.lookup_token_keys' => [
+                'current' => 'current-deposit-lookup-key-material-32',
+                'previous' => 'previous-deposit-lookup-key-material-32',
+            ],
+            'deposits.lookup_token_active_key_id' => 'current',
+        ]);
+
+        $replay = app(RecordProviderDeposit::class)->record($transfer);
+
+        self::assertSame(RecordResult::Replayed, $replay->outcome);
+        self::assertSame($first->deposit->id, $replay->deposit->id);
+        self::assertSame('previous', $replay->deposit->provider_reference_key_version);
+        self::assertSame('previous', $replay->deposit->idempotency_key_version);
+        self::assertDatabaseCount('deposits', 1);
+        self::assertDatabaseCount('ledger_entries', 2);
+    }
+
+    public function test_numeric_json_lookup_key_ids_are_normalized_to_strings(): void
+    {
+        config([
+            'deposits.lookup_token_keys' => '{"2026":"numeric-lookup-key-material-at-least-32"}',
+            'deposits.lookup_token_active_key_id' => '2026',
+        ]);
+
+        $result = app(RecordProviderDeposit::class)->record($this->transfer());
+
+        self::assertSame(RecordResult::Recorded, $result->outcome);
+        self::assertSame('2026', $result->deposit->provider_reference_key_version);
     }
 
     public function test_a_literal_z_provider_timestamp_is_accepted_and_canonicalized_to_utc(): void
@@ -243,6 +306,32 @@ final class RecordProviderDepositTest extends TestCase
             self::assertDatabaseCount('deposits', 0);
             config(['deposits.lookup_token_key' => 'testing-deposit-lookup-key-material-32']);
         }
+    }
+
+    public function test_an_invalid_lookup_key_ring_fails_before_any_database_write(): void
+    {
+        config([
+            'deposits.lookup_token_keys' => ['current' => 'too-short'],
+            'deposits.lookup_token_active_key_id' => 'current',
+        ]);
+
+        $this->expectException(LogicException::class);
+        try {
+            app(RecordProviderDeposit::class)->record($this->transfer());
+        } finally {
+            self::assertDatabaseCount('deposits', 0);
+        }
+    }
+
+    public function test_private_lookup_aliases_are_append_only(): void
+    {
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $alias = PrivateLookupAlias::query()->firstOrFail();
+
+        $this->assertImmutable(fn () => $alias->delete());
+
+        self::assertDatabaseHas('private_lookup_aliases', ['id' => $alias->id]);
+        self::assertSame($deposit->id, Deposit::query()->firstOrFail()->id);
     }
 
     public function test_an_unsupported_currency_is_rejected_before_any_database_write(): void

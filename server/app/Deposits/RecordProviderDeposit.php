@@ -5,6 +5,7 @@ namespace App\Deposits;
 use App\Models\Customer;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
+use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -21,8 +22,8 @@ final class RecordProviderDeposit
         $this->assertValid($transfer);
         $transfer = $this->normalise($transfer);
         $this->assertPortableProviderOccurrence($transfer->providerOccurredAt);
-        $providerReferenceDigest = $this->digest('provider_reference', $transfer->organizationId, $transfer->providerReference);
-        $idempotencyDigest = $this->digest('idempotency', $transfer->organizationId, json_encode([
+        $providerReferenceDigests = $this->digests('provider_reference', $transfer->organizationId, $transfer->providerReference);
+        $idempotencyDigests = $this->digests('idempotency', $transfer->organizationId, json_encode([
             'organization_id' => $transfer->organizationId,
             'installation_identifier' => $transfer->installationIdentifier,
             'customer_lookup_identifier' => $transfer->customerLookupIdentifier,
@@ -34,48 +35,67 @@ final class RecordProviderDeposit
             'receiver_identifier' => $transfer->receiverIdentifier,
         ], JSON_THROW_ON_ERROR));
 
-        $existing = $this->existing($transfer->organizationId, $providerReferenceDigest);
+        $existing = $this->existing($transfer->organizationId, $providerReferenceDigests);
         if ($existing !== null) {
-            return $this->replayResult($existing, $idempotencyDigest);
+            return $this->replayResult($existing, $idempotencyDigests);
         }
 
-        try {
-            return DB::transaction(function () use ($transfer, $providerReferenceDigest, $idempotencyDigest): RecordProviderDepositResult {
-                $existing = $this->existing($transfer->organizationId, $providerReferenceDigest, true);
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            try {
+                return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests): RecordProviderDepositResult {
+                    $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true);
+                    if ($existing !== null) {
+                        return $this->replayResult($existing, $idempotencyDigests);
+                    }
+
+                    event(new ProviderDepositPreflightMissed);
+
+                    $providerReferenceLookupId = $this->resolveLookupId('provider_reference', $transfer->organizationId, $providerReferenceDigests);
+                    $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true, $providerReferenceLookupId);
+                    if ($existing !== null) {
+                        return $this->replayResult($existing, $idempotencyDigests);
+                    }
+
+                    $customer = $this->customer($transfer);
+                    $installation = $this->installation($transfer);
+                    $receivedAt = CarbonImmutable::now();
+                    $deposit = Deposit::query()->create([
+                        'organization_id' => $transfer->organizationId,
+                        'customer_id' => $customer->id,
+                        'source_installation_id' => $installation->id,
+                        'kind' => DepositKind::ProviderCredit->value,
+                        'amount_minor' => $transfer->amountMinor,
+                        'currency' => strtoupper($transfer->currency),
+                        'provider_reference' => $transfer->providerReference,
+                        'provider_reference_digest' => $this->activeDigest($providerReferenceDigests),
+                        'provider_reference_lookup_id' => $providerReferenceLookupId,
+                        'provider_reference_key_version' => $this->activeKeyId(),
+                        'provider_occurred_at' => CarbonImmutable::parse($transfer->providerOccurredAt),
+                        'received_at' => $receivedAt,
+                        'sender_identifier' => $transfer->senderIdentifier,
+                        'receiver_identifier' => $transfer->receiverIdentifier,
+                        'idempotency_digest' => $this->activeDigest($idempotencyDigests),
+                        'idempotency_key_version' => $this->activeKeyId(),
+                    ]);
+                    $this->appendEntries($deposit, $receivedAt, false);
+
+                    return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
+                }, attempts: 3);
+            } catch (QueryException $exception) {
+                $existing = $this->existing($transfer->organizationId, $providerReferenceDigests);
                 if ($existing !== null) {
-                    return $this->replayResult($existing, $idempotencyDigest);
+                    return $this->replayResult($existing, $idempotencyDigests);
                 }
 
-                $customer = $this->customer($transfer);
-                $installation = $this->installation($transfer);
-                $receivedAt = CarbonImmutable::now();
-                $deposit = Deposit::query()->create([
-                    'organization_id' => $transfer->organizationId,
-                    'customer_id' => $customer->id,
-                    'source_installation_id' => $installation->id,
-                    'kind' => DepositKind::ProviderCredit->value,
-                    'amount_minor' => $transfer->amountMinor,
-                    'currency' => strtoupper($transfer->currency),
-                    'provider_reference' => $transfer->providerReference,
-                    'provider_reference_digest' => $providerReferenceDigest,
-                    'provider_occurred_at' => CarbonImmutable::parse($transfer->providerOccurredAt),
-                    'received_at' => $receivedAt,
-                    'sender_identifier' => $transfer->senderIdentifier,
-                    'receiver_identifier' => $transfer->receiverIdentifier,
-                    'idempotency_digest' => $idempotencyDigest,
-                ]);
-                $this->appendEntries($deposit, $receivedAt, false);
+                if ($attempt < 3 && $this->isRetryableTransactionFailure($exception)) {
+                    continue;
+                }
 
-                return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
-            }, attempts: 3);
-        } catch (QueryException $exception) {
-            $existing = $this->existing($transfer->organizationId, $providerReferenceDigest);
-            if ($existing !== null) {
-                return $this->replayResult($existing, $idempotencyDigest);
+                throw $exception;
             }
-
-            throw $exception;
         }
+
+        throw new LogicException('Provider deposit recording retry limit was exhausted.');
     }
 
     public function reverse(Deposit $deposit): ReverseProviderDepositResult
@@ -102,7 +122,8 @@ final class RecordProviderDeposit
                     'amount_minor' => $original->amount_minor,
                     'currency' => $original->currency,
                     'received_at' => $recordedAt,
-                    'idempotency_digest' => $this->digest('reversal', $original->organization_id, $original->id),
+                    'idempotency_digest' => $this->activeDigest($this->digests('reversal', $original->organization_id, $original->id)),
+                    'idempotency_key_version' => $this->activeKeyId(),
                 ]);
                 $this->appendEntries($reversal, $recordedAt, true);
 
@@ -189,41 +210,53 @@ final class RecordProviderDeposit
         }
     }
 
-    private function existing(string $organizationId, string $providerReferenceDigest, bool $lock = false): ?Deposit
+    /** @param array<string, string> $providerReferenceDigests */
+    private function existing(string $organizationId, array $providerReferenceDigests, bool $lock = false, ?string $lookupId = null): ?Deposit
     {
         $query = Deposit::query()
-            ->where('organization_id', $organizationId)
-            ->where('provider_reference_digest', $providerReferenceDigest);
+            ->where('organization_id', $organizationId);
+
+        $query->where(function ($query) use ($providerReferenceDigests, $lookupId): void {
+            $query->whereIn('provider_reference_digest', array_values($providerReferenceDigests));
+            if ($lookupId !== null) {
+                $query->orWhere('provider_reference_lookup_id', $lookupId);
+            }
+        });
 
         return $lock ? $query->lockForUpdate()->first() : $query->first();
     }
 
-    private function replayResult(Deposit $deposit, string $idempotencyDigest): RecordProviderDepositResult
+    /** @param array<string, string> $idempotencyDigests */
+    private function replayResult(Deposit $deposit, array $idempotencyDigests): RecordProviderDepositResult
     {
         return new RecordProviderDepositResult(
-            $deposit->idempotency_digest === $idempotencyDigest ? RecordResult::Replayed : RecordResult::Conflict,
+            in_array($deposit->idempotency_digest, $idempotencyDigests, true) ? RecordResult::Replayed : RecordResult::Conflict,
             $deposit,
         );
     }
 
     private function customer(ProviderTransfer $transfer): Customer
     {
-        $digest = $this->digest('customer_lookup', $transfer->organizationId, $transfer->customerLookupIdentifier);
+        $digests = $this->digests('customer_lookup', $transfer->organizationId, $transfer->customerLookupIdentifier);
 
-        return Customer::query()->firstOrCreate([
-            'organization_id' => $transfer->organizationId,
-            'private_lookup_digest' => $digest,
-        ]);
+        $lookupId = $this->resolveLookupId('customer_lookup', $transfer->organizationId, $digests);
+
+        return Customer::query()->createOrFirst(
+            ['organization_id' => $transfer->organizationId, 'private_lookup_id' => $lookupId],
+            ['private_lookup_digest' => $this->activeDigest($digests), 'private_lookup_key_version' => $this->activeKeyId()],
+        );
     }
 
     private function installation(ProviderTransfer $transfer): SourceInstallation
     {
-        $digest = $this->digest('installation_lookup', $transfer->organizationId, $transfer->installationIdentifier);
+        $digests = $this->digests('installation_lookup', $transfer->organizationId, $transfer->installationIdentifier);
 
-        return SourceInstallation::query()->firstOrCreate([
-            'organization_id' => $transfer->organizationId,
-            'installation_digest' => $digest,
-        ]);
+        $lookupId = $this->resolveLookupId('installation_lookup', $transfer->organizationId, $digests);
+
+        return SourceInstallation::query()->createOrFirst(
+            ['organization_id' => $transfer->organizationId, 'installation_lookup_id' => $lookupId],
+            ['installation_digest' => $this->activeDigest($digests), 'installation_key_version' => $this->activeKeyId()],
+        );
     }
 
     private function appendEntries(Deposit $deposit, CarbonImmutable $recordedAt, bool $reverse): void
@@ -244,18 +277,113 @@ final class RecordProviderDeposit
         }
     }
 
-    private function digest(string $purpose, string $organizationId, string $value): string
+    /** @param array<string, string> $digests */
+    private function resolveLookupId(string $purpose, string $organizationId, array $digests): string
     {
-        $key = config('deposits.lookup_token_key');
-        if (! is_string($key) || mb_strlen($key) < 32) {
-            throw new LogicException('Deposit lookup-token key is not configured.');
+        ksort($digests);
+        if ($digests === []) {
+            throw new LogicException('Deposit lookup-token key ring is not configured.');
         }
 
-        return hash_hmac('sha256', json_encode([
-            'version' => 'openpay.lookup.v1',
-            'purpose' => $purpose,
-            'organization_id' => $organizationId,
-            'value' => $value,
-        ], JSON_THROW_ON_ERROR), $key);
+        $lookupIds = PrivateLookupAlias::query()->where('organization_id', $organizationId)->where('purpose', $purpose)
+            ->whereIn('digest', array_values($digests))->pluck('lookup_id')->unique()->values();
+        if ($lookupIds->count() > 1) {
+            throw new LogicException('Deposit lookup aliases are inconsistent.');
+        }
+        $lookupId = $lookupIds->first() ?? (string) Str::uuid();
+        $createdWithoutExistingAlias = $lookupIds->isEmpty();
+
+        foreach ($digests as $index => $digest) {
+            $alias = PrivateLookupAlias::query()->createOrFirst(
+                ['organization_id' => $organizationId, 'purpose' => $purpose, 'digest' => $digest],
+                ['lookup_id' => $lookupId, 'created_at' => CarbonImmutable::now()],
+            );
+
+            if ($alias->lookup_id !== $lookupId) {
+                if ($index === array_key_first($digests) && $createdWithoutExistingAlias) {
+                    $lookupId = $alias->lookup_id;
+
+                    continue;
+                }
+
+                throw new LogicException('Deposit lookup aliases are inconsistent.');
+            }
+        }
+
+        return $lookupId;
+    }
+
+    private function isRetryableTransactionFailure(QueryException $exception): bool
+    {
+        $driverErrorCode = $exception->errorInfo[1] ?? null;
+
+        return in_array($exception->getCode(), ['23000', '23505'], true)
+            || (is_int($driverErrorCode) || is_string($driverErrorCode)) && (string) $driverErrorCode === '1020';
+    }
+
+    /** @return array<string, string> */
+    private function digests(string $purpose, string $organizationId, string $value): array
+    {
+        $digests = [];
+        foreach ($this->keyRing() as $keyId => $key) {
+            $digests[$keyId] = hash_hmac('sha256', json_encode([
+                'version' => 'openpay.lookup.v1',
+                'purpose' => $purpose,
+                'organization_id' => $organizationId,
+                'value' => $value,
+            ], JSON_THROW_ON_ERROR), $key);
+        }
+
+        return $digests;
+    }
+
+    /** @param array<string, string> $digests */
+    private function activeDigest(array $digests): string
+    {
+        return $digests[$this->activeKeyId()];
+    }
+
+    private function activeKeyId(): string
+    {
+        $configured = config('deposits.lookup_token_active_key_id');
+
+        return is_string($configured) && $configured !== '' ? $configured : 'v1';
+    }
+
+    /** @return array<string, string> */
+    private function keyRing(): array
+    {
+        $configured = config('deposits.lookup_token_keys');
+        if (is_string($configured) && $configured !== '') {
+            try {
+                $configured = json_decode($configured, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                throw new LogicException('Deposit lookup-token key ring is not configured.');
+            }
+        }
+
+        if ($configured === null || $configured === []) {
+            $configured = ['v1' => config('deposits.lookup_token_key')];
+        }
+
+        if (! is_array($configured)) {
+            throw new LogicException('Deposit lookup-token key ring is not configured.');
+        }
+
+        $ring = [];
+        foreach ($configured as $keyId => $key) {
+            $keyId = (string) $keyId;
+            if (preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $keyId) !== 1 || ! is_string($key) || mb_strlen($key) < 32) {
+                throw new LogicException('Deposit lookup-token key ring is not configured.');
+            }
+
+            $ring[$keyId] = $key;
+        }
+
+        if (! array_key_exists($this->activeKeyId(), $ring)) {
+            throw new LogicException('Deposit lookup-token key ring is not configured.');
+        }
+
+        return $ring;
     }
 }
