@@ -12,6 +12,8 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   const guide = await readFile(new URL('../docs/continuous-security-gate.md', import.meta.url), 'utf8');
   const gitleaksConfig = await readFile(new URL('../.gitleaks.toml', import.meta.url), 'utf8');
   const authorizationBoundary = await readFile(new URL('../server/tests/Feature/AuthorizationBoundaryTest.php', import.meta.url), 'utf8');
+  const dockerignore = await readFile(new URL('../.dockerignore', import.meta.url), 'utf8');
+  const serverDockerfile = await readFile(new URL('../server/Dockerfile', import.meta.url), 'utf8');
 
   for (const required of ['pull_request:', 'schedule:', 'release:', 'security-fast', 'security-full', 'workflow_dispatch:', 'timeout-minutes:', 'fetch-depth: 0']) {
     assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -45,7 +47,12 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.doesNotMatch(authorizationBoundary, /WithoutErrorHandler/);
   assert.match(await readFile(new URL('../scripts/security/verify-secret-scanner.sh', import.meta.url), 'utf8'), /seeded secret appended to a deterministic vector/);
   assert.doesNotMatch(authorizationBoundary, /file_put_contents|unlink|\.env/);
+  assert.match(dockerignore, /^server\/\.env$/m);
+  assert.doesNotMatch(serverDockerfile, /COPY\s+server\/\.env/);
+  assert.match(serverDockerfile, /FROM quality AS test[\s\S]*?cp \.env\.example \.env[\s\S]*?composer test/);
+  assert.match(serverDockerfile, /FROM dependencies AS security-authorization-proof[\s\S]*?cp \.env\.example \.env/);
   assert.match(guide, /fail-closed/);
   assert.match(guide, /release blocker/);
+  assert.match(guide, /Docker build context excludes `server\/\.env`/);
   assert.doesNotMatch(fast, /curl\s+.*https?:\/\//i);
 });

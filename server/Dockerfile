@@ -44,7 +44,10 @@ RUN composer dump-autoload --no-interaction --optimize \
 FROM quality AS test
 
 COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
-RUN composer test
+# This file exists only in the disposable test image. PHPUnit's explicit
+# environment overrides in phpunit.xml remain authoritative.
+RUN cp .env.example .env \
+    && composer test
 
 FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS production-dependencies
 
@@ -144,5 +147,5 @@ FROM dependencies AS security-authorization-proof
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
-RUN set -eu; composer dump-autoload --no-interaction --optimize; printf '%s\n' "Route::get('/security-gate-unprotected-fixture', static fn () => response()->noContent());" >> routes/web.php; set +e; output="$(php artisan test --filter=AuthorizationBoundaryTest 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
+RUN set -eu; cp .env.example .env; composer dump-autoload --no-interaction --optimize; printf '%s\n' "Route::get('/security-gate-unprotected-fixture', static fn () => response()->noContent());" >> routes/web.php; set +e; output="$(php artisan test --filter=AuthorizationBoundaryTest 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -ne 0 \
     && printf '%s\n' "$output" | grep -q 'security-gate-unprotected-fixture'

@@ -44,4 +44,5 @@ android-client/android/app/src/*
 !android-client/android/app/src/main/
 android-client/android/app/src/main/*
 !android-client/android/app/src/main/AndroidManifest.xml
+server/.env
 docs/node_modules
