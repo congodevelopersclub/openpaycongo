@@ -7,9 +7,9 @@ import '../../pairing/presentation/pairing_enrollment_status_card.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_bloc.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_card.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter/services.dart';
 
 import '../../sms_gateway/domain/sms_gateway.dart';
+import 'payment_inbox_bloc.dart';
 import '../../payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import '../../payment_outbox/presentation/payment_lifecycle_status_card.dart';
 import '../../payment_outbox/presentation/payment_request_lifecycle_bloc.dart';
@@ -26,6 +26,7 @@ final class PaymentInboxScreen extends StatefulWidget {
     this.paymentLifecycle,
     this.paymentRequestLifecycle,
     this.syncCursor,
+    this.inboxBloc,
     required this.gateway,
   });
   final SmsPermissionState smsPermissionState;
@@ -35,414 +36,225 @@ final class PaymentInboxScreen extends StatefulWidget {
   final PaymentLifecycleBloc? paymentLifecycle;
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final SyncCursorBloc? syncCursor;
+  final PaymentInboxBloc? inboxBloc;
   final SmsGatewayPort gateway;
   @override
   State<PaymentInboxScreen> createState() => _PaymentInboxScreenState();
 }
-
-enum _ReloadResult { authoritative, unknown }
-
-enum _TrustedRulesState { loading, authoritative, unknown }
 
 final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
   final TextEditingController _sender = TextEditingController();
   final TextEditingController _template = TextEditingController(
     text: '{amount} {currency} {reference}',
   );
-  List<SenderIdentity> _trustedSenders = const <SenderIdentity>[];
-  _TrustedRulesState _trustedRulesState = _TrustedRulesState.loading;
-  String? _setupError;
   bool _showSetup = false;
-  List<NativeSmsRecord> _nativeRecords = const <NativeSmsRecord>[];
-  NativeCaptureHealth? _nativeHealth;
-  String? _nativeError;
-  final Set<String> _busyNativeIds = <String>{};
+  late final PaymentInboxBloc _inboxBloc =
+      widget.inboxBloc ?? PaymentInboxBloc(gateway: widget.gateway);
+  late final bool _ownsInboxBloc = widget.inboxBloc == null;
 
   @override
   void initState() {
     super.initState();
-    _loadNativeInbox();
+    _inboxBloc.add(const PaymentInboxStarted());
   }
 
   @override
   void dispose() {
     _sender.dispose();
     _template.dispose();
+    if (_ownsInboxBloc) _inboxBloc.close();
     super.dispose();
-  }
-
-  Future<void> _saveRule() async {
-    final SenderIdentity? sender = SenderIdentity.fromOsMetadata(_sender.text);
-    final PaymentTemplate template = PaymentTemplate(_template.text.trim());
-    if (sender == null) {
-      setState(
-        () => _setupError =
-            'Use an exact E.164 number or 3-11 character capital ASCII sender ID.',
-      );
-      return;
-    }
-    if (!template.valid) {
-      setState(
-        () => _setupError =
-            'Template uses only {amount}, {currency}, {reference}.',
-      );
-      return;
-    }
-    final List<String> authoritative;
-    try {
-      authoritative = await widget.gateway.addTrustedSender(sender.value);
-    } on Object {
-      final _ReloadResult reload = await _loadNativeInbox();
-      if (mounted) {
-        setState(
-          () => _setupError = reload == _ReloadResult.authoritative
-              ? 'Rule outcome is unknown. Authoritative device rules were reloaded.'
-              : 'Rule outcome is unknown. Authoritative reload also failed.',
-        );
-      }
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _trustedSenders = _decodeTrustedSenders(authoritative);
-      _trustedRulesState = _TrustedRulesState.authoritative;
-      _setupError = null;
-      _showSetup = false;
-    });
-  }
-
-  Future<_ReloadResult> _loadNativeInbox() async {
-    final SmsGatewayPort gateway = widget.gateway;
-    if (mounted) {
-      setState(() => _trustedRulesState = _TrustedRulesState.loading);
-    }
-    try {
-      final List<String> storedSenders = await gateway.listTrustedSenders();
-      final List<SenderIdentity> trustedSenders = storedSenders
-          .map(SenderIdentity.fromOsMetadata)
-          .whereType<SenderIdentity>()
-          .toList(growable: false);
-      if (trustedSenders.length != storedSenders.length) {
-        throw const FormatException('invalid_native_trusted_sender');
-      }
-      final NativeCaptureHealth health = await gateway.captureHealth();
-      final bool blocksRead =
-          health.fault == CaptureFault.corruption ||
-          health.fault == CaptureFault.keyInvalidated ||
-          health.recoveryRequired;
-      final List<NativeSmsRecord> records = blocksRead
-          ? const <NativeSmsRecord>[]
-          : await gateway.drainInbox();
-      if (!mounted) {
-        return _ReloadResult.unknown;
-      }
-      setState(() {
-        _nativeHealth = health;
-        _nativeRecords = records;
-        _trustedSenders = trustedSenders;
-        _trustedRulesState = _TrustedRulesState.authoritative;
-        _nativeError = null;
-      });
-      return _ReloadResult.authoritative;
-    } on Object catch (error) {
-      if (mounted) {
-        setState(() {
-          _trustedRulesState = _TrustedRulesState.unknown;
-          _nativeError = _nativeFailureMessage(error);
-        });
-      }
-      return _ReloadResult.unknown;
-    }
-  }
-
-  Future<void> _commitNativeDecision(
-    NativeSmsRecord record,
-    NativeCaptureDecision decision,
-  ) async {
-    final SmsGatewayPort gateway = widget.gateway;
-    if (_busyNativeIds.contains(record.id)) {
-      return;
-    }
-    setState(() {
-      _busyNativeIds.add(record.id);
-      _nativeError = null;
-    });
-    try {
-      await gateway.commitInboxDecision(record.id, decision);
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _nativeRecords = _nativeRecords
-            .where((NativeSmsRecord item) => item.id != record.id)
-            .toList(growable: false);
-      });
-    } on Object {
-      final _ReloadResult reload = await _loadNativeInbox();
-      if (mounted) {
-        setState(() {
-          _nativeError = reload == _ReloadResult.authoritative
-              ? 'Decision outcome is unknown. Authoritative encrypted inbox was reloaded.'
-              : 'Decision outcome is unknown. Authoritative reload also failed.';
-          _busyNativeIds.remove(record.id);
-        });
-      }
-      return;
-    }
-    try {
-      final NativeCaptureHealth health = await gateway.captureHealth();
-      if (mounted) setState(() => _nativeHealth = health);
-    } on Object {
-      if (mounted) {
-        setState(
-          () => _nativeError =
-              'Decision was committed. Capture status refresh failed; retry status safely.',
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _busyNativeIds.remove(record.id));
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Scaffold(
-      backgroundColor: colors.surface,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => setState(() => _showSetup = !_showSetup),
-        icon: const Icon(Icons.tune_rounded),
-        label: const Text('Review rules'),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 112),
-          children: <Widget>[
-            Text(
-              'Payment Inbox',
-              style: Theme.of(context).textTheme.headlineMedium,
+    return BlocProvider<PaymentInboxBloc>.value(
+      value: _inboxBloc,
+      child: BlocConsumer<PaymentInboxBloc, PaymentInboxState>(
+        listener: (BuildContext context, PaymentInboxState state) {
+          if (state.feedback == PaymentInboxFeedback.ruleSaved && _showSetup) {
+            setState(() => _showSetup = false);
+          }
+        },
+        builder: (BuildContext context, PaymentInboxState inbox) {
+          final ColorScheme colors = Theme.of(context).colorScheme;
+          final NativeCaptureHealth? nativeHealth = inbox.health;
+          final String? nativeError = _feedbackMessage(inbox.feedback);
+          return Scaffold(
+            backgroundColor: colors.surface,
+            floatingActionButton: FloatingActionButton.extended(
+              onPressed: () => setState(() => _showSetup = !_showSetup),
+              icon: const Icon(Icons.tune_rounded),
+              label: const Text('Review rules'),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Evidence first. Nothing below is confirmed payment.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
-            ),
-            const SizedBox(height: 24),
-            _CaptureStatusCard(state: widget.smsPermissionState),
-            if (widget.pairingEnrollment
-                case final PairingEnrollmentBloc enrollment) ...<Widget>[
-              const SizedBox(height: 12),
-              BlocProvider<PairingEnrollmentBloc>.value(
-                value: enrollment,
-                child: const PairingEnrollmentStatusCard(),
-              ),
-            ],
-            if (widget.pairingSession
-                case final PairingSessionBloc pairing) ...<Widget>[
-              const SizedBox(height: 12),
-              BlocProvider<PairingSessionBloc>.value(
-                value: pairing,
-                child: const PairingSessionStatusCard(),
-              ),
-            ],
-            if (widget.syncCursor case final SyncCursorBloc sync) ...<Widget>[
-              const SizedBox(height: 12),
-              SyncCursorCard(bloc: sync),
-            ],
-            if (widget.paymentLifecycle
-                case final PaymentLifecycleBloc lifecycle) ...<Widget>[
-              const SizedBox(height: 12),
-              BlocProvider<PaymentLifecycleBloc>.value(
-                value: lifecycle,
-                child: const PaymentLifecycleStatusCard(),
-              ),
-            ],
-            if (widget.paymentRequestLifecycle
-                case final PaymentRequestLifecycleBloc lifecycle) ...<Widget>[
-              const SizedBox(height: 12),
-              BlocProvider<PaymentRequestLifecycleBloc>.value(
-                value: lifecycle,
-                child: const PaymentRequestLifecycleCard(),
-              ),
-            ],
-            if (_nativeHealth?.fault != null) ...<Widget>[
-              const SizedBox(height: 12),
-              _CaptureFaultCard(
-                fault: _nativeHealth!.fault!,
-                onOpenSettings: widget.gateway.openSettings,
-                onProbeStorage: _probeStorage,
-              ),
-            ],
-            if (_nativeHealth?.recoveryRequired == true) ...<Widget>[
-              const SizedBox(height: 12),
-              const _RecoveryRequiredCard(),
-            ],
-            if (_nativeHealth?.missed != null) ...<Widget>[
-              const SizedBox(height: 12),
-              _CaptureMissCard(signal: _nativeHealth!.missed!),
-            ],
-            if (_nativeError != null) ...<Widget>[
-              const SizedBox(height: 12),
-              _NativeErrorCard(
-                message: _nativeError!,
-                onRetry: () async {
-                  await _loadNativeInbox();
-                },
-              ),
-            ],
-            const SizedBox(height: 12),
-            _GemmaStatusCard(capability: widget.gemmaCapability),
-            if (_trustedRulesState == _TrustedRulesState.loading) ...<Widget>[
-              const SizedBox(height: 12),
-              const _TrustedRulesStateCard(
-                message: 'Loading authoritative trusted sender rules…',
-              ),
-            ],
-            if (_trustedRulesState == _TrustedRulesState.unknown) ...<Widget>[
-              const SizedBox(height: 12),
-              const _TrustedRulesStateCard(
-                message:
-                    'Trusted sender state is unknown. Automatic capture cannot be trusted until reload succeeds.',
-              ),
-            ],
-            if (_trustedRulesState == _TrustedRulesState.authoritative &&
-                _trustedSenders.isEmpty) ...<Widget>[
-              const SizedBox(height: 12),
-              const _NoTrustedSendersCard(),
-            ],
-            if (_trustedRulesState == _TrustedRulesState.authoritative &&
-                _trustedSenders.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 12),
-              _TrustedRuleStatus(
-                senders: _trustedSenders,
-                onRevoke: _revokeTrustedSender,
-                onClear: _clearTrustedSenders,
-              ),
-            ],
-            if (_showSetup) ...<Widget>[
-              const SizedBox(height: 20),
-              _SetupCard(
-                sender: _sender,
-                template: _template,
-                error: _setupError,
-                trustedSenders: _trustedSenders,
-                onSave: _saveRule,
-              ),
-            ],
-            const SizedBox(height: 28),
-            if (_nativeRecords.isNotEmpty) ...<Widget>[
-              Text(
-                'Captured securely',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Choose a durable review decision. The encrypted raw record is removed only after that decision commits.',
-              ),
-              const SizedBox(height: 10),
-              for (final NativeSmsRecord record in _nativeRecords)
-                _NativeSmsCard(
-                  record: record,
-                  busy: _busyNativeIds.contains(record.id),
-                  onReviewed: () => _commitNativeDecision(
-                    record,
-                    NativeCaptureDecision.reviewed,
+            body: SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 112),
+                children: <Widget>[
+                  Text(
+                    'Payment Inbox',
+                    style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                  onRejected: () => _confirmReject(record),
-                ),
-              const SizedBox(height: 24),
-            ],
-            if (_nativeRecords.isEmpty) const _EmptyReview(),
-          ],
-        ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Evidence first. Nothing below is confirmed payment.',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  _CaptureStatusCard(state: widget.smsPermissionState),
+                  if (widget.pairingEnrollment
+                      case final PairingEnrollmentBloc enrollment) ...<Widget>[
+                    const SizedBox(height: 12),
+                    BlocProvider<PairingEnrollmentBloc>.value(
+                      value: enrollment,
+                      child: const PairingEnrollmentStatusCard(),
+                    ),
+                  ],
+                  if (widget.pairingSession
+                      case final PairingSessionBloc pairing) ...<Widget>[
+                    const SizedBox(height: 12),
+                    BlocProvider<PairingSessionBloc>.value(
+                      value: pairing,
+                      child: const PairingSessionStatusCard(),
+                    ),
+                  ],
+                  if (widget.syncCursor
+                      case final SyncCursorBloc sync) ...<Widget>[
+                    const SizedBox(height: 12),
+                    SyncCursorCard(bloc: sync),
+                  ],
+                  if (widget.paymentLifecycle
+                      case final PaymentLifecycleBloc lifecycle) ...<Widget>[
+                    const SizedBox(height: 12),
+                    BlocProvider<PaymentLifecycleBloc>.value(
+                      value: lifecycle,
+                      child: const PaymentLifecycleStatusCard(),
+                    ),
+                  ],
+                  if (widget.paymentRequestLifecycle
+                      case final PaymentRequestLifecycleBloc
+                          lifecycle) ...<Widget>[
+                    const SizedBox(height: 12),
+                    BlocProvider<PaymentRequestLifecycleBloc>.value(
+                      value: lifecycle,
+                      child: const PaymentRequestLifecycleCard(),
+                    ),
+                  ],
+                  if (nativeHealth?.fault != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _CaptureFaultCard(
+                      fault: nativeHealth!.fault!,
+                      onOpenSettings: widget.gateway.openSettings,
+                      onProbeStorage: () async => _inboxBloc.add(
+                        const PaymentInboxStorageProbeRequested(),
+                      ),
+                    ),
+                  ],
+                  if (nativeHealth?.recoveryRequired == true) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const _RecoveryRequiredCard(),
+                  ],
+                  if (nativeHealth?.missed != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _CaptureMissCard(signal: nativeHealth!.missed!),
+                  ],
+                  if (nativeError != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _NativeErrorCard(
+                      message: nativeError,
+                      onRetry: () async {
+                        _inboxBloc.add(const PaymentInboxReloadRequested());
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  _GemmaStatusCard(capability: widget.gemmaCapability),
+                  if (inbox.authority ==
+                      PaymentInboxAuthority.loading) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const _TrustedRulesStateCard(
+                      message: 'Loading authoritative trusted sender rules…',
+                    ),
+                  ],
+                  if (inbox.authority ==
+                      PaymentInboxAuthority.unknown) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const _TrustedRulesStateCard(
+                      message:
+                          'Trusted sender state is unknown. Automatic capture cannot be trusted until reload succeeds.',
+                    ),
+                  ],
+                  if (inbox.authority == PaymentInboxAuthority.authoritative &&
+                      inbox.trustedSenders.isEmpty) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const _NoTrustedSendersCard(),
+                  ],
+                  if (inbox.authority == PaymentInboxAuthority.authoritative &&
+                      inbox.trustedSenders.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _TrustedRuleStatus(
+                      senders: inbox.trustedSenders,
+                      onRevoke: (SenderIdentity sender) async => _inboxBloc.add(
+                        PaymentInboxTrustedSenderRevoked(sender),
+                      ),
+                      onClear: () async => _inboxBloc.add(
+                        const PaymentInboxTrustedSendersCleared(),
+                      ),
+                    ),
+                  ],
+                  if (_showSetup) ...<Widget>[
+                    const SizedBox(height: 20),
+                    _SetupCard(
+                      sender: _sender,
+                      template: _template,
+                      error: _setupFeedbackMessage(inbox.feedback),
+                      trustedSenders: inbox.trustedSenders,
+                      onSave: () async => _inboxBloc.add(
+                        PaymentInboxTrustedSenderSaveRequested(
+                          sender: _sender.text,
+                          template: _template.text,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 28),
+                  if (inbox.authority == PaymentInboxAuthority.authoritative &&
+                      inbox.records.isNotEmpty) ...<Widget>[
+                    Text(
+                      'Captured securely',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Choose a durable review decision. The encrypted raw record is removed only after that decision commits.',
+                    ),
+                    const SizedBox(height: 10),
+                    for (final NativeSmsRecord record in inbox.records)
+                      _NativeSmsCard(
+                        record: record,
+                        busy: inbox.busyRecordIds.contains(record.id),
+                        onReviewed: () => _inboxBloc.add(
+                          PaymentInboxDecisionRequested(
+                            recordId: record.id,
+                            decision: NativeCaptureDecision.reviewed,
+                          ),
+                        ),
+                        onRejected: () => _confirmReject(record),
+                      ),
+                    const SizedBox(height: 24),
+                  ],
+                  if (inbox.authority == PaymentInboxAuthority.authoritative &&
+                      inbox.records.isEmpty)
+                    const _EmptyReview(),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
-  }
-
-  Future<void> _probeStorage() async {
-    try {
-      await widget.gateway.probeStorage();
-    } on Object {
-      final _ReloadResult reload = await _loadNativeInbox();
-      if (mounted) {
-        setState(
-          () => _nativeError = reload == _ReloadResult.authoritative
-              ? 'Storage probe outcome is unknown. Authoritative capture health was reloaded.'
-              : 'Storage probe outcome is unknown. Authoritative reload also failed.',
-        );
-      }
-      return;
-    }
-    await _loadNativeInbox();
-  }
-
-  Future<void> _revokeTrustedSender(SenderIdentity sender) async {
-    try {
-      final List<String> authoritative = await widget.gateway
-          .revokeTrustedSender(sender.value);
-      if (mounted) {
-        setState(() {
-          _trustedSenders = _decodeTrustedSenders(authoritative);
-          _trustedRulesState = _TrustedRulesState.authoritative;
-        });
-      }
-    } on Object {
-      final _ReloadResult reload = await _loadNativeInbox();
-      if (mounted) {
-        setState(
-          () => _nativeError = reload == _ReloadResult.authoritative
-              ? 'Rule revoke outcome is unknown. Authoritative rules were reloaded.'
-              : 'Rule revoke outcome is unknown. Authoritative reload also failed.',
-        );
-      }
-    }
-  }
-
-  Future<void> _clearTrustedSenders() async {
-    try {
-      final List<String> authoritative = await widget.gateway
-          .clearTrustedSenders();
-      if (mounted) {
-        setState(() {
-          _trustedSenders = _decodeTrustedSenders(authoritative);
-          _trustedRulesState = _TrustedRulesState.authoritative;
-        });
-      }
-    } on Object {
-      final _ReloadResult reload = await _loadNativeInbox();
-      if (mounted) {
-        setState(
-          () => _nativeError = reload == _ReloadResult.authoritative
-              ? 'Rule clear outcome is unknown. Authoritative rules were reloaded.'
-              : 'Rule clear outcome is unknown. Authoritative reload also failed.',
-        );
-      }
-    }
-  }
-
-  List<SenderIdentity> _decodeTrustedSenders(List<String> values) {
-    final List<SenderIdentity> decoded = values
-        .map(SenderIdentity.fromOsMetadata)
-        .whereType<SenderIdentity>()
-        .toList(growable: false);
-    if (decoded.length != values.length) {
-      throw const FormatException('invalid_native_trusted_sender');
-    }
-    return decoded;
-  }
-
-  String _nativeFailureMessage(Object error) {
-    if (error is PlatformException &&
-        error.code == 'legacy_migration_required') {
-      return 'Recovery required: legacy encrypted SMS data was detected. Use Android Clear storage or reinstall only after accepting local data loss.';
-    }
-    return 'Encrypted SMS inbox is unavailable. No message was acknowledged.';
   }
 
   Future<void> _confirmReject(NativeSmsRecord record) async {
@@ -468,9 +280,54 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
         ) ??
         false;
     if (confirmed && mounted) {
-      await _commitNativeDecision(record, NativeCaptureDecision.rejected);
+      _inboxBloc.add(
+        PaymentInboxDecisionRequested(
+          recordId: record.id,
+          decision: NativeCaptureDecision.rejected,
+        ),
+      );
     }
   }
+
+  String? _setupFeedbackMessage(
+    PaymentInboxFeedback feedback,
+  ) => switch (feedback) {
+    PaymentInboxFeedback.invalidSender =>
+      'Use an exact E.164 number or 3-11 character capital ASCII sender ID.',
+    PaymentInboxFeedback.invalidTemplate =>
+      'Template uses only {amount}, {currency}, {reference}.',
+    _ => null,
+  };
+
+  String? _feedbackMessage(PaymentInboxFeedback feedback) => switch (feedback) {
+    PaymentInboxFeedback.inboxUnavailable =>
+      'Encrypted SMS inbox is unavailable. No message was acknowledged.',
+    PaymentInboxFeedback.legacyRecoveryRequired =>
+      'Recovery required: legacy encrypted SMS data was detected. Use Android Clear storage or reinstall only after accepting local data loss.',
+    PaymentInboxFeedback.decisionReloaded =>
+      'Decision outcome is unknown. Authoritative encrypted inbox was reloaded.',
+    PaymentInboxFeedback.decisionReloadFailed =>
+      'Decision outcome is unknown. Authoritative reload also failed.',
+    PaymentInboxFeedback.decisionCommittedHealthUnknown =>
+      'Decision was committed. Capture status refresh failed; retry status safely.',
+    PaymentInboxFeedback.probeReloaded =>
+      'Storage probe outcome is unknown. Authoritative capture health was reloaded.',
+    PaymentInboxFeedback.probeReloadFailed =>
+      'Storage probe outcome is unknown. Authoritative reload also failed.',
+    PaymentInboxFeedback.ruleAddReloaded =>
+      'Rule outcome is unknown. Authoritative device rules were reloaded.',
+    PaymentInboxFeedback.ruleAddReloadFailed =>
+      'Rule outcome is unknown. Authoritative reload also failed.',
+    PaymentInboxFeedback.ruleRevokeReloadFailed =>
+      'Rule revoke outcome is unknown. Authoritative reload also failed.',
+    PaymentInboxFeedback.ruleClearReloadFailed =>
+      'Rule outcome is unknown. Authoritative reload also failed.',
+    PaymentInboxFeedback.ruleRevokeReloaded =>
+      'Rule revoke outcome is unknown. Authoritative rules were reloaded.',
+    PaymentInboxFeedback.ruleClearReloaded =>
+      'Rule clear outcome is unknown. Authoritative rules were reloaded.',
+    _ => null,
+  };
 }
 
 final class _CaptureStatusCard extends StatelessWidget {

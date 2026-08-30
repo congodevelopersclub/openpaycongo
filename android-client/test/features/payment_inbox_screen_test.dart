@@ -240,14 +240,18 @@ void main() {
     expect(find.text('Reject and remove raw SMS?'), findsOneWidget);
     await tester.tap(find.text('Confirm reject'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Trusted sender: AIRTEL'), findsOneWidget);
+    expect(find.textContaining('Trusted sender: AIRTEL'), findsNothing);
+    expect(
+      find.textContaining('Trusted sender state is unknown'),
+      findsOneWidget,
+    );
     expect(
       find.textContaining('Authoritative reload also failed'),
       findsOneWidget,
     );
   });
 
-  testWidgets('committed decision stays removed when health refresh fails', (
+  testWidgets('health refresh failure clears actionable evidence', (
     WidgetTester tester,
   ) async {
     final _FakeGateway gateway = _FakeGateway(
@@ -273,7 +277,11 @@ void main() {
     await tester.tap(find.text('Reviewed — remove raw SMS'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Trusted sender: AIRTEL'), findsNothing);
-    expect(find.textContaining('Decision was committed'), findsOneWidget);
+    expect(
+      find.textContaining('Trusted sender state is unknown'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Decision outcome is unknown'), findsOneWidget);
   });
 
   testWidgets('missed capture signal warns but does not block inbox', (
@@ -429,9 +437,10 @@ void main() {
       'Paid {amount} {currency} ref {reference}',
     );
     await tester.tap(find.text('Store trusted rule securely'));
+    await tester.pump(const Duration(milliseconds: 1));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('Authoritative reload also failed'),
+      find.textContaining('Trusted sender state is unknown'),
       findsOneWidget,
     );
   });
