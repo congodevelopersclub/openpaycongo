@@ -63,12 +63,12 @@ or copy it into a report.
 The exercise proves the sequence **private report → fix → regression test →
 advisory draft → patched-release decision**. It creates no real advisory,
 release, customer record, secret, or security finding.
-`.replaceAll('\n', '\r\n');
+`;
 }
 
 function assertClosedWorldTabletop(source, markdown) {
   assert.deepEqual(source, tabletopSource, 'tabletop JSON must contain only the approved synthetic schema and values');
-  assert.equal(markdown, renderTabletop(source), 'Markdown fixture must be the deterministic rendering of the closed-world JSON source');
+  assert.equal(markdown.replaceAll('\r\n', '\n'), renderTabletop(source), 'Markdown fixture must be the deterministic rendering of the closed-world JSON source');
 }
 
 const requiredTabletopFields = [
@@ -215,4 +215,5 @@ test('private-report tabletop fixture is synthetic, closed-world, and rendered d
   assert.throws(() => assertClosedWorldTabletop({ ...source, unknown: 'freeform prose' }, fixture));
   assert.throws(() => assertClosedWorldTabletop({ ...source, claim: 'https://example.invalid/?access_token=REALVALUE' }, fixture));
   assert.throws(() => assertClosedWorldTabletop(source, `${fixture}\nextra prose`));
+  assert.doesNotThrow(() => assertClosedWorldTabletop(source, fixture.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n')));
 });
