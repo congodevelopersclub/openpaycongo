@@ -2,12 +2,10 @@
 
 namespace Tests\Feature;
 
-use PHPUnit\Framework\Attributes\WithoutErrorHandler;
 use Tests\TestCase;
 
 final class AuthorizationBoundaryTest extends TestCase
 {
-    #[WithoutErrorHandler]
     public function test_every_runtime_route_is_reviewed_as_public_or_authorized(): void
     {
         $anonymousRoutes = [
@@ -55,7 +53,6 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertSame(7, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
-    #[WithoutErrorHandler]
     public function test_unsigned_framework_storage_routes_are_rejected(): void
     {
         $this->get('/storage/not-signed')->assertForbidden();

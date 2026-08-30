@@ -17,6 +17,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
     assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.match(workflow, /github\.event_name != 'pull_request'/);
+  assert.doesNotMatch(workflow, /actions\/cache|trivy-cache/);
   assert.match(fast, /gitleaks@sha256:/);
   assert.match(fast, /\.gitleaks\.toml/);
   assert.match(gitleaksConfig, /Exact deterministic public vector values/);
@@ -41,7 +42,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fullProofs, /vulnerable-composer/);
   assert.match(authorizationBoundary, /storage\/not-signed\?upload=true/);
   assert.match(authorizationBoundary, /assertForbidden\(\)/);
-  assert.match(authorizationBoundary, /#\[WithoutErrorHandler\]/);
+  assert.doesNotMatch(authorizationBoundary, /WithoutErrorHandler/);
   assert.match(await readFile(new URL('../scripts/security/verify-secret-scanner.sh', import.meta.url), 'utf8'), /seeded secret appended to a deterministic vector/);
   assert.doesNotMatch(authorizationBoundary, /file_put_contents|unlink|\.env/);
   assert.match(guide, /fail-closed/);
