@@ -20,8 +20,9 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
+        $expectedRevision = '2026_08_30_000000_create_deposit_ledger_tables';
         $this->getJson('/healthz')->assertOk()->assertExactJson(['status' => 'ok']);
-        $this->getJson('/readyz')
+        $ready = $this->getJson('/readyz')
             ->assertOk()
             ->assertHeader('cache-control', 'no-store, private')
             ->assertJson([
@@ -32,6 +33,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
                 'write_admission' => 'open',
                 'adapter' => 'sqlite',
                 'implementation' => 'congo-openpay-server',
+                'migration_revision' => $expectedRevision,
             ]);
         $originalConnection = config('database.default');
         config(['database.default' => 'pgsql']);
@@ -41,7 +43,12 @@ final class OperationalAnalyticsFixtureTest extends TestCase
         $version
             ->assertOk()
             ->assertHeader('cache-control', 'no-store, private')
-            ->assertJson(['adapter' => 'pgsql']);
+            ->assertJson([
+                'adapter' => 'pgsql',
+                'migration_revision' => $expectedRevision,
+            ]);
+
+        self::assertSame($ready->json('migration_revision'), $version->json('migration_revision'));
     }
 
     public function test_projection_dependency_failure_closes_readiness(): void
@@ -127,6 +134,10 @@ final class OperationalAnalyticsFixtureTest extends TestCase
                 'projection' => 'failed',
                 'write_admission' => 'closed',
             ]);
+
+        $this->getJson('/version')
+            ->assertOk()
+            ->assertJson(['migration_revision' => '2026_08_30_000000_create_deposit_ledger_tables']);
     }
 
     public function test_trusted_proxy_https_forwarding_is_recognized(): void

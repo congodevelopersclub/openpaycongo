@@ -19,12 +19,8 @@ final readonly class LaravelMigrationReadiness implements MigrationReadiness
             }
 
             $ran = $this->migrator->getRepository()->getRan();
-            $expected = array_map(
-                static fn (string $path): string => pathinfo($path, PATHINFO_FILENAME),
-                glob(database_path('migrations/*.php')) ?: [],
-            );
+            $expected = $this->expectedMigrations();
 
-            sort($expected);
             sort($ran);
 
             return $expected === $ran ? 'current' : 'pending';
@@ -35,8 +31,21 @@ final readonly class LaravelMigrationReadiness implements MigrationReadiness
 
     public function revision(): string
     {
-        $ran = $this->migrator->getRepository()->getRan();
+        $expected = $this->expectedMigrations();
 
-        return $ran === [] ? 'none' : end($ran);
+        return $expected === [] ? 'none' : end($expected);
+    }
+
+    /** @return list<string> */
+    private function expectedMigrations(): array
+    {
+        $expected = array_map(
+            static fn (string $path): string => pathinfo($path, PATHINFO_FILENAME),
+            glob(database_path('migrations/*.php')) ?: [],
+        );
+
+        sort($expected);
+
+        return $expected;
     }
 }
