@@ -2,21 +2,16 @@
 
 declare(strict_types=1);
 
+use App\Operations\AssessReadiness;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/healthz', static fn () => response()->json(['status' => 'ok']));
 
-Route::get('/readyz', static fn () => response()->json([
-    'datastore' => 'ok',
-    'migration' => 'pending',
-    'topology' => 'unsupported',
-    'projection' => 'failed',
-    'write_admission' => 'closed',
-    'contract_version' => 'unimplemented',
-    'migration_revision' => 'unimplemented',
-    'adapter' => 'sqlite',
-    'implementation' => 'congo-openpay-server',
-], 503, ['cache-control' => 'no-store']));
+Route::get('/readyz', static function (AssessReadiness $readiness) {
+    $status = $readiness->assess();
+
+    return response()->json($status['body'], $status['status'], ['cache-control' => 'no-store']);
+});
 
 Route::get('/version', static fn () => response()->json([
     'build' => 'dev',
