@@ -40,47 +40,55 @@ final class RecordProviderDeposit
             return $this->replayResult($existing, $idempotencyDigests);
         }
 
-        try {
-            return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests): RecordProviderDepositResult {
-                $providerReferenceLookupId = $this->resolveLookupId('provider_reference', $transfer->organizationId, $providerReferenceDigests);
-                $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true, $providerReferenceLookupId);
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            try {
+                return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests): RecordProviderDepositResult {
+                    $providerReferenceLookupId = $this->resolveLookupId('provider_reference', $transfer->organizationId, $providerReferenceDigests);
+                    $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true, $providerReferenceLookupId);
+                    if ($existing !== null) {
+                        return $this->replayResult($existing, $idempotencyDigests);
+                    }
+
+                    $customer = $this->customer($transfer);
+                    $installation = $this->installation($transfer);
+                    $receivedAt = CarbonImmutable::now();
+                    $deposit = Deposit::query()->create([
+                        'organization_id' => $transfer->organizationId,
+                        'customer_id' => $customer->id,
+                        'source_installation_id' => $installation->id,
+                        'kind' => DepositKind::ProviderCredit->value,
+                        'amount_minor' => $transfer->amountMinor,
+                        'currency' => strtoupper($transfer->currency),
+                        'provider_reference' => $transfer->providerReference,
+                        'provider_reference_digest' => $this->activeDigest($providerReferenceDigests),
+                        'provider_reference_lookup_id' => $providerReferenceLookupId,
+                        'provider_reference_key_version' => $this->activeKeyId(),
+                        'provider_occurred_at' => CarbonImmutable::parse($transfer->providerOccurredAt),
+                        'received_at' => $receivedAt,
+                        'sender_identifier' => $transfer->senderIdentifier,
+                        'receiver_identifier' => $transfer->receiverIdentifier,
+                        'idempotency_digest' => $this->activeDigest($idempotencyDigests),
+                        'idempotency_key_version' => $this->activeKeyId(),
+                    ]);
+                    $this->appendEntries($deposit, $receivedAt, false);
+
+                    return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
+                }, attempts: 3);
+            } catch (QueryException $exception) {
+                $existing = $this->existing($transfer->organizationId, $providerReferenceDigests);
                 if ($existing !== null) {
                     return $this->replayResult($existing, $idempotencyDigests);
                 }
 
-                $customer = $this->customer($transfer);
-                $installation = $this->installation($transfer);
-                $receivedAt = CarbonImmutable::now();
-                $deposit = Deposit::query()->create([
-                    'organization_id' => $transfer->organizationId,
-                    'customer_id' => $customer->id,
-                    'source_installation_id' => $installation->id,
-                    'kind' => DepositKind::ProviderCredit->value,
-                    'amount_minor' => $transfer->amountMinor,
-                    'currency' => strtoupper($transfer->currency),
-                    'provider_reference' => $transfer->providerReference,
-                    'provider_reference_digest' => $this->activeDigest($providerReferenceDigests),
-                    'provider_reference_lookup_id' => $providerReferenceLookupId,
-                    'provider_reference_key_version' => $this->activeKeyId(),
-                    'provider_occurred_at' => CarbonImmutable::parse($transfer->providerOccurredAt),
-                    'received_at' => $receivedAt,
-                    'sender_identifier' => $transfer->senderIdentifier,
-                    'receiver_identifier' => $transfer->receiverIdentifier,
-                    'idempotency_digest' => $this->activeDigest($idempotencyDigests),
-                    'idempotency_key_version' => $this->activeKeyId(),
-                ]);
-                $this->appendEntries($deposit, $receivedAt, false);
+                if ($attempt < 3 && $this->isUniqueConstraintViolation($exception)) {
+                    continue;
+                }
 
-                return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
-            }, attempts: 3);
-        } catch (QueryException $exception) {
-            $existing = $this->existing($transfer->organizationId, $providerReferenceDigests);
-            if ($existing !== null) {
-                return $this->replayResult($existing, $idempotencyDigests);
+                throw $exception;
             }
-
-            throw $exception;
         }
+
+        throw new LogicException('Provider deposit recording retry limit was exhausted.');
     }
 
     public function reverse(Deposit $deposit): ReverseProviderDepositResult
@@ -296,6 +304,11 @@ final class RecordProviderDeposit
         }
 
         return $lookupId;
+    }
+
+    private function isUniqueConstraintViolation(QueryException $exception): bool
+    {
+        return in_array($exception->getCode(), ['23000', '23505'], true);
     }
 
     /** @return array<string, string> */

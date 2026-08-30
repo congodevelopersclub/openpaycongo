@@ -134,11 +134,15 @@ jobs:
           MYSQL_USER: openpay
           MYSQL_PASSWORD: openpay
           MYSQL_ROOT_PASSWORD: root-openpay
+          MARIADB_DATABASE: openpaycongo
+          MARIADB_USER: openpay
+          MARIADB_PASSWORD: openpay
+          MARIADB_ROOT_PASSWORD: root-openpay
         ports:
           - 5432:5432
           - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U openpay -d openpaycongo || mysqladmin ping -h localhost -uopenpay -popenpay"
+          --health-cmd "pg_isready -U openpay -d openpaycongo || mysqladmin ping -h localhost -uroot -proot-openpay"
           --health-interval 10s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
