@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
         env:
           POSTGRES_DB: openpaycongo
           POSTGRES_USER: openpay
@@ -59,6 +59,16 @@ jobs:
           --env DB_USERNAME=openpay
           --env DB_PASSWORD=openpay
           openpaycongo-server-postgres php artisan migrate:fresh --force
+      - name: Assert reversal constraint identities
+        run: |
+          docker run --rm --network host --env PGPASSWORD=openpay postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 \
+            psql --host=127.0.0.1 --port=5432 --username=openpay --dbname=openpaycongo --tuples-only --no-align \
+            --command "select constraint_name || ':' || constraint_type from information_schema.table_constraints where table_schema = 'public' and table_name = 'deposits' and constraint_name in ('deposits_reverses_deposit_id_foreign', 'deposits_reverses_deposit_id_unique') order by constraint_name" \
+            | grep -Fx 'deposits_reverses_deposit_id_foreign:FOREIGN KEY'
+          docker run --rm --network host --env PGPASSWORD=openpay postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 \
+            psql --host=127.0.0.1 --port=5432 --username=openpay --dbname=openpaycongo --tuples-only --no-align \
+            --command "select constraint_name || ':' || constraint_type from information_schema.table_constraints where table_schema = 'public' and table_name = 'deposits' and constraint_name in ('deposits_reverses_deposit_id_foreign', 'deposits_reverses_deposit_id_unique') order by constraint_name" \
+            | grep -Fx 'deposits_reverses_deposit_id_unique:UNIQUE'
 
   flutter:
     runs-on: ubuntu-latest
