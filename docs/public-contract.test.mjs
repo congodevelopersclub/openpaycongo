@@ -24,6 +24,8 @@ const postgresClientImages = (job) => {
 
   for (const line of lines) {
     assert.match(line.trimStart(), /^docker (?:build|run) /, `noncanonical Docker invocation: ${line.trim()}`);
+    assert.equal((line.match(/\bdocker\b/g) ?? []).length, 1, `multiple Docker invocations: ${line.trim()}`);
+    assert.doesNotMatch(line, /[;&|]/, `chained Docker invocation: ${line.trim()}`);
   }
 
   return lines
@@ -107,6 +109,12 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
     `if true; then docker run --rm ${postgresImage} \\; fi`,
   ]) {
     assert.throws(() => postgresClientImages({ steps: [{ run: invocation }] }), /noncanonical Docker invocation/);
+  }
+  for (const invocation of [
+    `docker run --rm ${postgresImage} \\; docker run --rm postgres:16-alpine \\`,
+    `docker run --rm ${postgresImage} \\ && docker run --rm postgres:16-alpine \\`,
+  ]) {
+    assert.throws(() => postgresClientImages({ steps: [{ run: invocation }] }), /multiple Docker invocations|chained Docker invocation/);
   }
   assert.match(runs, /deposits_reverses_deposit_id_foreign:FOREIGN KEY/);
   assert.match(runs, /deposits_reverses_deposit_id_unique:UNIQUE/);
