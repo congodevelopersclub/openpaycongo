@@ -278,6 +278,40 @@ void main() {
   });
 
   test(
+    'close fails closed after a cleanup-marker write failure during recovery',
+    () async {
+      final _FailOnceCleanupStore store = _FailOnceCleanupStore()
+        ..value = _pending();
+      final _DeferredRecoveryTransport transport = _DeferredRecoveryTransport();
+      final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+        store: store,
+        transport: transport,
+        telemetry: _Telemetry(),
+      );
+
+      bloc.add(const PairingEnrollmentRecovered());
+      await transport.recoverEntered.future;
+      final Future<void> closed = bloc.close();
+      transport.releaseRecover.complete(_pending());
+      await closed;
+
+      expect(transport.discardCalls, 1);
+      expect(store.value, isNull);
+      final _CountingTransport restartedTransport = _CountingTransport();
+      final PairingEnrollmentBloc restarted = PairingEnrollmentBloc(
+        store: store,
+        transport: restartedTransport,
+        telemetry: _Telemetry(),
+      );
+      restarted.add(const PairingEnrollmentRecovered());
+      await Future<void>.delayed(Duration.zero);
+      expect(restarted.state, isA<PairingEnrollmentIdle>());
+      expect(restartedTransport.calls, 0);
+      await restarted.close();
+    },
+  );
+
+  test(
     'close drains a blocked save and leaves no enrollment to recover',
     () async {
       final _DeferredSaveStore store = _DeferredSaveStore();
@@ -359,7 +393,7 @@ void main() {
     );
     bloc.add(const PairingEnrollmentCancelled());
     await offline;
-    expect(transport.discardCalls, 0);
+    expect(transport.discardCalls, 1);
     expect(store.value, isNull);
 
     final Future<PairingEnrollmentState> idle = bloc.stream.firstWhere(
@@ -367,7 +401,7 @@ void main() {
     );
     bloc.add(const PairingEnrollmentRetryRequested());
     await idle;
-    expect(transport.discardCalls, 1);
+    expect(transport.discardCalls, 2);
     expect(store.value, isNull);
     await bloc.close();
   });
@@ -375,9 +409,10 @@ void main() {
   test('failed cleanup marker fails closed across process restart', () async {
     final _FailOnceCleanupStore store = _FailOnceCleanupStore()
       ..value = _pending();
+    final _CountingTransport firstTransport = _CountingTransport();
     final PairingEnrollmentBloc first = PairingEnrollmentBloc(
       store: store,
-      transport: _CountingTransport(),
+      transport: firstTransport,
       telemetry: _Telemetry(),
     );
     final Future<PairingEnrollmentState> offline = first.stream.firstWhere(
@@ -386,18 +421,84 @@ void main() {
     first.add(const PairingEnrollmentCancelled());
     await offline;
     expect(store.value, isNull);
+    expect(firstTransport.discardCalls, 1);
     await first.close();
 
+    final _CountingTransport restartedTransport = _CountingTransport();
     final PairingEnrollmentBloc restarted = PairingEnrollmentBloc(
       store: store,
-      transport: _CountingTransport(),
+      transport: restartedTransport,
       telemetry: _Telemetry(),
     );
     restarted.add(const PairingEnrollmentRecovered());
     await Future<void>.delayed(Duration.zero);
     expect(restarted.state, isA<PairingEnrollmentIdle>());
+    expect(restartedTransport.calls, 0);
+    expect(restartedTransport.discardCalls, 0);
     await restarted.close();
   });
+
+  test(
+    'stale failed cleanup fallback cannot clear or dispose newer authority',
+    () async {
+      final _DeferredFailingCleanupStore store = _DeferredFailingCleanupStore()
+        ..value = _pending();
+      final _CountingTransport transport = _CountingTransport();
+      final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+        store: store,
+        transport: transport,
+        telemetry: _Telemetry(),
+      );
+
+      bloc.add(const PairingEnrollmentCancelled());
+      await store.firstCleanupSaveEntered.future;
+      final Future<PairingEnrollmentState> idle = bloc.stream.firstWhere(
+        (PairingEnrollmentState state) => state is PairingEnrollmentIdle,
+      );
+      bloc.add(const PairingEnrollmentCancelled());
+      store.releaseFirstCleanupFailure.completeError(
+        const PairingEnrollmentPersistenceException(),
+      );
+      await idle;
+
+      expect(store.clearCalls, 1);
+      expect(transport.discardCalls, 1);
+      expect(store.value, isNull);
+      await bloc.close();
+    },
+  );
+
+  test(
+    'start cannot pass a deferred failed cancellation-marker write',
+    () async {
+      final _DeferredFailingCleanupStore store = _DeferredFailingCleanupStore()
+        ..value = _pending();
+      final _CountingTransport transport = _CountingTransport();
+      final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+        store: store,
+        transport: transport,
+        telemetry: _Telemetry(),
+      );
+      final Future<PairingEnrollmentState> offline = bloc.stream.firstWhere(
+        (PairingEnrollmentState state) => state is PairingEnrollmentOffline,
+      );
+
+      bloc.add(const PairingEnrollmentCancelled());
+      await store.firstCleanupSaveEntered.future;
+      bloc.add(const PairingEnrollmentStarted());
+      await Future<void>.delayed(Duration.zero);
+      store.releaseFirstCleanupFailure.completeError(
+        const PairingEnrollmentPersistenceException(),
+      );
+      await offline;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(transport.calls, 0);
+      expect(transport.discardCalls, 1);
+      expect(store.value, isNull);
+      await bloc.close();
+    },
+  );
 
   test(
     'overlapping cancellation cleanup serializes transport disposal',
@@ -757,6 +858,52 @@ final class _FailOnceCleanupStore extends _Store {
   }
 }
 
+final class _DeferredRecoveryTransport implements PairingEnrollmentTransport {
+  final Completer<void> recoverEntered = Completer<void>();
+  final Completer<PairingEnrollment> releaseRecover =
+      Completer<PairingEnrollment>();
+  int discardCalls = 0;
+
+  @override
+  Future<PairingEnrollment> begin() async => _pending();
+
+  @override
+  Future<PairingEnrollment> recover(PairingEnrollment enrollment) {
+    recoverEntered.complete();
+    return releaseRecover.future;
+  }
+
+  @override
+  Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
+      enrollment;
+
+  @override
+  Future<void> discardTerminal() async => discardCalls++;
+}
+
+final class _DeferredFailingCleanupStore extends _Store {
+  final Completer<void> firstCleanupSaveEntered = Completer<void>();
+  final Completer<void> releaseFirstCleanupFailure = Completer<void>();
+  int saveCleanupCalls = 0;
+  int clearCalls = 0;
+
+  @override
+  Future<void> saveCleanup(PairingEnrollmentCleanup cleanup) async {
+    saveCleanupCalls++;
+    if (saveCleanupCalls == 1) {
+      firstCleanupSaveEntered.complete();
+      await releaseFirstCleanupFailure.future;
+    }
+    await super.saveCleanup(cleanup);
+  }
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    await super.clear();
+  }
+}
+
 final class _FlakyDiscardTransport implements PairingEnrollmentTransport {
   int beginCalls = 0;
   int discardCalls = 0;
@@ -853,6 +1000,7 @@ final class _UnexpectedDiscardTransport implements PairingEnrollmentTransport {
 
 final class _CountingTransport implements PairingEnrollmentTransport {
   int calls = 0;
+  int discardCalls = 0;
 
   @override
   Future<PairingEnrollment> begin() async {
@@ -873,7 +1021,7 @@ final class _CountingTransport implements PairingEnrollmentTransport {
   }
 
   @override
-  Future<void> discardTerminal() async {}
+  Future<void> discardTerminal() async => discardCalls++;
 }
 
 final class _UnexpectedLoadStore implements PairingEnrollmentStore {

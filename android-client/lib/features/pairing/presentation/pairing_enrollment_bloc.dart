@@ -298,16 +298,21 @@ final class PairingEnrollmentBloc
     final int generation = ++_generation;
     final Future<void>? activeWork = _activeWork;
     telemetry.record(PairingEnrollmentTelemetry.cancelled);
-    if (activeWork != null) await activeWork;
-    if (generation != _generation) return;
-    if (!await _installCleanup(
-      PairingEnrollmentCleanup.cancelled,
-      generation,
-      emit,
-    )) {
-      return;
+    _activeOperation = generation;
+    try {
+      if (activeWork != null) await activeWork;
+      if (generation != _generation) return;
+      if (!await _installCleanup(
+        PairingEnrollmentCleanup.cancelled,
+        generation,
+        emit,
+      )) {
+        return;
+      }
+      await _completeCleanup(generation, emit);
+    } finally {
+      if (_activeOperation == generation) _activeOperation = null;
     }
-    await _completeCleanup(generation, emit);
   }
 
   void _offlineIfCurrent(int generation, Emitter<PairingEnrollmentState> emit) {
@@ -375,13 +380,26 @@ final class PairingEnrollmentBloc
       _unsavedCleanup = null;
       return true;
     } on PairingEnrollmentPersistenceException {
+      if (generation != _generation) return false;
       _unsavedCleanup = target;
-      try {
-        await _clear();
-      } on PairingEnrollmentPersistenceException {
-        // Storage remains unavailable; do not claim cleanup completed.
-      }
+      await _failClosedFallback(generation);
       _offlineIfCurrent(generation, emit);
+      return false;
+    }
+  }
+
+  Future<bool> _failClosedFallback(int generation) async {
+    if (generation != _generation) return false;
+    try {
+      await transport.discardTerminal();
+      if (generation != _generation) return false;
+      await _clear();
+      return generation == _generation;
+    } on TimeoutException {
+      return false;
+    } on PairingEnrollmentUnavailableException {
+      return false;
+    } on PairingEnrollmentPersistenceException {
       return false;
     }
   }
@@ -471,23 +489,28 @@ final class PairingEnrollmentBloc
     final Future<void>? activeWork = _activeWork;
     try {
       if (activeWork != null) {
+        var cleanupMarkerSaved = false;
         try {
           await _queue(
             () => store.saveCleanup(PairingEnrollmentCleanup.cancelled),
           );
-          await activeWork;
-          if (generation != _generation) {
-            await super.close();
-            return;
-          }
+          cleanupMarkerSaved = true;
+        } on PairingEnrollmentPersistenceException {
+          _unsavedCleanup = PairingEnrollmentCleanup.cancelled;
+        }
+        await activeWork;
+        if (generation != _generation) return;
+        if (!cleanupMarkerSaved) {
+          await _failClosedFallback(generation);
+          return;
+        }
+        try {
           await transport.discardTerminal();
           if (generation != _generation) {
-            await super.close();
             return;
           }
           await _clear();
           if (generation != _generation) {
-            await super.close();
             return;
           }
           await _queue(store.clearCleanup);
