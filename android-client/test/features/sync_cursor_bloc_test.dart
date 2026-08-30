@@ -109,6 +109,34 @@ void main() {
     await bloc.close();
   });
 
+  test('degraded reconciliation without a cursor is not empty', () async {
+    final SyncCursorBloc bloc = SyncCursorBloc(
+      store: _Store(),
+      contract: _Contract(null, health: SyncCursorHealth.degraded),
+      telemetry: _Telemetry(),
+    );
+    bloc.add(const SyncCursorStarted());
+    await bloc.stream.firstWhere((state) => state is SyncCursorDegraded);
+    expect(bloc.state, isA<SyncCursorDegraded>());
+    await bloc.close();
+  });
+
+  test('initial start does not claim recovery telemetry', () async {
+    final _Telemetry telemetry = _Telemetry();
+    final SyncCursorBloc bloc = SyncCursorBloc(
+      store: _Store(),
+      contract: _Contract(SyncCursor('cursor-initial')),
+      telemetry: telemetry,
+    );
+    bloc.add(const SyncCursorStarted());
+    await bloc.stream.firstWhere((state) => state is SyncCursorSynced);
+    expect(
+      telemetry.signals,
+      isNot(contains(SyncCursorTelemetrySignal.recovered)),
+    );
+    await bloc.close();
+  });
+
   test('unexpected contract errors are not mapped to offline', () async {
     final _ObservingBlocObserver observer = _ObservingBlocObserver();
     final BlocObserver previous = Bloc.observer;
@@ -155,6 +183,14 @@ final class _Contract implements SyncCursorContract {
   Future<SyncCursorReconciliation> reconcile(SyncCursor? cursor) async {
     return SyncCursorReconciliation(cursor: value, health: health);
   }
+
+  @override
+  Future<SyncCursorDeliveryDecision> classifyDelivery(
+    SyncCursor? durableCursor,
+    SyncCursor delivery,
+  ) async => durableCursor?.value == delivery.value
+      ? SyncCursorDeliveryDecision.duplicate
+      : SyncCursorDeliveryDecision.accept;
 }
 
 final class _FlakyContract implements SyncCursorContract {
@@ -174,6 +210,12 @@ final class _FlakyContract implements SyncCursorContract {
       health: SyncCursorHealth.current,
     );
   }
+
+  @override
+  Future<SyncCursorDeliveryDecision> classifyDelivery(
+    SyncCursor? durableCursor,
+    SyncCursor delivery,
+  ) async => SyncCursorDeliveryDecision.accept;
 }
 
 final class _Telemetry implements SyncCursorTelemetry {

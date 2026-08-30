@@ -13,7 +13,13 @@ abstract interface class SyncCursorStore {
 /// A server contract seam. The application supplies the actual transport later.
 abstract interface class SyncCursorContract {
   Future<SyncCursorReconciliation> reconcile(SyncCursor? durableCursor);
+  Future<SyncCursorDeliveryDecision> classifyDelivery(
+    SyncCursor? durableCursor,
+    SyncCursor delivery,
+  );
 }
+
+enum SyncCursorDeliveryDecision { accept, duplicate, stale }
 
 enum SyncCursorHealth { current, stale, degraded }
 
@@ -115,6 +121,11 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
   final SyncCursorContract contract;
   final SyncCursorTelemetry telemetry;
   int _generation = 0;
+  Future<void> _persistence = Future<void>.value();
+
+  Future<void> _save(SyncCursor cursor) {
+    return _persistence = _persistence.then((_) => store.save(cursor));
+  }
 
   Future<void> _retry(
     SyncCursorRetryRequested event,
@@ -139,17 +150,25 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
       if (generation != _generation) return;
       final SyncCursor? next = reconciliation.cursor;
       if (next == null) {
-        emit(const SyncCursorEmpty());
+        if (reconciliation.health == SyncCursorHealth.degraded) {
+          emit(const SyncCursorDegraded(null));
+          telemetry.record(SyncCursorTelemetrySignal.degraded);
+        } else {
+          emit(const SyncCursorEmpty());
+        }
         return;
       }
       if (current?.value != next.value) {
-        await store.save(next);
+        await _save(next);
         if (generation != _generation) return;
       }
       switch (reconciliation.health) {
         case SyncCursorHealth.current:
           emit(SyncCursorSynced(next));
-          telemetry.record(SyncCursorTelemetrySignal.recovered);
+          if (event is SyncCursorRetryRequested ||
+              event is SyncCursorRecovered) {
+            telemetry.record(SyncCursorTelemetrySignal.recovered);
+          }
         case SyncCursorHealth.stale:
           emit(SyncCursorStale(next));
           telemetry.record(SyncCursorTelemetrySignal.staleCursor);
@@ -173,12 +192,22 @@ final class SyncCursorBloc extends Bloc<SyncCursorEvent, SyncCursorState> {
     try {
       final SyncCursor? current = await store.load();
       if (generation != _generation) return;
-      if (current?.value == event.cursor.value) {
+      final SyncCursorDeliveryDecision decision = await contract
+          .classifyDelivery(current, event.cursor);
+      if (generation != _generation) return;
+      if (decision == SyncCursorDeliveryDecision.duplicate) {
         telemetry.record(SyncCursorTelemetrySignal.duplicateIgnored);
         emit(SyncCursorSynced(event.cursor));
         return;
       }
-      await store.save(event.cursor);
+      if (decision == SyncCursorDeliveryDecision.stale) {
+        telemetry.record(SyncCursorTelemetrySignal.staleCursor);
+        emit(
+          current == null ? const SyncCursorEmpty() : SyncCursorStale(current),
+        );
+        return;
+      }
+      await _save(event.cursor);
       if (generation != _generation) return;
       emit(SyncCursorSynced(event.cursor));
     } on SyncCursorFailure {

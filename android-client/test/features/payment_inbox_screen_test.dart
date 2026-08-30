@@ -693,6 +693,12 @@ final class _SyncContract implements SyncCursorContract {
       health: SyncCursorHealth.current,
     );
   }
+
+  @override
+  Future<SyncCursorDeliveryDecision> classifyDelivery(
+    SyncCursor? durableCursor,
+    SyncCursor delivery,
+  ) async => SyncCursorDeliveryDecision.accept;
 }
 
 final class _SyncTelemetry implements SyncCursorTelemetry {
