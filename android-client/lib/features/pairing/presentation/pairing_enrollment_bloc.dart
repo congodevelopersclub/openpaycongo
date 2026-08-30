@@ -148,6 +148,7 @@ final class PairingEnrollmentBloc
   int _generation = 0;
   int? _activeOperation;
   Future<void> _persistence = Future<void>.value();
+  Future<void> _cleanup = Future<void>.value();
   PairingEnrollmentCleanup? _pendingCleanup;
   PairingEnrollmentCleanup? _unsavedCleanup;
 
@@ -379,8 +380,22 @@ final class PairingEnrollmentBloc
   ) async {
     final PairingEnrollmentCleanup? target = _pendingCleanup;
     if (target == null) return true;
+    final Future<bool> result = _cleanup.then<bool>(
+      (_) => _performCleanup(target, generation, emit),
+    );
+    _cleanup = result.then<void>((_) {});
+    return result;
+  }
+
+  Future<bool> _performCleanup(
+    PairingEnrollmentCleanup target,
+    int generation,
+    Emitter<PairingEnrollmentState> emit,
+  ) async {
     try {
-      if (generation != _generation) return false;
+      if (generation != _generation || _pendingCleanup != target) {
+        return false;
+      }
       await transport.discardTerminal();
       if (generation != _generation) return false;
       await _clear();

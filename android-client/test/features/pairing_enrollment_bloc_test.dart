@@ -301,6 +301,63 @@ void main() {
   });
 
   test(
+    'overlapping cancellation cleanup serializes transport disposal',
+    () async {
+      final _Store store = _Store()..value = _pending();
+      final _SerialDiscardTransport transport = _SerialDiscardTransport();
+      final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+        store: store,
+        transport: transport,
+        telemetry: _Telemetry(),
+      );
+
+      bloc.add(const PairingEnrollmentCancelled());
+      await transport.firstDiscardEntered.future;
+      bloc.add(const PairingEnrollmentCancelled());
+      await Future<void>.delayed(Duration.zero);
+
+      expect(transport.discardCalls, 1);
+      transport.releaseFirstDiscard.complete();
+      await bloc.stream.firstWhere(
+        (PairingEnrollmentState state) => state is PairingEnrollmentIdle,
+      );
+
+      expect(transport.discardCalls, 2);
+      expect(store.value, isNull);
+      expect(store.cleanup, isNull);
+      await bloc.close();
+    },
+  );
+
+  test(
+    'delayed cleanup restore cannot overwrite newer cancellation intent',
+    () async {
+      final _DeferredCleanupLoadStore store = _DeferredCleanupLoadStore();
+      final _CountingTransport transport = _CountingTransport();
+      final PairingEnrollmentBloc bloc = PairingEnrollmentBloc(
+        store: store,
+        transport: transport,
+        telemetry: _Telemetry(),
+      );
+
+      bloc.add(const PairingEnrollmentRecovered());
+      await store.loadCleanupEntered.future;
+      final Future<PairingEnrollmentState> idle = bloc.stream.firstWhere(
+        (PairingEnrollmentState state) => state is PairingEnrollmentIdle,
+      );
+      bloc.add(const PairingEnrollmentCancelled());
+      await idle;
+      store.releaseCleanupLoad.complete(PairingEnrollmentCleanup.terminalError);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(bloc.state, isA<PairingEnrollmentIdle>());
+      expect(store.cleanup, isNull);
+      expect(transport.calls, 0);
+      await bloc.close();
+    },
+  );
+
+  test(
     'stale protocol failure cannot replace cancellation cleanup intent',
     () async {
       final Completer<PairingEnrollment> begin = Completer<PairingEnrollment>();
@@ -541,6 +598,18 @@ final class _DeferredLoadStore implements PairingEnrollmentStore {
   Future<void> clearCleanup() async => cleanup = null;
 }
 
+final class _DeferredCleanupLoadStore extends _Store {
+  final Completer<void> loadCleanupEntered = Completer<void>();
+  final Completer<PairingEnrollmentCleanup?> releaseCleanupLoad =
+      Completer<PairingEnrollmentCleanup?>();
+
+  @override
+  Future<PairingEnrollmentCleanup?> loadCleanup() {
+    loadCleanupEntered.complete();
+    return releaseCleanupLoad.future;
+  }
+}
+
 final class _FailingClearStore implements PairingEnrollmentStore {
   const _FailingClearStore();
 
@@ -613,6 +682,32 @@ final class _DeferredDiscardTransport implements PairingEnrollmentTransport {
   Future<void> discardTerminal() {
     if (!discardEntered.isCompleted) discardEntered.complete();
     return releaseDiscard.future;
+  }
+
+  @override
+  Future<PairingEnrollment> recover(PairingEnrollment enrollment) async =>
+      enrollment;
+
+  @override
+  Future<PairingEnrollment> retry(PairingEnrollment enrollment) async =>
+      enrollment;
+}
+
+final class _SerialDiscardTransport implements PairingEnrollmentTransport {
+  final Completer<void> firstDiscardEntered = Completer<void>();
+  final Completer<void> releaseFirstDiscard = Completer<void>();
+  int discardCalls = 0;
+
+  @override
+  Future<PairingEnrollment> begin() async => _pending();
+
+  @override
+  Future<void> discardTerminal() async {
+    discardCalls++;
+    if (discardCalls == 1) {
+      firstDiscardEntered.complete();
+      await releaseFirstDiscard.future;
+    }
   }
 
   @override
