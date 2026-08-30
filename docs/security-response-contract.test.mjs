@@ -71,6 +71,18 @@ function assertClosedWorldTabletop(source, markdown) {
   assert.equal(markdown.replaceAll('\r\n', '\n'), renderTabletop(source), 'Markdown fixture must be the deterministic rendering of the closed-world JSON source');
 }
 
+function parseCanonicalTabletop(rawSource) {
+  const canonicalSource = JSON.stringify(tabletopSource, null, 2) + '\n';
+
+  assert.equal(
+    rawSource.replaceAll('\r\n', '\n'),
+    canonicalSource,
+    'tabletop JSON must use the canonical closed-world serialization',
+  );
+
+  return JSON.parse(rawSource);
+}
+
 const requiredTabletopFields = [
   /# SYNTHETIC TABLETOP ONLY: private-report lifecycle/,
   /Private report identifier: `SYNTHETIC-REPORT-001`/,
@@ -153,7 +165,8 @@ test('security response policy is private, accountable, and release-blocking', a
 
 test('private-report tabletop fixture is synthetic, closed-world, and rendered deterministically', async () => {
   const fixture = await read('docs/security-report-tabletop.fixture.md');
-  const source = JSON.parse(await read('docs/security-report-tabletop.fixture.json'));
+  const rawSource = await read('docs/security-report-tabletop.fixture.json');
+  const source = parseCanonicalTabletop(rawSource);
 
   assertClosedWorldTabletop(source, fixture);
   assert.match(fixture, /private report/i);
@@ -215,5 +228,13 @@ test('private-report tabletop fixture is synthetic, closed-world, and rendered d
   assert.throws(() => assertClosedWorldTabletop({ ...source, unknown: 'freeform prose' }, fixture));
   assert.throws(() => assertClosedWorldTabletop({ ...source, claim: 'https://example.invalid/?access_token=REALVALUE' }, fixture));
   assert.throws(() => assertClosedWorldTabletop(source, `${fixture}\nextra prose`));
+  assert.throws(
+    () => parseCanonicalTabletop(rawSource.replace(
+      '  "claim": "a synthetic authorization boundary needs review",',
+      '  "claim": "unsafe first duplicate value",\n  "claim": "a synthetic authorization boundary needs review",',
+    )),
+    /canonical closed-world serialization/,
+    'duplicate JSON keys must not be accepted through JSON.parse last-value semantics',
+  );
   assert.doesNotThrow(() => assertClosedWorldTabletop(source, fixture.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n')));
 });
