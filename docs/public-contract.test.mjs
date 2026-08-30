@@ -92,7 +92,7 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.ok(workflow.concurrency?.group);
   assert.equal(workflow.concurrency?.['cancel-in-progress'], true);
-  assert.deepEqual(Object.keys(workflow.jobs).sort(), ['contract', 'flutter', 'laravel', 'postgres-migration']);
+  assert.deepEqual(Object.keys(workflow.jobs).sort(), ['contract', 'deposit-concurrency', 'flutter', 'laravel', 'postgres-migration']);
   const runs = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []).map((step) => step.run).filter(Boolean).join('\n');
   assert.match(runs, /docker build --target test -f docs\/Dockerfile \./);
   assert.match(runs, /docker build --target test -f server\/Dockerfile \./);
