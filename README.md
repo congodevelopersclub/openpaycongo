@@ -30,9 +30,11 @@ and the Laravel test suite in that order. For an individual local check from
 within `server/`, run `composer run lint`, `composer run analyse`, or `composer
 run quality`.
 
-The Flutter APK is debug-signed CI output, not a distributable release. A
-production image, PostgreSQL Compose stack, queue worker, scheduler, backups,
-and restore procedure are tracked separately before any deployment claim.
+The Flutter APK is debug-signed CI output, not a distributable release. The
+Laravel runtime and PostgreSQL Compose instructions are in
+[docs/operations.md](docs/operations.md). They do not make the unfinished
+application protocol safe for real payment, SMS, credential, or enrollment
+data.
 
 ## Security and operational notes
 

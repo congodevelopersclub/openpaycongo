@@ -34,6 +34,9 @@ FROM dependencies AS quality
 
 COPY server/ ./
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+COPY compose.yaml /compose.yaml
+COPY .dockerignore /dockerignore
+COPY .github/workflows/ci.yml /ci.yml
 RUN composer dump-autoload --no-interaction --optimize \
     && composer run lint \
     && composer run analyse
@@ -42,3 +45,76 @@ FROM quality AS test
 
 COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
 RUN composer test
+
+FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS production-dependencies
+
+WORKDIR /app
+
+COPY server/composer.json server/composer.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist --no-scripts
+
+COPY server/ ./
+RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
+
+FROM php:8.3-fpm-alpine@sha256:958112faffb434ca47ac10e51ef40506af76505adac4b879f013540a91d32a67 AS production
+
+RUN apk add --no-cache --upgrade \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
+        openssl=3.5.8-r0 \
+    && apk add --no-cache --virtual .build-deps \
+        autoconf=2.73-r0 \
+        dpkg=1.23.7-r0 \
+        dpkg-dev=1.23.7-r0 \
+        file=5.47-r2 \
+        g++=15.2.0-r5 \
+        gcc=15.2.0-r5 \
+        linux-headers=7.0.0-r1 \
+        make=4.4.1-r4 \
+        musl-dev=1.2.6-r2 \
+        pkgconf=2.5.1-r0 \
+        postgresql18-dev=18.6-r0 \
+        re2c=4.5.1-r0 \
+        sqlite-dev=3.53.4-r0 \
+    && docker-php-ext-install pdo_pgsql pdo_mysql pdo_sqlite pcntl \
+    && apk del .build-deps \
+    && apk add --no-cache libpq=18.6-r0 \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+
+WORKDIR /var/www/html
+
+COPY --from=production-dependencies /app ./
+
+RUN mkdir -p bootstrap/cache storage/app storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/home/.config/psysh \
+    && chown -R www-data:www-data bootstrap/cache storage \
+    && rm -rf tests phpunit.xml phpstan.neon pint.json .env .env.example
+
+ENV APP_ENV=production \
+    APP_DEBUG=false \
+    HOME=/var/www/html/storage/home \
+    LOG_CHANNEL=stderr \
+    LOG_LEVEL=warning
+
+USER www-data
+
+EXPOSE 9000
+
+FROM production AS production-contract
+
+RUN php -m | grep -qx pdo_pgsql \
+    && php -m | grep -qx pdo_mysql \
+    && php -m | grep -qx pdo_sqlite \
+    && php -m | grep -qx pcntl \
+    && test ! -e tests \
+    && test ! -e phpunit.xml \
+    && test ! -e phpstan.neon \
+    && test ! -e pint.json \
+    && test ! -e .env \
+    && test ! -e .env.example \
+    && test ! -e node_modules \
+    && test ! -e vendor/.openpay-host-dependency-marker \
+    && test -f composer.json \
+    && test -f composer.lock \
+    && test ! -w /var/www/html/vendor \
+    && test -w /var/www/html/storage \
+    && test -w /var/www/html/bootstrap/cache

@@ -7,6 +7,8 @@
 !docs/**
 !server/
 !server/**
+server/vendor
+server/node_modules
 !.github/
 .github/*
 !.github/workflows/
@@ -16,6 +18,12 @@
 !.github/ISSUE_TEMPLATE/
 !.github/ISSUE_TEMPLATE/*
 !.github/ISSUE_TEMPLATE/bug_report.md
+!compose.yaml
+server/.env
+server/.env.*
+!server/.env.example
+server/storage/*
+!server/storage/**/.gitignore
 !android-client/
 android-client/*
 !android-client/Dockerfile.ci

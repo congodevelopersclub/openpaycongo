@@ -1,10 +1,11 @@
 # Installation du serveur
 
-Le serveur canonique est l'application Laravel native dans `server/`.
-
-L'image de production, Compose PostgreSQL, le worker de file, le planificateur,
-les sauvegardes et la restauration restent des travaux distincts. Aucun binaire
-historique, image publiee, ni serveur de production n'est fourni actuellement.
+Le serveur canonique est l'application Laravel native dans `server/`. La pile
+Docker Compose PostgreSQL, le worker de file, le planificateur et les procedures
+de sauvegarde/restauration sont documentes dans
+[`../operations.md`](../operations.md). Cette pile n'autorise pas le traitement
+de donnees de paiement, SMS, identifiants ou enrollement reels tant que les
+limites de securite et de protocole du depot restent incompletes.
 
 Pour verifier le point d'entree Laravel avec Docker depuis la racine du depot :
 

@@ -30,4 +30,5 @@ test('canonical Laravel quality gates are documented and run in Docker', async (
   assert.match(phpstan, /level: 5/);
   assert.match(readme, /composer\s+run quality/);
   assert.match(workflow, /Run canonical Laravel quality gates and tests in Docker/);
+  assert.match(workflow, /Build and contract-check the seeded production image/);
 });

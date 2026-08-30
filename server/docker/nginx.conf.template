@@ -1,0 +1,35 @@
+server {
+    listen 8080;
+    server_name _;
+    root /var/www/html/public;
+    index index.php;
+
+    # Rendered from an explicit, validated CIDR list. The safe default is
+    # loopback only; broad private ranges are never trusted.
+    __OPENPAY_TRUSTED_PROXY_DIRECTIVES__
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    # Dotfiles are never public application assets. Preserve the conventional
+    # ACME path as the sole intentional exception.
+    location ~ /\.(?!well-known(?:/|$)) {
+        return 404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        # Laravel receives the original proxy peer only when nginx has accepted
+        # that peer from the explicit CIDR list. It therefore never trusts a
+        # client-supplied forwarded scheme from an untrusted source.
+        fastcgi_param REMOTE_ADDR $realip_remote_addr;
+        fastcgi_param HTTP_X_FORWARDED_FOR $proxy_add_x_forwarded_for;
+        fastcgi_param HTTP_X_FORWARDED_PROTO $openpay_forwarded_proto;
+        fastcgi_pass php:9000;
+    }
+}
