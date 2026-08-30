@@ -55,6 +55,31 @@ wait "$second_pid"
 grep -Fx charged "$barrier_root/race/first.out" || grep -Fx charged "$barrier_root/race/second.out"
 grep -Fx pending "$barrier_root/race/first.out" || grep -Fx pending "$barrier_root/race/second.out"
 docker run "${base_args[@]}" --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" --env PAYMENT_REQUEST_TEST_EXPECTED_CHARGED=1 --env PAYMENT_REQUEST_TEST_EXPECTED_PENDING=1 --env PAYMENT_REQUEST_TEST_EXPECTED_AVAILABLE=0 "$image" php tests/Support/assert_payment_request_state.php
+
+# A second overlapped pair uses the same opaque key. Both callers must receive
+# the one persisted pending request instead of creating a second debit/request.
+same_key_volume="${barrier_volume}-same-key"
+docker volume create "$same_key_volume" >/dev/null
+for worker in first second; do
+  docker run "${base_args[@]}" --volume "$same_key_volume:/barrier" \
+    --env PAYMENT_REQUEST_TEST_BARRIER_DIRECTORY=/barrier \
+    --env PAYMENT_REQUEST_TEST_WORKER="$worker" \
+    --env PAYMENT_REQUEST_TEST_IDEMPOTENCY_KEY="same-opaque-replay-key" \
+    --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" \
+    "$image" php tests/Support/create_payment_request.php >"$barrier_root/race/same-$worker.out" 2>&1 &
+  eval "same_${worker}_pid=$!"
+done
+for _ in $(seq 1 300); do
+  docker run --rm --volume "$same_key_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.ready') && file_exists('/barrier/second.ready') ? 0 : 1);" && break
+  sleep 0.1
+done
+docker run --rm --volume "$same_key_volume:/barrier" "$image" php -r "touch('/barrier/release');"
+wait "$same_first_pid"
+wait "$same_second_pid"
+grep -Fx pending "$barrier_root/race/same-first.out"
+grep -Fx pending "$barrier_root/race/same-second.out"
+docker run "${base_args[@]}" --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" --env PAYMENT_REQUEST_TEST_EXPECTED_CHARGED=1 --env PAYMENT_REQUEST_TEST_EXPECTED_PENDING=2 --env PAYMENT_REQUEST_TEST_EXPECTED_AVAILABLE=0 "$image" php tests/Support/assert_payment_request_state.php
+docker volume rm "$same_key_volume" >/dev/null
 docker run "${base_args[@]}" "$image" php tests/Support/assert_payment_request_upgrade_reversal.php
 # Exercise the FIFO tie-break, expiry, all-or-nothing, currency isolation,
 # idempotency replay, and durable-delivery regressions against this same dialect.
