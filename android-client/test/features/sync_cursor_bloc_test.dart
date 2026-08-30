@@ -188,6 +188,26 @@ void main() {
     await bloc.close();
   });
 
+  test(
+    'delivery waits for a blocked clear before classifying durability',
+    () async {
+      final _BlockedClearStore store = _BlockedClearStore()
+        ..value = SyncCursor('cursor-current');
+      final SyncCursorBloc bloc = SyncCursorBloc(
+        store: store,
+        contract: _Contract(null),
+        telemetry: _Telemetry(),
+      );
+      bloc.add(const SyncCursorStarted());
+      await store.clearEntered.future;
+      bloc.add(SyncCursorDeliveryReceived(SyncCursor('cursor-current')));
+      store.releaseClear();
+      await bloc.stream.firstWhere((state) => state is SyncCursorSynced);
+      expect(store.value?.value, 'cursor-current');
+      await bloc.close();
+    },
+  );
+
   test('unexpected contract errors are not mapped to offline', () async {
     final _ObservingBlocObserver observer = _ObservingBlocObserver();
     final BlocObserver previous = Bloc.observer;
@@ -325,6 +345,20 @@ final class _BlockedSaveStore extends _Store {
   @override
   Future<void> clear() async {
     clearCalls++;
+    value = null;
+  }
+}
+
+final class _BlockedClearStore extends _Store {
+  final Completer<void> clearEntered = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+
+  void releaseClear() => _release.complete();
+
+  @override
+  Future<void> clear() async {
+    clearEntered.complete();
+    await _release.future;
     value = null;
   }
 }
