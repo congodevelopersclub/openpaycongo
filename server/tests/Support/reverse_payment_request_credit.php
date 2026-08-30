@@ -35,7 +35,7 @@ Event::listen(CustomerCreditCreationPending::class, function () use ($barrier, $
     }
 });
 
-$actor = User::query()->create(['name' => 'Test operator', 'email' => 'test-operator@example.test', 'password' => 'unused']);
+$actor = User::query()->create(['name' => 'Test operator', 'email' => 'test-operator-'.$worker.'@example.test', 'password' => 'unused']);
 $actor->is_financial_operator = true;
 $actor->save();
 $result = app(ReverseDeposit::class)->reverse($actor, Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID')), 'provider_correction');
