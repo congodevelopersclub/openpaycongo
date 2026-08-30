@@ -11,7 +11,20 @@ $app = require __DIR__.'/../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
 Artisan::call('migrate:fresh', ['--force' => true]);
-Artisan::call('migrate:rollback', ['--step' => 2]);
+
+$creditMigration = '2026_09_01_000000_create_payment_request_credit_tables';
+$appliedMigrations = DB::table('migrations')
+    ->orderByDesc('batch')
+    ->orderByDesc('migration')
+    ->pluck('migration')
+    ->all();
+$creditMigrationPosition = array_search($creditMigration, $appliedMigrations, true);
+
+if ($creditMigrationPosition === false) {
+    throw new LogicException('The customer-credit migration must be applied before the historical upgrade fixture starts.');
+}
+
+Artisan::call('migrate:rollback', ['--step' => $creditMigrationPosition + 1]);
 
 $organizationId = '00000000-0000-4000-8000-000000000166';
 $customerId = (string) Str::uuid();
