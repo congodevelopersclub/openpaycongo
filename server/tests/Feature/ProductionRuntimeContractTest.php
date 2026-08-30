@@ -45,7 +45,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertMatchesRegularExpression('/postgres:16-alpine@sha256:[a-f0-9]{64}/', $compose);
         self::assertStringContainsString('nginx:', $compose);
         self::assertStringContainsString('dockerfile: server/docker/nginx.Dockerfile', $compose);
-        self::assertMatchesRegularExpression('/nginx:\n    build:\n      context: \.\n      dockerfile: server\/docker\/nginx\.Dockerfile\n      target: production/', $compose);
+        self::assertMatchesRegularExpression('/nginx:\r?\n    build:\r?\n      context: \.\r?\n      dockerfile: server\/docker\/nginx\.Dockerfile\r?\n      target: production/', $compose);
         self::assertStringContainsString('dockerfile: server/Dockerfile', $compose);
         self::assertStringContainsString('php:9000', $nginxTemplate);
         self::assertStringContainsString('location ~ /\\.(?!well-known(?:/|$))', $nginxTemplate);
