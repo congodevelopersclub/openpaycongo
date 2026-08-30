@@ -6,6 +6,7 @@ use App\Models\InitialSetupState;
 use App\Models\Organization;
 use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Auth\Access\AuthorizationException;
 use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
@@ -89,5 +90,25 @@ final class InitialAdminSetupTest extends TestCase
 
         app(FinancialOperatorMfaSession::class)->assertVerified($operator);
         $this->assertSame($operator->getAuthIdentifier(), session('financial_operator_mfa.user_id'));
+    }
+
+    public function test_a_confirmed_operator_must_acknowledge_recovery_codes_before_mfa_can_be_established(): void
+    {
+        $operator = User::factory()->create([
+            'is_financial_operator' => true,
+            'two_factor_confirmed_at' => now(),
+            'two_factor_recovery_codes' => Crypt::encryptString('[]'),
+        ]);
+
+        $this->actingAs($operator)
+            ->post('/setup/security/recovery-codes/acknowledge', ['recovery_codes_saved' => true])
+            ->assertRedirect('/setup/security');
+
+        $this->assertNotNull($operator->fresh()->recovery_codes_confirmed_at);
+    }
+
+    public function test_setup_security_requires_authentication(): void
+    {
+        $this->get('/setup/security')->assertRedirect('/login');
     }
 }

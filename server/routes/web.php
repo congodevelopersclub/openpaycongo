@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\InitialSetupController;
+use App\Http\Controllers\InitialSetupSecurityController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -9,3 +10,7 @@ Route::get('/', function () {
 
 Route::get('/setup', InitialSetupController::class)->name('setup.initial');
 Route::post('/setup', [InitialSetupController::class, 'store'])->name('setup.initial.store');
+Route::get('/setup/security', InitialSetupSecurityController::class)->middleware('auth')->name('setup.security');
+Route::post('/setup/security/recovery-codes/acknowledge', [InitialSetupSecurityController::class, 'acknowledgeRecoveryCodes'])
+    ->middleware('auth')
+    ->name('setup.recovery-codes.acknowledge');
