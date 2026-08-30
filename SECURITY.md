@@ -123,12 +123,15 @@ supported artifact:
 5. Build, test, scan, and identify the patched artifacts using the normal
    Docker-backed release evidence; unavailable scanners or evidence fail the
    release decision visibly.
-6. The release owner authorizes the patched release or rollback only after
+6. After the artifact evidence is available, the incident coordinator prepares
+   a private advisory draft, links the fix and minimal regression evidence,
+   and the release owner records the patched-release date.
+7. The release owner authorizes the patched release or rollback only after
    verifying ordinary release authority—or, if step 3 invoked the compromise
    response, after the restored authority is verified under the repository's
    approved release authority. The coordinator then records user communication
    and the advisory decision.
-7. After containment, conduct a blameless review and update this policy, the
+8. After containment, conduct a blameless review and update this policy, the
    threat model, tests, or release controls when evidence shows a gap.
 
 This procedure does not bypass branch protection, create real advisories,
