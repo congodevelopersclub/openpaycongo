@@ -2,6 +2,7 @@
 
 namespace App\Deposits;
 
+use App\Events\ProviderDepositRecorded;
 use App\Models\Customer;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
@@ -78,6 +79,7 @@ final class RecordProviderDeposit
                         'idempotency_key_version' => $this->activeKeyId(),
                     ]);
                     $this->appendEntries($deposit, $receivedAt, false);
+                    event(new ProviderDepositRecorded($deposit->id));
 
                     return new RecordProviderDepositResult(RecordResult::Recorded, $deposit);
                 }, attempts: 3);

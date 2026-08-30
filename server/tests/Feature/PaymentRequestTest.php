@@ -1,0 +1,209 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Events\PaymentRequestAllocated;
+use App\Models\Customer;
+use App\Models\CustomerCredit;
+use App\Models\Deposit;
+use App\Models\PaymentRequest;
+use App\Models\SourceInstallation;
+use App\PaymentRequests\AllocatePendingPaymentRequests;
+use App\PaymentRequests\CreatePaymentRequest;
+use App\PaymentRequests\PaymentRequestStatus;
+use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use InvalidArgumentException;
+use Tests\TestCase;
+
+final class PaymentRequestTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_it_charges_sufficient_customer_credit_without_an_organization_scope(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create([
+            'customer_id' => $customer->id,
+            'currency' => 'CDF',
+            'available_minor' => 1200,
+        ]);
+
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+
+        self::assertSame(PaymentRequestStatus::Charged, $request->status);
+        self::assertSame(0, $request->remaining_minor);
+        self::assertNull($request->organization_id ?? null);
+        self::assertSame(0, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+    }
+
+    public function test_allocation_event_is_not_dispatched_until_the_credit_charge_commits(): void
+    {
+        Event::fake();
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 1200]);
+
+        DB::transaction(function () use ($customer): void {
+            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+            Event::assertNotDispatched(PaymentRequestAllocated::class);
+        });
+
+        Event::assertDispatched(PaymentRequestAllocated::class);
+    }
+
+    public function test_it_keeps_an_insufficient_request_pending_until_credit_arrives(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create([
+            'customer_id' => $customer->id,
+            'currency' => 'CDF',
+            'available_minor' => 1199,
+        ]);
+
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+
+        self::assertSame(PaymentRequestStatus::Pending, $request->status);
+        self::assertSame(1200, $request->remaining_minor);
+        self::assertSame(1199, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+        self::assertTrue($request->expires_at->greaterThan(CarbonImmutable::now()->addDays(89)));
+    }
+
+    public function test_a_new_smaller_request_cannot_bypass_an_older_unexpired_shortfall(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 400]);
+        $older = PaymentRequest::query()->create($this->pendingAttributes(
+            $customer->id,
+            '00000000-0000-4000-8000-000000000001',
+            500,
+            CarbonImmutable::now()->addDay(),
+            CarbonImmutable::now()->subMinute(),
+        ));
+
+        $newer = app(CreatePaymentRequest::class)->create($customer->id, 300, 'CDF');
+
+        self::assertSame(PaymentRequestStatus::Pending, $older->fresh()->status);
+        self::assertSame(PaymentRequestStatus::Pending, $newer->status);
+        self::assertSame(400, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+    }
+
+    public function test_deposit_credit_allocates_unexpired_pending_requests_oldest_first_with_stable_id_tie_breaking(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        $now = CarbonImmutable::parse('2026-08-30 12:00:00');
+        CarbonImmutable::setTestNow($now);
+        try {
+            $first = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000001', 500, $now->addDay(), $now));
+            $second = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000002', 500, $now->addDay(), $now));
+            $deposit = Deposit::query()->create($this->depositAttributes($customer->id, 500));
+
+            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
+
+            self::assertSame(PaymentRequestStatus::Charged, $first->fresh()->status);
+            self::assertSame(PaymentRequestStatus::Pending, $second->fresh()->status);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_expired_requests_never_consume_later_credit_and_all_or_nothing_policy_does_not_partially_charge(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        $now = CarbonImmutable::parse('2026-08-30 12:00:00');
+        CarbonImmutable::setTestNow($now);
+        try {
+            $expired = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000001', 500, $now->subSecond()));
+            $pending = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000002', 700, $now->addDay(), $now));
+            $deposit = Deposit::query()->create($this->depositAttributes($customer->id, 600));
+
+            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
+
+            self::assertSame(PaymentRequestStatus::Expired, $expired->fresh()->status);
+            self::assertSame(PaymentRequestStatus::Pending, $pending->fresh()->status);
+            self::assertSame(600, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_credit_currencies_are_isolated(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create([
+            'customer_id' => $customer->id,
+            'currency' => 'USD',
+            'available_minor' => 1200,
+        ]);
+
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+
+        self::assertSame(PaymentRequestStatus::Pending, $request->status);
+        self::assertSame(1200, CustomerCredit::query()->where('customer_id', $customer->id)->where('currency', 'USD')->value('available_minor'));
+    }
+
+    public function test_an_iso_shaped_but_unsupported_currency_is_rejected_before_creating_a_pending_request(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+
+        $this->expectException(InvalidArgumentException::class);
+        try {
+            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'USD');
+        } finally {
+            self::assertDatabaseCount('payment_requests', 0);
+        }
+    }
+
+    /** @return array<string, string> */
+    private function customerAttributes(): array
+    {
+        return [
+            'organization_id' => '00000000-0000-4000-8000-000000000001',
+            'private_lookup_digest' => 'payment-request-fixture',
+            'private_lookup_id' => '00000000-0000-4000-8000-000000000010',
+            'private_lookup_key_version' => 'v1',
+        ];
+    }
+
+    /** @return array<string, int|string|CarbonImmutable> */
+    private function pendingAttributes(string $customerId, string $id, int $amount, CarbonImmutable $expiresAt, ?CarbonImmutable $createdAt = null): array
+    {
+        return [
+            'id' => $id,
+            'customer_id' => $customerId,
+            'currency' => 'CDF',
+            'amount_minor' => $amount,
+            'remaining_minor' => $amount,
+            'status' => PaymentRequestStatus::Pending->value,
+            'expires_at' => $expiresAt,
+            'created_at' => $createdAt ?? $expiresAt,
+            'updated_at' => $createdAt ?? $expiresAt,
+        ];
+    }
+
+    /** @return array<string, int|string|CarbonImmutable> */
+    private function depositAttributes(string $customerId, int $amount): array
+    {
+        SourceInstallation::query()->find('00000000-0000-4000-8000-000000000020')
+            ?? SourceInstallation::query()->forceCreate([
+                'id' => '00000000-0000-4000-8000-000000000020',
+                'organization_id' => '00000000-0000-4000-8000-000000000001',
+                'installation_digest' => 'payment-request-installation-fixture',
+                'installation_lookup_id' => '00000000-0000-4000-8000-000000000021',
+                'installation_key_version' => 'v1',
+            ]);
+
+        return [
+            'organization_id' => '00000000-0000-4000-8000-000000000001',
+            'customer_id' => $customerId,
+            'source_installation_id' => '00000000-0000-4000-8000-000000000020',
+            'kind' => 'provider_credit',
+            'amount_minor' => $amount,
+            'currency' => 'CDF',
+            'received_at' => CarbonImmutable::now(),
+            'idempotency_digest' => 'payment-request-deposit-fixture',
+            'idempotency_key_version' => 'v1',
+        ];
+    }
+}
