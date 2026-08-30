@@ -10,6 +10,29 @@ Production targets PostgreSQL and Laravel's database queue. SQLite and
 MySQL/MariaDB remain supported for development and testing. Do not introduce a
 second backend, a generic repository layer, MongoDB, or a separate admin SPA.
 
+## Customer and provider PII
+
+Customer `name`, `address`, `phone`, and `email`, plus deposit
+`provider_reference`, `sender_identifier`, `receiver_identifier`, and
+`reversal_detail`, are PII. They use Laravel's built-in `encrypted` Eloquent
+cast, `TEXT`-or-larger storage, and model `$hidden` redaction. Do not put these
+values in events, queues, logs, telemetry, exceptions, fixtures, or API output.
+
+Money and operational provenance stay queryable: amounts, currency, kind,
+timestamps, organization/customer/install identifiers, reversal linkage, and
+deduplication metadata. Existing lookup/idempotency digests remain
+non-reversible operational metadata; no custom encryption or hash lookup is
+introduced for PII.
+
+For key rotation, deploy a new `APP_KEY` while retaining retired keys in
+`APP_PREVIOUS_KEYS`. Laravel decrypts existing values with those prior keys.
+Through an authorized controlled maintenance path, mutable Customer PII can be
+saved to re-encrypt it with the current key. Deposits are immutable financial
+records: never rewrite their PII to rotate encryption. Keep prior keys for
+their decryptability until an explicitly designed compliant migration and
+re-encryption approach exists. This does not authorize PII retention changes,
+administrative reveal, or API PII exposure.
+
 ## Quality checks
 
 Laravel Boost is installed as a development dependency. Its generated agent
