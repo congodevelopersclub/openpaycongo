@@ -69,11 +69,16 @@ docker run "${base_args[@]}" --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_i
 same_key_volume="${barrier_volume}-same-key"
 barrier_volumes+=("$same_key_volume")
 docker volume create "$same_key_volume" >/dev/null
+rotation_ring='{"v1":"testing-deposit-lookup-key-material-32","previous":"pppppppppppppppppppppppppppppppp","current":"cccccccccccccccccccccccccccccccc"}'
 for worker in first second; do
+  active_key_id=previous
+  if [[ "$worker" == second ]]; then active_key_id=current; fi
   docker run "${base_args[@]}" --volume "$same_key_volume:/barrier" \
     --env PAYMENT_REQUEST_TEST_BARRIER_DIRECTORY=/barrier \
     --env PAYMENT_REQUEST_TEST_WORKER="$worker" \
     --env PAYMENT_REQUEST_TEST_TRANSACTION_BARRIER=1 \
+    --env PAYMENT_REQUEST_IDEMPOTENCY_KEYS="$rotation_ring" \
+    --env PAYMENT_REQUEST_IDEMPOTENCY_ACTIVE_KEY_ID="$active_key_id" \
     --env PAYMENT_REQUEST_TEST_IDEMPOTENCY_KEY="same-opaque-replay-key" \
     --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" \
     "$image" php tests/Support/create_payment_request.php >"$barrier_root/race/same-$worker.out" 2>&1 &

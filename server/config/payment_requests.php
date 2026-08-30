@@ -10,8 +10,10 @@ return [
      * they share the mandatory deposit lookup key ring so rotation remains one
      * coordinated operational change without introducing an APP_KEY fallback.
      * Rotation is two-phase: deploy the complete old+new ring everywhere while
-     * the old key stays active, then flip the active id everywhere. Retain the
-     * old key for the full replay window before removing it.
+     * the old key stays active, then flip the active id everywhere. Payment
+     * requests are retained, so every key version referenced by a retained row
+     * must remain in the ring. Creation fails closed if a persisted version is
+     * removed; retirement requires an explicit row-retention/purge migration.
      */
     'idempotency_key' => env('PAYMENT_REQUEST_IDEMPOTENCY_KEY', env('DEPOSIT_LOOKUP_TOKEN_KEY')),
     'idempotency_keys' => env('PAYMENT_REQUEST_IDEMPOTENCY_KEYS', env('DEPOSIT_LOOKUP_TOKEN_KEYS')),

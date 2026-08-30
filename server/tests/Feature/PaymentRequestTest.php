@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
+use LogicException;
 use Tests\TestCase;
 
 final class PaymentRequestTest extends TestCase
@@ -219,6 +220,32 @@ final class PaymentRequestTest extends TestCase
         self::assertSame('current', $current->idempotency_key_version);
         self::assertNotSame(hash('sha256', 'rotated-opaque-key'), $first->idempotency_digest);
         self::assertDatabaseCount('payment_requests', 2);
+    }
+
+    public function test_retiring_a_key_with_retained_requests_fails_closed(): void
+    {
+        config()->set('payment_requests.idempotency_keys', [
+            'current' => str_repeat('c', 32),
+            'previous' => str_repeat('p', 32),
+        ]);
+        config()->set('payment_requests.idempotency_active_key_id', 'previous');
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 2400]);
+        $first = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'retained-old-key');
+
+        config()->set('payment_requests.idempotency_keys', ['current' => str_repeat('c', 32)]);
+        config()->set('payment_requests.idempotency_active_key_id', 'current');
+
+        try {
+            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'retained-old-key');
+            self::fail('Removing a persisted idempotency key version must fail closed.');
+        } catch (LogicException $exception) {
+            self::assertSame('Payment-request idempotency key ring cannot retire a persisted key version.', $exception->getMessage());
+        }
+
+        self::assertDatabaseCount('payment_requests', 1);
+        self::assertSame($first->id, PaymentRequest::query()->sole()->id);
+        self::assertSame(1200, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
     }
 
     public function test_idempotency_replay_expires_a_due_pending_request(): void

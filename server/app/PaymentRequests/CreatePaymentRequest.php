@@ -32,13 +32,25 @@ final class CreatePaymentRequest
 
         try {
             return DB::transaction(function () use ($customerId, $amountMinor, $currency, $digest, $digests): PaymentRequest {
-                $replay = PaymentRequest::query()->where('customer_id', $customerId)->whereIn('idempotency_digest', array_values($digests))->lockForUpdate()->first();
+                $replay = PaymentRequest::query()->where('customer_id', $customerId)->whereIn('idempotency_digest', array_values($digests))->first();
                 if ($replay !== null) {
+                    $replay = PaymentRequest::query()->lockForUpdate()->findOrFail($replay->id);
+
                     return $this->replayOrConflict($this->expireIfDue($replay), $amountMinor, $currency);
                 }
 
                 event(new PaymentRequestCreationPreflightMissed($customerId));
                 Customer::query()->lockForUpdate()->findOrFail($customerId);
+
+                // Nodes may temporarily use different active key ids during the
+                // second phase of rotation. Recheck the complete ring after the
+                // customer lock so those writers still serialize to one request.
+                $replay = PaymentRequest::query()->where('customer_id', $customerId)->whereIn('idempotency_digest', array_values($digests))->lockForUpdate()->first();
+                if ($replay !== null) {
+                    return $this->replayOrConflict($this->expireIfDue($replay), $amountMinor, $currency);
+                }
+                $this->assertPersistedKeyVersionsConfigured($customerId, array_keys($digests));
+
                 $credit = CustomerCredit::query()
                     ->where('customer_id', $customerId)
                     ->where('currency', $currency)
@@ -158,6 +170,18 @@ final class CreatePaymentRequest
         $configured = config('payment_requests.idempotency_active_key_id');
 
         return is_string($configured) && $configured !== '' ? $configured : 'v1';
+    }
+
+    /** @param list<string> $configuredKeyIds */
+    private function assertPersistedKeyVersionsConfigured(string $customerId, array $configuredKeyIds): void
+    {
+        $missingVersionExists = PaymentRequest::query()
+            ->where('customer_id', $customerId)
+            ->whereNotIn('idempotency_key_version', $configuredKeyIds)
+            ->exists();
+        if ($missingVersionExists) {
+            throw new LogicException('Payment-request idempotency key ring cannot retire a persisted key version.');
+        }
     }
 
     /** @return array<string, string> */
