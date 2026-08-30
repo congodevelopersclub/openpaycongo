@@ -31,7 +31,7 @@ return new class extends Migration
             $table->uuid('organization_id');
             $table->foreignUuid('customer_id')->constrained();
             $table->foreignUuid('source_installation_id')->constrained();
-            $table->foreignUuid('reverses_deposit_id')->nullable()->unique()->constrained('deposits');
+            $table->uuid('reverses_deposit_id')->nullable();
             $table->string('kind', self::DEPOSIT_KIND_LENGTH);
             $table->unsignedBigInteger('amount_minor');
             $table->char('currency', 3);
@@ -45,6 +45,11 @@ return new class extends Migration
             $table->timestamps();
             $table->unique(['organization_id', 'provider_reference_digest']);
             $table->unique(['organization_id', 'idempotency_digest']);
+        });
+
+        Schema::table('deposits', function (Blueprint $table): void {
+            $table->unique('reverses_deposit_id');
+            $table->foreign('reverses_deposit_id')->references('id')->on('deposits');
         });
 
         Schema::create('ledger_entries', function (Blueprint $table): void {

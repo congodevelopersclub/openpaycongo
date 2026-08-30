@@ -27,6 +27,39 @@ jobs:
       - name: Run canonical Laravel quality gates and tests in Docker
         run: docker build --target test -f server/Dockerfile .
 
+  postgres-migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: openpaycongo
+          POSTGRES_USER: openpay
+          POSTGRES_PASSWORD: openpay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openpay -d openpaycongo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Build PHP 8.3 PostgreSQL Laravel runtime
+        run: docker build --target quality --tag openpaycongo-server-postgres -f server/Dockerfile .
+      - name: Migrate a clean PostgreSQL schema
+        run: >-
+          docker run --rm --network host
+          --env APP_ENV=testing
+          --env APP_KEY=base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+          --env DB_CONNECTION=pgsql
+          --env DB_HOST=127.0.0.1
+          --env DB_PORT=5432
+          --env DB_DATABASE=openpaycongo
+          --env DB_USERNAME=openpay
+          --env DB_PASSWORD=openpay
+          openpaycongo-server-postgres php artisan migrate:fresh --force
+
   flutter:
     runs-on: ubuntu-latest
     steps:
