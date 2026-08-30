@@ -47,6 +47,10 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/vendor', $dockerignore);
         self::assertStringContainsString('server/node_modules', $dockerignore);
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
+        self::assertStringContainsString('OPENPAY_APP_URL: ${OPENPAY_APP_URL:?Set OPENPAY_APP_URL outside the repository}', $compose);
+        self::assertStringContainsString('OPENPAY_PASSKEY_RP_ID: ${OPENPAY_PASSKEY_RP_ID:?Set OPENPAY_PASSKEY_RP_ID outside the repository}', $compose);
+        self::assertStringContainsString('OPENPAY_PASSKEY_ALLOWED_ORIGINS: ${OPENPAY_PASSKEY_ALLOWED_ORIGINS:?Set OPENPAY_PASSKEY_ALLOWED_ORIGINS outside the repository}', $compose);
+        self::assertStringContainsString('OPENPAY_PASSKEY_USER_HANDLE_SECRET: ${OPENPAY_PASSKEY_USER_HANDLE_SECRET:?Set OPENPAY_PASSKEY_USER_HANDLE_SECRET outside the repository}', $compose);
         self::assertStringContainsString('${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}', $compose);
         self::assertStringContainsString('DEPOSIT_LOOKUP_TOKEN_KEYS: ${DEPOSIT_LOOKUP_TOKEN_KEYS:-}', $compose);
         self::assertStringContainsString('DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID: ${DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID:-}', $compose);
@@ -82,6 +86,7 @@ final class ProductionRuntimeContractTest extends TestCase
         $runner = file_get_contents('/scripts/ci/fast-feedback.sh');
         self::assertIsString($runner);
         self::assertStringContainsString('--target production-contract -f server/Dockerfile .', $runner);
+        self::assertStringContainsString("export OPENPAY_PASSKEY_ALLOWED_ORIGINS='[\"https://openpay.test\"]'", $runner);
         self::assertStringContainsString('aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c', $runner);
         self::assertStringContainsString('congo-openpay-fpm:ci', $runner);
         self::assertStringContainsString('congo-openpay-nginx:ci', $runner);

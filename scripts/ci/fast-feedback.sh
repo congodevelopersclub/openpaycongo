@@ -45,6 +45,10 @@ run_security_fast() {
 
 run_laravel_pr() (
   export OPENPAY_APP_KEY='base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE='
+  export OPENPAY_APP_URL='https://openpay.test'
+  export OPENPAY_PASSKEY_RP_ID='openpay.test'
+  export OPENPAY_PASSKEY_ALLOWED_ORIGINS='["https://openpay.test"]'
+  export OPENPAY_PASSKEY_USER_HANDLE_SECRET='ci-passkey-user-handle-secret-at-least-32-characters'
   export OPENPAY_DB_PASSWORD='ci-compose-validation-only'
   export DEPOSIT_LOOKUP_TOKEN_KEY='ci-compose-deposit-lookup-token-only'
   created_markers=()

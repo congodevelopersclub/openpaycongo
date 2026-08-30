@@ -10,6 +10,7 @@ use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Events\RecoveryCodesGenerated;
 use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
@@ -22,6 +23,20 @@ final class InitialAdminSetupTest extends TestCase
     public function test_a_fresh_installation_exposes_the_one_time_administrator_setup_entry_point(): void
     {
         $this->get('/setup')->assertOk();
+    }
+
+    public function test_a_legacy_installation_with_users_never_reopens_public_setup(): void
+    {
+        User::factory()->create();
+        Schema::drop('initial_setup_states');
+
+        $migration = require database_path('migrations/2026_09_03_000000_create_initial_setup_states_table.php');
+        $migration->up();
+
+        $this->assertNotNull(InitialSetupState::query()->findOrFail(1)->completed_at);
+        $this->get('/setup')->assertNotFound();
+        $this->post('/setup')->assertNotFound();
+        $this->assertSame(1, User::query()->count());
     }
 
     public function test_generic_registration_is_not_an_alternate_first_administrator_entry_point(): void

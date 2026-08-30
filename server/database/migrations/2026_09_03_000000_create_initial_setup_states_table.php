@@ -9,6 +9,8 @@ return new class extends Migration
 {
     public function up(): void
     {
+        $legacyInstallation = Schema::hasTable('users') && DB::table('users')->exists();
+
         Schema::create('initial_setup_states', function (Blueprint $table): void {
             $table->unsignedTinyInteger('id')->primary();
             $table->dateTime('completed_at')->nullable();
@@ -18,6 +20,7 @@ return new class extends Migration
 
         DB::table('initial_setup_states')->insert([
             'id' => 1,
+            'completed_at' => $legacyInstallation ? now() : null,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -26,7 +29,7 @@ return new class extends Migration
     public function down(): void
     {
         if (DB::table('initial_setup_states')->whereNotNull('completed_at')->exists()) {
-            throw new LogicException('Completed initial setup cannot be removed.');
+            throw new \LogicException('Completed initial setup cannot be removed.');
         }
 
         Schema::dropIfExists('initial_setup_states');

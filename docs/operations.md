@@ -32,12 +32,24 @@ do not expose the application port publicly.
 export OPENPAY_APP_KEY='base64:replace-with-the-generated-key'
 export OPENPAY_DB_PASSWORD='replace-with-a-secret-from-your-secret-manager'
 export DEPOSIT_LOOKUP_TOKEN_KEY='replace-with-a-distinct-secret-from-your-secret-manager'
+export OPENPAY_APP_URL='https://pay.example.com'
+export OPENPAY_PASSKEY_RP_ID='pay.example.com'
+export OPENPAY_PASSKEY_ALLOWED_ORIGINS='["https://pay.example.com"]'
+export OPENPAY_PASSKEY_USER_HANDLE_SECRET='replace-with-a-distinct-32-byte-secret-from-your-secret-manager'
 export OPENPAY_HTTP_BIND_ADDRESS='127.0.0.1'
 export OPENPAY_HTTP_PORT='8080'
 export OPENPAY_TRUSTED_PROXY_CIDRS='127.0.0.1/32'
 docker compose up --build -d
 curl --fail http://127.0.0.1:8080/healthz
 ```
+
+`OPENPAY_APP_URL` is the one canonical public HTTPS origin. Its hostname must
+exactly equal `OPENPAY_PASSKEY_RP_ID`, and
+`OPENPAY_PASSKEY_ALLOWED_ORIGINS` must be a JSON array containing only that
+same origin. `OPENPAY_PASSKEY_USER_HANDLE_SECRET` is distinct from `APP_KEY`,
+must be at least 32 bytes, and must come from the secret manager. These four
+values are required by this production Compose path; do not substitute a
+wildcard, a forwarded host header, or a local HTTP address.
 
 Compose first runs the one-shot `migrate` service. The `php`, `nginx`, `queue`, and
 `scheduler` services wait for PostgreSQL health and successful migrations, use

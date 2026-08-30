@@ -10,6 +10,12 @@ that entry point. The administrator must enroll and confirm Fortify TOTP before
 an operational route can be used. Recovery codes remain a recovery mechanism,
 not a way to avoid enrollment.
 
+An installation which already has any users is treated as legacy and setup is
+closed by migration before a request can reach it. A release operator must use
+the authenticated administrative provisioning procedure to designate an
+existing user as a financial operator; public first-run setup is never a
+remediation mechanism for an existing installation.
+
 Passkeys supplement, rather than replace, the password and TOTP flow. The
 application uses Laravel Fortify's maintained `laravel/passkeys` integration;
 it does not parse WebAuthn ceremonies or create cryptographic material itself.
