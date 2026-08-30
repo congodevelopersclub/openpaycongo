@@ -34,7 +34,9 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(history, /git --config=.*--log-opts=--all --redact --exit-code=1/);
   assert.match(fast, /dir --config=.*--redact --exit-code=1/);
   assert.match(full, /cyclonedx-json/);
-  assert.match(full, /bash "\$\{root\}\/scripts\/security\/security-fast\.sh"/);
+  assert.match(full, /OPENPAY_SECURITY_FAST_GATE/);
+  assert.match(full, /fast_status/);
+  assert.match(full, /retaining generated SBOMs/);
   assert.match(full, /image --scanners vuln --severity HIGH,CRITICAL --exit-code 1/);
   assert.match(full, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro/);
   assert.match(fullProofs, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro/);
@@ -51,6 +53,8 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fullProofs, /openpaycongo-fpm-production\.cdx\.json/);
   assert.match(fullProofs, /openpaycongo-nginx-production\.cdx\.json/);
   assert.match(fullProofs, /vulnerable-composer/);
+  assert.match(fullProofs, /seeded-fast-gate-failure/);
+  assert.match(fullProofs, /OPENPAY_SECURITY_ARTIFACTS_DIR/);
   assert.match(authorizationBoundary, /storage\/not-signed\?upload=true/);
   assert.match(authorizationBoundary, /assertForbidden\(\)/);
   assert.match(authorizationBoundary, /auth\.optional/);
@@ -82,6 +86,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(guide, /candidate-tag pushes/);
   assert.match(guide, /Repository governance issue #10/);
   assert.match(guide, /including any generated security artifacts present under it/);
+  assert.match(guide, /still generates all four SBOMs before returning that failure/);
   assert.match(guide, /Docker build context excludes `server\/\.env`/);
   assert.doesNotMatch(fast, /curl\s+.*https?:\/\//i);
 });

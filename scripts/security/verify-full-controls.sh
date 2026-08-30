@@ -29,7 +29,9 @@ if grep --quiet 'scripts/security/fixtures\|vulnerable-composer\|vulnerable-flut
 fi
 
 result="$(mktemp)"
-trap 'rm -f "${result}"' EXIT
+failing_fast_gate="$(mktemp)"
+failure_artifacts="$(mktemp -d)"
+trap 'rm -f "${result}" "${failing_fast_gate}"; rm -rf "${failure_artifacts}"' EXIT
 
 if MSYS_NO_PATHCONV=1 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock:ro --volume "${trivy_cache}:/root/.cache/trivy" "${trivy_image}" \
   image --scanners vuln --quiet --severity HIGH,CRITICAL --exit-code 1 "${vulnerable_image}" >"${result}" 2>&1; then
@@ -46,4 +48,17 @@ fi
 
 cat "${result}"
 
-echo 'Source and production SBOM generation plus container scanning rejected their controlled checks'
+printf '%s\n' '#!/usr/bin/env bash' 'echo seeded-fast-gate-failure >&2' 'exit 42' >"${failing_fast_gate}"
+if OPENPAY_SECURITY_FAST_GATE="${failing_fast_gate}" OPENPAY_SECURITY_ARTIFACTS_DIR="${failure_artifacts}" \
+  bash "${root}/scripts/security/security-full.sh" >"${result}" 2>&1; then
+  echo 'Full security gate accepted a seeded fast-gate failure' >&2
+  cat "${result}" >&2
+  exit 1
+fi
+
+grep --quiet --fixed-strings 'seeded-fast-gate-failure' "${result}"
+for sbom in openpaycongo-server.cdx.json openpaycongo-android-client.cdx.json openpaycongo-fpm-production.cdx.json openpaycongo-nginx-production.cdx.json; do
+  test -s "${failure_artifacts}/${sbom}"
+done
+
+echo 'Source and production SBOM generation plus container scanning rejected their controlled checks and retained SBOMs after a seeded fast-gate failure'
