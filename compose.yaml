@@ -42,10 +42,8 @@ x-application: &application
 x-passport-key-secrets: &passport-key-secrets
   - source: passport-private-key
     target: oauth-private.key
-    mode: 0444
   - source: passport-public-key
     target: oauth-public.key
-    mode: 0444
 
 services:
   postgres:

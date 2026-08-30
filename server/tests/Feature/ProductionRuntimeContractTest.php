@@ -58,7 +58,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('secrets: *passport-key-secrets', $compose);
         self::assertStringContainsString('target: oauth-private.key', $compose);
         self::assertStringContainsString('target: oauth-public.key', $compose);
-        self::assertStringContainsString('mode: 0444', $compose);
+        self::assertStringNotContainsString('mode: 0444', $compose);
         self::assertStringContainsString('OPENPAY_PASSPORT_PRIVATE_KEY_FILE:?Set OPENPAY_PASSPORT_PRIVATE_KEY_FILE outside the repository', $compose);
         self::assertStringContainsString('OPENPAY_PASSPORT_PUBLIC_KEY_FILE:?Set OPENPAY_PASSPORT_PUBLIC_KEY_FILE outside the repository', $compose);
         self::assertStringNotContainsString('PASSPORT_PRIVATE_KEY:', $compose);
@@ -112,12 +112,16 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('dst=/run/secrets,readonly', $runner);
         self::assertStringContainsString('mktemp -d', $runner);
         self::assertStringContainsString('chmod 0755 "$passport_key_directory"', $runner);
-        self::assertStringContainsString('chmod 0444 /run/openpay-ci-keys/oauth-private.key /run/openpay-ci-keys/oauth-public.key', $runner);
+        self::assertStringContainsString('--user root', $runner);
+        self::assertStringContainsString('OPENPAY_PASSPORT_KEYS_PATH=/run/openpay-ci-keys', $runner);
+        self::assertStringContainsString('php artisan passport:keys', $runner);
+        self::assertStringContainsString('chown "$(id -u www-data):$(id -g www-data)"', $runner);
+        self::assertStringContainsString('chmod 0400 /run/openpay-ci-keys/oauth-private.key', $runner);
+        self::assertStringContainsString('chmod 0444 /run/openpay-ci-keys/oauth-public.key', $runner);
         self::assertStringContainsString('openssl pkey -in /run/secrets/oauth-private.key -check -noout', $runner);
         self::assertStringContainsString('openssl pkey -pubin -in /run/secrets/oauth-public.key -noout', $runner);
         self::assertStringContainsString('php artisan config:show openpay > /tmp/openpay-openpay', $runner);
         self::assertStringContainsString('passport_keys_path', $runner);
-        self::assertStringNotContainsString('passport:keys', $runner);
         self::assertStringContainsString('OPENPAY_PASSKEY_USER_HANDLE_SECRET', $runner);
         self::assertStringContainsString("export OPENPAY_PASSPORT_PRIVATE_KEY_FILE='/tmp/openpay-passport-private-key'", $runner);
         self::assertStringContainsString("export OPENPAY_PASSPORT_PUBLIC_KEY_FILE='/tmp/openpay-passport-public-key'", $runner);
@@ -134,5 +138,24 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertDoesNotMatchRegularExpression('/(?:php\s+-S|artisan\s+serve)/', $dockerfile.$compose);
         self::assertStringNotContainsString('frankenphp', $dockerfile.$compose);
         self::assertStringNotContainsString('Caddyfile', $dockerfile.$compose);
+    }
+
+    public function test_operator_instructions_provision_passport_keys_before_compose_uses_them(): void
+    {
+        $operations = file_get_contents('/docs/operations.md');
+
+        self::assertIsString($operations);
+        self::assertStringContainsString('docker build --target production --tag congo-openpay-fpm:local -f server/Dockerfile .', $operations);
+        self::assertStringNotContainsString('docker compose build php', $operations);
+        self::assertStringContainsString('--user root', $operations);
+        self::assertStringContainsString('chown "$(id -u www-data):$(id -g www-data)"', $operations);
+        self::assertStringContainsString('chmod 0400 /run/openpay-passport-keys/oauth-private.key', $operations);
+        self::assertStringContainsString('chmod 0444 /run/openpay-passport-keys/oauth-public.key', $operations);
+        self::assertStringContainsString('export OPENPAY_PASSPORT_PRIVATE_KEY_FILE="$OPENPAY_PASSPORT_KEYS_DIR/oauth-private.key"', $operations);
+        self::assertStringContainsString('export OPENPAY_PASSPORT_PUBLIC_KEY_FILE="$OPENPAY_PASSPORT_KEYS_DIR/oauth-public.key"', $operations);
+        self::assertLessThan(
+            strpos($operations, 'docker compose up --build -d'),
+            strpos($operations, 'docker build --target production --tag congo-openpay-fpm:local -f server/Dockerfile .'),
+        );
     }
 }

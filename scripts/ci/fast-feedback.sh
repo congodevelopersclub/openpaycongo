@@ -89,14 +89,19 @@ run_laravel_pr() (
   created_markers+=("$passport_private_key" "$passport_public_key")
   created_directories+=("$passport_key_directory")
   # CI-only disposable files; deployed keys remain operator-provisioned.
-  docker run --rm --user "$(id -u):$(id -g)" \
-    --env APP_ENV=testing \
+  # This mirrors the documented root-only provisioning step, then proves the
+  # unprivileged production user can read the resulting read-only mount.
+  docker run --rm --user root \
+    --env APP_ENV=production \
+    --env APP_KEY="$OPENPAY_APP_KEY" \
+    --env OPENPAY_PASSPORT_KEYS_PATH=/run/openpay-ci-keys \
     --mount "type=bind,src=$passport_key_directory,dst=/run/openpay-ci-keys" \
     congo-openpay-fpm:ci sh -ceu '
       umask 077
-      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /run/openpay-ci-keys/oauth-private.key >/dev/null 2>&1
-      openssl pkey -in /run/openpay-ci-keys/oauth-private.key -pubout -out /run/openpay-ci-keys/oauth-public.key >/dev/null 2>&1
-      chmod 0444 /run/openpay-ci-keys/oauth-private.key /run/openpay-ci-keys/oauth-public.key
+      php artisan passport:keys
+      chown "$(id -u www-data):$(id -g www-data)" /run/openpay-ci-keys/oauth-private.key /run/openpay-ci-keys/oauth-public.key
+      chmod 0400 /run/openpay-ci-keys/oauth-private.key
+      chmod 0444 /run/openpay-ci-keys/oauth-public.key
     '
   docker run --rm \
     --mount "type=bind,src=$passport_key_directory,dst=/run/secrets,readonly" \
