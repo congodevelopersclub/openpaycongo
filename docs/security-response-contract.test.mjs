@@ -7,6 +7,31 @@ import test from 'node:test';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFile(resolve(repositoryRoot, path), 'utf8');
 
+const requiredTabletopFields = [
+  /# SYNTHETIC TABLETOP ONLY: private-report lifecycle/,
+  /Private report identifier: `SYNTHETIC-REPORT-001`/,
+  /Affected component: `example\.invalid\/synthetic-component`/,
+  /Reporter contact: withheld in this public fixture/,
+  /Claim: a synthetic authorization boundary needs review/,
+  /Evidence: a non-executable, synthetic reproduction summary only/,
+  /private report → fix → regression test →\s*advisory draft → patched-release decision/,
+];
+
+const sensitiveTabletopFields = [
+  /^\s*(?:raw\s+sms|sms\s+body)\s*:/im,
+  /^\s*(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
+  /^\s*(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
+  /^\s*(?:authorization|bearer|jwt|access\s+token)\s*:/im,
+  /^\s*(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
+];
+
+function assertSyntheticTabletop(fixture) {
+  for (const field of requiredTabletopFields) assert.match(fixture, field);
+  for (const field of sensitiveTabletopFields) {
+    assert.doesNotMatch(fixture, field, `synthetic tabletop contains a prohibited field: ${field}`);
+  }
+}
+
 test('security response policy is private, accountable, and release-blocking', async () => {
   const security = await read('SECURITY.md');
 
@@ -43,12 +68,29 @@ test('security response policy is private, accountable, and release-blocking', a
 test('private-report tabletop fixture is synthetic and excludes sensitive content', async () => {
   const fixture = await read('docs/security-report-tabletop.fixture.md');
 
-  assert.match(fixture, /SYNTHETIC TABLETOP ONLY/);
-  assert.match(fixture, /SYNTHETIC-REPORT-001/);
+  assertSyntheticTabletop(fixture);
   assert.match(fixture, /private report/i);
   assert.match(fixture, /regression test/i);
   assert.match(fixture, /advisory draft/i);
   assert.match(fixture, /patched-release decision/i);
   assert.match(fixture, /No real user, customer, credential, token, key, raw SMS, exploit\s+payload, or topology detail/i);
   assert.doesNotMatch(fixture, /(@|ghp_|github_pat_|AKIA|-----BEGIN|password\s*[:=])/i);
+
+  const mutations = [
+    'Raw SMS: synthetic message text',
+    'Phone number: +243000000000',
+    'Customer name: Synthetic Customer',
+    'Payment amount: 123',
+    'Authorization: Bearer synthetic-token-value',
+    'JWT: synthetic-token-value',
+    'Internal host: 10.0.0.1',
+  ];
+
+  for (const mutation of mutations) {
+    assert.throws(
+      () => assertSyntheticTabletop(`${fixture}\n${mutation}\n`),
+      /synthetic tabletop contains a prohibited field/,
+      `fixture mutation must be rejected: ${mutation}`,
+    );
+  }
 });
