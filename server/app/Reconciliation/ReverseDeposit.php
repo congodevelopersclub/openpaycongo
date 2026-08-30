@@ -71,6 +71,6 @@ final class ReverseDeposit
             );
 
             return $result;
-        });
+        }, attempts: 3);
     }
 }
