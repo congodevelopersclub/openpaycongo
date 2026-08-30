@@ -77,7 +77,7 @@ final class PaymentRequestTest extends TestCase
     {
         $customer = Customer::query()->create($this->customerAttributes());
         CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 400]);
-        $older = PaymentRequest::query()->create($this->pendingAttributes(
+        $older = PaymentRequest::query()->forceCreate($this->pendingAttributes(
             $customer->id,
             '00000000-0000-4000-8000-000000000001',
             500,
@@ -98,8 +98,8 @@ final class PaymentRequestTest extends TestCase
         $now = CarbonImmutable::parse('2026-08-30 12:00:00');
         CarbonImmutable::setTestNow($now);
         try {
-            $first = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000001', 500, $now->addDay(), $now));
-            $second = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000002', 500, $now->addDay(), $now));
+            $first = PaymentRequest::query()->forceCreate($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000001', 500, $now->addDay(), $now));
+            $second = PaymentRequest::query()->forceCreate($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000002', 500, $now->addDay(), $now));
             $deposit = Deposit::query()->create($this->depositAttributes($customer->id, 500));
 
             app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
@@ -129,8 +129,8 @@ final class PaymentRequestTest extends TestCase
         $now = CarbonImmutable::parse('2026-08-30 12:00:00');
         CarbonImmutable::setTestNow($now);
         try {
-            $expired = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000001', 500, $now->subSecond()));
-            $pending = PaymentRequest::query()->create($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000002', 700, $now->addDay(), $now));
+            $expired = PaymentRequest::query()->forceCreate($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000001', 500, $now->subSecond()));
+            $pending = PaymentRequest::query()->forceCreate($this->pendingAttributes($customer->id, '00000000-0000-4000-8000-000000000002', 700, $now->addDay(), $now));
             $deposit = Deposit::query()->create($this->depositAttributes($customer->id, 600));
 
             app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
