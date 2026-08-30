@@ -4,6 +4,8 @@ namespace App\Deposits;
 
 use App\Events\ProviderDepositRecorded;
 use App\Models\Customer;
+use App\Models\CustomerCredit;
+use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
@@ -128,6 +130,7 @@ final class RecordProviderDeposit
                     'idempotency_key_version' => $this->activeKeyId(),
                 ]);
                 $this->appendEntries($reversal, $recordedAt, true);
+                $this->debitCustomerCredit($reversal);
 
                 return new ReverseProviderDepositResult(ReversalResult::Reversed, $reversal);
             }, attempts: 3);
@@ -277,6 +280,32 @@ final class RecordProviderDeposit
                 ...$entry,
             ]);
         }
+    }
+
+    private function debitCustomerCredit(Deposit $reversal): void
+    {
+        $credit = CustomerCredit::query()
+            ->where('customer_id', $reversal->customer_id)
+            ->where('currency', $reversal->currency)
+            ->lockForUpdate()
+            ->first();
+        if ($credit === null) {
+            $credit = CustomerCredit::query()->create([
+                'customer_id' => $reversal->customer_id,
+                'currency' => $reversal->currency,
+                'available_minor' => 0,
+            ]);
+            $credit = CustomerCredit::query()->whereKey($credit->id)->lockForUpdate()->firstOrFail();
+        }
+
+        $amount = (int) $reversal->amount_minor;
+        $credit->available_minor = (int) $credit->available_minor - $amount;
+        $credit->save();
+        CustomerCreditPosting::query()->create([
+            'deposit_id' => $reversal->id,
+            'customer_credit_id' => $credit->id,
+            'amount_minor' => -$amount,
+        ]);
     }
 
     /** @param array<string, string> $digests */

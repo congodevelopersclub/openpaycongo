@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Events\PaymentRequestAllocated;
+use App\Jobs\DispatchPaymentRequestAllocation;
 use App\Models\Customer;
 use App\Models\CustomerCredit;
 use App\Models\Deposit;
 use App\Models\PaymentRequest;
+use App\Models\PaymentRequestAllocationDelivery;
 use App\Models\SourceInstallation;
 use App\PaymentRequests\AllocatePendingPaymentRequests;
 use App\PaymentRequests\CreatePaymentRequest;
@@ -15,6 +17,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -31,7 +34,7 @@ final class PaymentRequestTest extends TestCase
             'available_minor' => 1200,
         ]);
 
-        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'charged-request');
 
         self::assertSame(PaymentRequestStatus::Charged, $request->status);
         self::assertSame(0, $request->remaining_minor);
@@ -39,18 +42,18 @@ final class PaymentRequestTest extends TestCase
         self::assertSame(0, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
     }
 
-    public function test_allocation_event_is_not_dispatched_until_the_credit_charge_commits(): void
+    public function test_allocation_delivery_is_persisted_with_the_credit_charge_and_enqueued_after_commit(): void
     {
-        Event::fake();
+        Queue::fake();
         $customer = Customer::query()->create($this->customerAttributes());
         CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 1200]);
 
         DB::transaction(function () use ($customer): void {
-            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
-            Event::assertNotDispatched(PaymentRequestAllocated::class);
+            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'commit-before-dispatch');
+            self::assertDatabaseCount('payment_request_allocation_deliveries', 1);
         });
 
-        Event::assertDispatched(PaymentRequestAllocated::class);
+        Queue::assertPushed(DispatchPaymentRequestAllocation::class);
     }
 
     public function test_it_keeps_an_insufficient_request_pending_until_credit_arrives(): void
@@ -62,7 +65,7 @@ final class PaymentRequestTest extends TestCase
             'available_minor' => 1199,
         ]);
 
-        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'pending-request');
 
         self::assertSame(PaymentRequestStatus::Pending, $request->status);
         self::assertSame(1200, $request->remaining_minor);
@@ -82,7 +85,7 @@ final class PaymentRequestTest extends TestCase
             CarbonImmutable::now()->subMinute(),
         ));
 
-        $newer = app(CreatePaymentRequest::class)->create($customer->id, 300, 'CDF');
+        $newer = app(CreatePaymentRequest::class)->create($customer->id, 300, 'CDF', 'newer-request');
 
         self::assertSame(PaymentRequestStatus::Pending, $older->fresh()->status);
         self::assertSame(PaymentRequestStatus::Pending, $newer->status);
@@ -149,7 +152,7 @@ final class PaymentRequestTest extends TestCase
             'available_minor' => 1200,
         ]);
 
-        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF');
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'currency-isolation');
 
         self::assertSame(PaymentRequestStatus::Pending, $request->status);
         self::assertSame(1200, CustomerCredit::query()->where('customer_id', $customer->id)->where('currency', 'USD')->value('available_minor'));
@@ -161,10 +164,52 @@ final class PaymentRequestTest extends TestCase
 
         $this->expectException(InvalidArgumentException::class);
         try {
-            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'USD');
+            app(CreatePaymentRequest::class)->create($customer->id, 1200, 'USD', 'unsupported-currency');
         } finally {
             self::assertDatabaseCount('payment_requests', 0);
         }
+    }
+
+    public function test_an_identical_idempotency_replay_returns_the_original_request_without_a_second_debit(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 1200]);
+
+        $first = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'opaque-replay-key');
+        $replay = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'opaque-replay-key');
+
+        self::assertSame($first->id, $replay->id);
+        self::assertDatabaseCount('payment_requests', 1);
+        self::assertSame(0, CustomerCredit::query()->where('customer_id', $customer->id)->value('available_minor'));
+    }
+
+    public function test_an_idempotency_key_cannot_be_reused_with_a_changed_payload(): void
+    {
+        $customer = Customer::query()->create($this->customerAttributes());
+        app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'opaque-conflict-key');
+
+        $this->expectException(InvalidArgumentException::class);
+        app(CreatePaymentRequest::class)->create($customer->id, 1199, 'CDF', 'opaque-conflict-key');
+    }
+
+    public function test_allocation_delivery_stays_recoverable_when_callback_handoff_fails(): void
+    {
+        Event::fake([PaymentRequestAllocated::class]);
+        Queue::fake();
+        $customer = Customer::query()->create($this->customerAttributes());
+        CustomerCredit::query()->create(['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 1200]);
+        $request = app(CreatePaymentRequest::class)->create($customer->id, 1200, 'CDF', 'durable-delivery');
+        $delivery = PaymentRequestAllocationDelivery::query()->where('payment_request_id', $request->id)->firstOrFail();
+
+        // A crash or enqueue failure before this queued job runs leaves the row untouched.
+        self::assertNull($delivery->fresh()->dispatched_at);
+
+        Event::fake([PaymentRequestAllocated::class]);
+        app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
+        app(DispatchPaymentRequestAllocation::class, ['deliveryId' => $delivery->id])->handle();
+
+        Event::assertDispatchedTimes(PaymentRequestAllocated::class, 1);
+        self::assertNotNull($delivery->fresh()->dispatched_at);
     }
 
     /** @return array<string, string> */
@@ -184,6 +229,7 @@ final class PaymentRequestTest extends TestCase
         return [
             'id' => $id,
             'customer_id' => $customerId,
+            'idempotency_digest' => hash('sha256', $id),
             'currency' => 'CDF',
             'amount_minor' => $amount,
             'remaining_minor' => $amount,

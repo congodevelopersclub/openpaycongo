@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('payment-requests:recover-credit')->everyMinute()->withoutOverlapping();
+Schedule::command('payment-requests:recover-allocation-deliveries')->everyMinute()->withoutOverlapping();

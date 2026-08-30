@@ -3,7 +3,6 @@
 namespace App\PaymentRequests;
 
 use App\Deposits\DepositKind;
-use App\Events\PaymentRequestAllocated;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
@@ -82,7 +81,7 @@ final class AllocatePendingPaymentRequests
                         $request->status = PaymentRequestStatus::Charged->value;
                         $request->charged_at = $now;
                         $request->save();
-                        event(new PaymentRequestAllocated($request->id));
+                        app(RecordPaymentRequestAllocation::class)->record($request->id);
                     }
 
                     $credit->save();

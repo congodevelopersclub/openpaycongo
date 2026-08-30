@@ -66,6 +66,7 @@ final class LookupKeyVersionMigrationTest extends TestCase
         $this->artisan('migrate', ['--force' => true])->assertExitCode(0);
 
         self::assertSame(12500, DB::table('customer_credits')->where('customer_id', $customerId)->where('currency', 'CDF')->value('available_minor'));
+        self::assertDatabaseHas('customer_credit_postings', ['deposit_id' => $depositId]);
 
         foreach ([
             ['customers', 'private_lookup_id', 'customer_lookup', $this->digest('customer_lookup', $organizationId, $customerIdentifier, $previousKey)],

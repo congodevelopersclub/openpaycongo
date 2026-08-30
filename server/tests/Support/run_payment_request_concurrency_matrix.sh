@@ -37,6 +37,7 @@ for worker in first second; do
   docker run "${base_args[@]}" --volume "$barrier_volume:/barrier" \
     --env PAYMENT_REQUEST_TEST_BARRIER_DIRECTORY=/barrier \
     --env PAYMENT_REQUEST_TEST_WORKER="$worker" \
+    --env PAYMENT_REQUEST_TEST_IDEMPOTENCY_KEY="payment-request-race-$worker" \
     --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" \
     "$image" php tests/Support/create_payment_request.php >"$barrier_root/race/$worker.out" 2>&1 &
   eval "${worker}_pid=$!"
@@ -54,3 +55,4 @@ wait "$second_pid"
 grep -Fx charged "$barrier_root/race/first.out" || grep -Fx charged "$barrier_root/race/second.out"
 grep -Fx pending "$barrier_root/race/first.out" || grep -Fx pending "$barrier_root/race/second.out"
 docker run "${base_args[@]}" --env PAYMENT_REQUEST_TEST_CUSTOMER_ID="$customer_id" --env PAYMENT_REQUEST_TEST_EXPECTED_CHARGED=1 --env PAYMENT_REQUEST_TEST_EXPECTED_PENDING=1 --env PAYMENT_REQUEST_TEST_EXPECTED_AVAILABLE=0 "$image" php tests/Support/assert_payment_request_state.php
+docker run "${base_args[@]}" "$image" php tests/Support/assert_payment_request_upgrade_reversal.php

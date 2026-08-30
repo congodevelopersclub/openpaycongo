@@ -8,6 +8,7 @@ use App\Deposits\ProviderTransfer;
 use App\Deposits\RecordProviderDeposit;
 use App\Deposits\RecordResult;
 use App\Deposits\ReversalResult;
+use App\Models\CustomerCredit;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
@@ -222,6 +223,7 @@ final class RecordProviderDepositTest extends TestCase
         self::assertSame($deposit->id, $first->deposit->reverses_deposit_id);
         self::assertDatabaseCount('deposits', 2);
         self::assertDatabaseCount('ledger_entries', 4);
+        self::assertSame(0, CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', 'CDF')->value('available_minor'));
     }
 
     public function test_a_reversal_uses_the_locked_persisted_deposit_not_a_mutated_model_instance(): void

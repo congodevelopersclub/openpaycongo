@@ -29,6 +29,7 @@ $request = app(CreatePaymentRequest::class)->create(
     (string) getenv('PAYMENT_REQUEST_TEST_CUSTOMER_ID'),
     (int) (getenv('PAYMENT_REQUEST_TEST_AMOUNT_MINOR') ?: 100),
     (string) (getenv('PAYMENT_REQUEST_TEST_CURRENCY') ?: 'CDF'),
+    (string) (getenv('PAYMENT_REQUEST_TEST_IDEMPOTENCY_KEY') ?: 'payment-request-support-key'),
 );
 
 echo $request->status->value;
