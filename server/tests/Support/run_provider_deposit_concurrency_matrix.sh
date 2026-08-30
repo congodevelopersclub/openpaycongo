@@ -91,7 +91,7 @@ run_pair() {
   assert_state "$expected_deposits" "$expected_entries" "$expected_credit" "$expected_customers" 1
   if [[ "$second_reference" != "" ]]; then
     docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
-    docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$second_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$second_active" --env DEPOSIT_TEST_PROVIDER_REFERENCE="$second_reference" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
+    docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$second_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$second_active" --env DEPOSIT_TEST_PROVIDER_REFERENCE="$second_reference" --env DEPOSIT_TEST_CUSTOMER_IDENTIFIER="$second_customer" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
   elif [[ "$second_sender" == "" ]]; then
     docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
   fi
