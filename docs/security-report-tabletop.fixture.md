@@ -24,7 +24,8 @@ or copy it into a report.
 3. A maintainer prepares the smallest synthetic fix and a regression test that
    proves the boundary. The regression test contains no exploit payload.
 4. The coordinator prepares a private advisory draft with affected and patched
-   synthetic versions, mitigation, and reporter credit preference.
+   synthetic versions, mitigation, reporter credit preference, and links the
+   synthetic fix and regression-test evidence from step 3.
 5. The release owner records a patched-release decision after Docker-backed
    tests and scans identify the synthetic artifact.
 6. The group agrees a coordinated disclosure date, then records the

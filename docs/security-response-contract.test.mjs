@@ -28,7 +28,9 @@ const sensitiveTabletopFields = [
   /\b(?:authorization|bearer|jwt|access\s+token)\b\s+(?:is|was)\b/i,
   /\b(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\b\s+(?:is|was)\b/i,
   /\+\d{7,15}\b/,
-  /\b(?:10|127|192)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+  /\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+  /\b192\.168\.\d{1,3}\.\d{1,3}\b/,
+  /\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b/,
 ];
 
 function assertSyntheticTabletop(fixture) {
@@ -37,10 +39,17 @@ function assertSyntheticTabletop(fixture) {
     assert.doesNotMatch(fixture, field, `synthetic tabletop contains a prohibited field: ${field}`);
   }
 
-  assert.match(fixture, /1\. A triage owner[\s\S]*?assigns provisional severe classification, freezes the synthetic candidate/i);
+  const stepOneStart = fixture.indexOf('1. A triage owner');
+  const stepTwoStart = fixture.indexOf('2. The triage and release owners');
+  assert.ok(stepOneStart >= 0 && stepTwoStart > stepOneStart, 'tabletop must contain ordered first and second steps');
+  const stepOne = fixture.slice(stepOneStart, stepTwoStart);
+  assert.match(stepOne, /assigns provisional severe classification, freezes the synthetic candidate/i);
   const advisoryDraft = fixture.indexOf('4. The coordinator prepares a private advisory draft');
   const releaseDecision = fixture.indexOf('5. The release owner records a patched-release decision');
   assert.ok(advisoryDraft >= 0 && advisoryDraft < releaseDecision, 'private advisory draft must precede the patched-release decision');
+  const advisoryStepEnd = fixture.indexOf('5. The release owner', advisoryDraft);
+  const advisoryStep = fixture.slice(advisoryDraft, advisoryStepEnd);
+  assert.match(advisoryStep, /links the\s+synthetic fix and regression-test evidence/i);
 }
 
 test('security response policy is private, accountable, and release-blocking', async () => {
@@ -101,6 +110,7 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     'The payment amount is 123.',
     'The authorization is Bearer synthetic-token-value.',
     'The internal host is 10.0.0.1.',
+    'Connect to http://172.16.0.1/admin for the synthetic topology.',
   ];
 
   for (const mutation of mutations) {
