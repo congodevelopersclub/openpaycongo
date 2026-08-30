@@ -55,6 +55,8 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(authorizationBoundary, /assertForbidden\(\)/);
   assert.match(authorizationBoundary, /auth\.optional/);
   assert.match(authorizationBoundary, /authorize-anything/);
+  assert.match(authorizationBoundary, /gatherRouteMiddleware/);
+  assert.match(authorizationBoundary, /withoutMiddleware\('auth'\)/);
   assert.doesNotMatch(authorizationBoundary, /str_starts_with\(\$middleware, 'auth'\)/);
   assert.doesNotMatch(authorizationBoundary, /WithoutErrorHandler/);
   assert.match(await readFile(new URL('../scripts/security/verify-secret-scanner.sh', import.meta.url), 'utf8'), /seeded secret appended to a deterministic vector/);

@@ -46,7 +46,7 @@ final class AuthorizationBoundaryTest extends TestCase
             }
 
             self::assertTrue(
-                collect($route->gatherMiddleware())->contains(fn (string $middleware): bool => $this->isExpectedBoundaryMiddleware($middleware)),
+                collect(app('router')->gatherRouteMiddleware($route))->contains(fn (string $middleware): bool => $this->isExpectedBoundaryMiddleware($middleware)),
                 "Route [{$signature}] is neither in the reviewed anonymous inventory nor protected by authorization middleware.",
             );
         }
@@ -81,6 +81,20 @@ final class AuthorizationBoundaryTest extends TestCase
     {
         $this->get('/storage/not-signed')->assertForbidden();
         $this->put('/storage/not-signed?upload=true')->assertForbidden();
+    }
+
+    public function test_excluded_authentication_middleware_does_not_count_as_authorization(): void
+    {
+        $router = app('router');
+        $router->aliasMiddleware('auth', Authenticate::class);
+        $route = $router->get('/security-gate-excluded-auth-fixture', static fn () => response()->noContent())
+            ->middleware('auth')
+            ->withoutMiddleware('auth');
+
+        self::assertFalse(
+            collect($router->gatherRouteMiddleware($route))
+                ->contains(fn (string $middleware): bool => $this->isExpectedBoundaryMiddleware($middleware)),
+        );
     }
 
     private function isExpectedBoundaryMiddleware(string $middleware): bool
