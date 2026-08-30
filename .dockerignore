@@ -23,6 +23,8 @@ server/node_modules
 !compose.yaml
 !scripts/
 !scripts/upgrade-quiescent.sh
+!scripts/ci/
+!scripts/ci/**
 server/.env
 server/.env.*
 !server/.env.example
@@ -34,6 +36,8 @@ server/storage/*
 !android-client/
 android-client/*
 !android-client/Dockerfile.ci
+!android-client/test/
+!android-client/test/**
 !android-client/android/
 android-client/android/*
 !android-client/android/app/

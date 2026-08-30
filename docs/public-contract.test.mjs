@@ -87,6 +87,7 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
   const contractDockerfile = await readFile(resolve(repositoryRoot, 'docs/Dockerfile'), 'utf8');
   const serverDockerfile = await readFile(resolve(repositoryRoot, 'server/Dockerfile'), 'utf8');
   const flutterDockerfile = await readFile(resolve(repositoryRoot, 'android-client/Dockerfile.ci'), 'utf8');
+  const runner = await readFile(resolve(repositoryRoot, 'scripts/ci/fast-feedback.sh'), 'utf8');
   const readme = await readFile(resolve(repositoryRoot, 'README.md'), 'utf8');
 
   assert.deepEqual(workflow.permissions, { contents: 'read' });
@@ -97,35 +98,21 @@ test('delivery workflow validates contracts, canonical Laravel, and Flutter in D
     workflow.jobs['deposit-concurrency'].services.database.options,
     /healthcheck\.sh --connect --innodb_initialized/,
   );
+  assert.deepEqual(workflow.jobs.contract.steps.at(-1).run, 'bash scripts/ci/fast-feedback.sh pr contracts');
+  assert.deepEqual(workflow.jobs.laravel.steps.at(-1).run, 'bash scripts/ci/fast-feedback.sh pr laravel');
+  assert.deepEqual(workflow.jobs['postgres-migration'].steps.at(-1).run, 'bash scripts/ci/fast-feedback.sh pr postgres-migration');
+  assert.deepEqual(workflow.jobs['deposit-concurrency'].steps.at(-1).run, 'bash scripts/ci/fast-feedback.sh pr deposit-concurrency ${{ matrix.connection }} ${{ matrix.port }}');
+  assert.deepEqual(workflow.jobs.flutter.steps.at(-2).run, 'bash scripts/ci/fast-feedback.sh pr flutter');
   const runs = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []).map((step) => step.run).filter(Boolean).join('\n');
-  assert.match(runs, /docker build --target test -f docs\/Dockerfile \./);
-  assert.match(runs, /docker build --target test -f server\/Dockerfile \./);
+  assert.doesNotMatch(runs, /docker (?:build|run|compose)/);
   const postgresImage = 'postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685';
   assert.equal(workflow.jobs['postgres-migration'].services.postgres.image, postgresImage);
-  const expectedPostgresClients = ['openpaycongo-server-postgres', postgresImage, postgresImage];
-  assertPostgresClientImages(workflow.jobs['postgres-migration'], expectedPostgresClients);
-  assert.throws(() => assertPostgresClientImages({
-    steps: [{ run: `docker run --rm ${postgresImage} \\` }, { run: 'docker run --rm postgres:16-alpine \\' }],
-  }, expectedPostgresClients), /Expected values to be strictly deep-equal/);
-  for (const invocation of [
-    `env PGPASSWORD=openpay docker run --rm ${postgresImage} \\`,
-    `command docker run --rm ${postgresImage} \\`,
-    `if true; then docker run --rm ${postgresImage} \\; fi`,
-  ]) {
-    assert.throws(() => postgresClientImages({ steps: [{ run: invocation }] }), /noncanonical Docker invocation/);
-  }
-  for (const invocation of [
-    `docker run --rm ${postgresImage} \\; docker run --rm postgres:16-alpine \\`,
-    `docker run --rm ${postgresImage} \\ && docker run --rm postgres:16-alpine \\`,
-  ]) {
-    assert.throws(() => postgresClientImages({ steps: [{ run: invocation }] }), /multiple Docker invocations|chained Docker invocation/);
-  }
-  assert.match(runs, /deposits_reverses_deposit_id_foreign:FOREIGN KEY/);
-  assert.match(runs, /deposits_reverses_deposit_id_unique:UNIQUE/);
-  assert.match(runs, /docker build[\s\S]*android-client/);
+  assert.match(runner, /deposits_reverses_deposit_id_foreign:FOREIGN KEY/);
+  assert.match(runner, /deposits_reverses_deposit_id_unique:UNIQUE/);
   assert.doesNotMatch(runs, /competing-runtime/i);
   assert.match(contractDockerfile, /RUN npm test/);
   assert.match(contractDockerfile, /RUN npm ci --ignore-scripts/);
+  assert.match(contractDockerfile, /RUN apk add --no-cache bash=5\.3\.9-r1/);
   assert.doesNotMatch(contractDockerfile, /COPY \. \./);
   assert.doesNotMatch(contractDockerfile, /competing-runtime/i);
   assert.match(serverDockerfile, /COPY server\/composer\.json server\/composer\.lock/);

@@ -17,49 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Validate public contract and runtime-neutral fixtures in Docker
-        run: docker build --target test -f docs/Dockerfile .
+      - name: Run canonical pull-request contract gate
+        run: bash scripts/ci/fast-feedback.sh pr contracts
 
   laravel:
     runs-on: ubuntu-latest
-    env:
-      OPENPAY_APP_KEY: base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
-      OPENPAY_DB_PASSWORD: ci-compose-validation-only
-      DEPOSIT_LOOKUP_TOKEN_KEY: ci-compose-deposit-lookup-token-only
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Validate production Compose configuration
-        run: docker compose config --quiet
-      - name: Reject missing production Compose secrets
-        run: |
-          set -euo pipefail
-          for secret in OPENPAY_APP_KEY OPENPAY_DB_PASSWORD DEPOSIT_LOOKUP_TOKEN_KEY; do
-            if env -u "$secret" docker compose config --quiet >/dev/null 2>&1; then
-              echo "Compose accepted a missing required secret."
-              exit 1
-            fi
-          done
-      - name: Run canonical Laravel quality gates and tests in Docker
-        run: docker build --target test -f server/Dockerfile .
-      - name: Build and contract-check the seeded production image
-        run: |
-          mkdir -p server/vendor server/node_modules
-          touch server/vendor/.openpay-host-dependency-marker
-          touch server/node_modules/.openpay-host-dependency-marker
-          docker build --target production-contract -f server/Dockerfile .
-          docker build --target production-contract -f server/docker/nginx.Dockerfile .
-      - name: Build deployable FPM and nginx images
-        run: |
-          docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
-          docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
-      - name: Run pinned production image vulnerability scans
-        run: |
-          set -euo pipefail
-          for image in congo-openpay-fpm:ci congo-openpay-nginx:ci; do
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
-              aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
-              image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check "$image"
-          done
+      - name: Run canonical pull-request Laravel gate
+        run: bash scripts/ci/fast-feedback.sh pr laravel
 
   postgres-migration:
     runs-on: ubuntu-latest
@@ -79,30 +45,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Build PHP 8.3 PostgreSQL Laravel runtime
-        run: docker build --target quality --tag openpaycongo-server-postgres -f server/Dockerfile .
-      - name: Migrate a clean PostgreSQL schema
-        run: >-
-          docker run --rm --network host
-          --env APP_ENV=testing
-          --env APP_KEY=base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
-          --env DB_CONNECTION=pgsql
-          --env DB_HOST=127.0.0.1
-          --env DB_PORT=5432
-          --env DB_DATABASE=openpaycongo
-          --env DB_USERNAME=openpay
-          --env DB_PASSWORD=openpay
-          openpaycongo-server-postgres php artisan migrate:fresh --force
-      - name: Assert reversal constraint identities
-        run: |
-          docker run --rm --network host --env PGPASSWORD=openpay postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 \
-            psql --host=127.0.0.1 --port=5432 --username=openpay --dbname=openpaycongo --tuples-only --no-align \
-            --command "select constraint_name || ':' || constraint_type from information_schema.table_constraints where table_schema = 'public' and table_name = 'deposits' and constraint_name in ('deposits_reverses_deposit_id_foreign', 'deposits_reverses_deposit_id_unique') order by constraint_name" \
-            | grep -Fx 'deposits_reverses_deposit_id_foreign:FOREIGN KEY'
-          docker run --rm --network host --env PGPASSWORD=openpay postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 \
-            psql --host=127.0.0.1 --port=5432 --username=openpay --dbname=openpaycongo --tuples-only --no-align \
-            --command "select constraint_name || ':' || constraint_type from information_schema.table_constraints where table_schema = 'public' and table_name = 'deposits' and constraint_name in ('deposits_reverses_deposit_id_foreign', 'deposits_reverses_deposit_id_unique') order by constraint_name" \
-             | grep -Fx 'deposits_reverses_deposit_id_unique:UNIQUE'
+      - name: Run canonical pull-request PostgreSQL migration gate
+        run: bash scripts/ci/fast-feedback.sh pr postgres-migration
 
   deposit-concurrency:
     runs-on: ubuntu-latest
@@ -146,26 +90,15 @@ jobs:
           --health-interval 10s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Build PHP 8.3 database runtime
-        run: docker build --target quality --tag openpaycongo-server-concurrency -f server/Dockerfile .
-      - name: Force provider deposit races
-        run: bash server/tests/Support/run_provider_deposit_concurrency_matrix.sh openpaycongo-server-concurrency ${{ matrix.connection }} ${{ matrix.port }}
-      - name: Force payment-request credit races
-        run: bash server/tests/Support/run_payment_request_concurrency_matrix.sh openpaycongo-server-concurrency ${{ matrix.connection }} ${{ matrix.port }}
+      - name: Run canonical pull-request concurrency gate
+        run: bash scripts/ci/fast-feedback.sh pr deposit-concurrency ${{ matrix.connection }} ${{ matrix.port }}
 
   flutter:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Analyze Flutter in Docker
-        run: docker build --target analyze -f android-client/Dockerfile.ci android-client
-      - name: Test Flutter in Docker
-        run: docker build --target test -f android-client/Dockerfile.ci android-client
-      - name: Build debug APK in Docker
-        run: >-
-          docker build --target artifact
-          --output type=local,dest=android-client/build/ci
-          -f android-client/Dockerfile.ci android-client
+      - name: Run canonical pull-request Flutter gate
+        run: bash scripts/ci/fast-feedback.sh pr flutter
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openpaycongo-debug-apk-${{ github.sha }}

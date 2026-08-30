@@ -5,12 +5,13 @@ import test from 'node:test';
 const readWorkspaceFile = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('canonical Laravel quality gates are documented and run in Docker', async () => {
-  const [composer, dockerfile, phpstan, readme, workflow] = await Promise.all([
+  const [composer, dockerfile, phpstan, readme, workflow, runner] = await Promise.all([
     readWorkspaceFile('../server/composer.json'),
     readWorkspaceFile('../server/Dockerfile'),
     readWorkspaceFile('../server/phpstan.neon'),
     readWorkspaceFile('../README.md'),
     readWorkspaceFile('../.github/workflows/ci.yml'),
+    readWorkspaceFile('../scripts/ci/fast-feedback.sh'),
   ]);
   const manifest = JSON.parse(composer);
 
@@ -28,7 +29,8 @@ test('canonical Laravel quality gates are documented and run in Docker', async (
   assert.match(dockerfile, /composer test/);
   assert.match(phpstan, /vendor\/larastan\/larastan\/extension\.neon/);
   assert.match(phpstan, /level: 5/);
-  assert.match(readme, /composer\s+run quality/);
-  assert.match(workflow, /Run canonical Laravel quality gates and tests in Docker/);
-  assert.match(workflow, /Build and contract-check the seeded production image/);
+  assert.match(readme, /local laravel/);
+  assert.match(workflow, /bash scripts\/ci\/fast-feedback\.sh pr laravel/);
+  assert.match(runner, /docker build --target test -f server\/Dockerfile \./);
+  assert.match(runner, /docker build --target production-contract -f server\/Dockerfile \./);
 });
