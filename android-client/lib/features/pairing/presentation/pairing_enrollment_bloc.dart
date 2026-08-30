@@ -186,8 +186,10 @@ final class PairingEnrollmentBloc
     }
     final int generation = _generation;
     final bool wasOffline = state is PairingEnrollmentOffline;
-    final PairingEnrollment? enrollment = await _load(emit, generation);
+    final _EnrollmentLoad load = await _load(emit, generation);
     if (generation != _generation) return;
+    if (load.failed) return;
+    final PairingEnrollment? enrollment = load.enrollment;
     if (enrollment == null) {
       if (!wasOffline && state is PairingEnrollmentOffline) return;
       await _run(emit, transport.begin, started: true);
@@ -214,8 +216,10 @@ final class PairingEnrollmentBloc
     }
     final int generation = _generation;
     final bool wasOffline = state is PairingEnrollmentOffline;
-    final PairingEnrollment? enrollment = await _load(emit, generation);
+    final _EnrollmentLoad load = await _load(emit, generation);
     if (generation != _generation) return;
+    if (load.failed) return;
+    final PairingEnrollment? enrollment = load.enrollment;
     if (enrollment == null) {
       if (!wasOffline && state is PairingEnrollmentOffline) return;
       if (state is! PairingEnrollmentOffline) {
@@ -226,21 +230,23 @@ final class PairingEnrollmentBloc
     await _run(emit, () => transport.recover(enrollment), recovered: true);
   }
 
-  Future<PairingEnrollment?> _load(
+  Future<_EnrollmentLoad> _load(
     Emitter<PairingEnrollmentState> emit,
     int generation,
   ) async {
     await _persistence;
-    if (generation != _generation) return null;
+    if (generation != _generation) return const _EnrollmentLoad.stale();
     try {
       final PairingEnrollment? enrollment = await store.load();
-      return generation == _generation ? enrollment : null;
+      return generation == _generation
+          ? _EnrollmentLoad.value(enrollment)
+          : const _EnrollmentLoad.stale();
     } on PairingEnrollmentPersistenceException {
       if (generation == _generation) {
         emit(const PairingEnrollmentOffline());
         telemetry.record(PairingEnrollmentTelemetry.offline);
       }
-      return null;
+      return const _EnrollmentLoad.failed();
     }
   }
 
@@ -424,3 +430,12 @@ final class PairingEnrollmentBloc
 }
 
 enum _CleanupResume { none, resumed, failed }
+
+final class _EnrollmentLoad {
+  const _EnrollmentLoad.value(this.enrollment) : failed = false;
+  const _EnrollmentLoad.failed() : enrollment = null, failed = true;
+  const _EnrollmentLoad.stale() : enrollment = null, failed = false;
+
+  final PairingEnrollment? enrollment;
+  final bool failed;
+}
