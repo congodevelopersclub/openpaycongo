@@ -12,6 +12,7 @@ use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -120,6 +121,16 @@ final class RecordProviderDepositTest extends TestCase
 
         self::assertSame(RecordResult::Recorded, $result->outcome);
         self::assertSame('2026', $result->deposit->provider_reference_key_version);
+    }
+
+    public function test_mariadb_deadlock_error_1213_is_retryable(): void
+    {
+        $previous = new \PDOException('Deadlock found when trying to get lock; try restarting transaction.');
+        $previous->errorInfo = ['40001', 1213, 'Deadlock found when trying to get lock; try restarting transaction.'];
+        $exception = new QueryException('mariadb', 'insert into private_lookup_aliases', [], $previous);
+        $classifier = new \ReflectionMethod(RecordProviderDeposit::class, 'isRetryableTransactionFailure');
+
+        self::assertTrue($classifier->invoke(app(RecordProviderDeposit::class), $exception));
     }
 
     public function test_a_literal_z_provider_timestamp_is_accepted_and_canonicalized_to_utc(): void

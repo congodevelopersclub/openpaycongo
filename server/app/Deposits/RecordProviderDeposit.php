@@ -317,8 +317,9 @@ final class RecordProviderDeposit
     {
         $driverErrorCode = $exception->errorInfo[1] ?? null;
 
-        return in_array($exception->getCode(), ['23000', '23505'], true)
-            || (is_int($driverErrorCode) || is_string($driverErrorCode)) && (string) $driverErrorCode === '1020';
+        return in_array($exception->getCode(), ['23000', '23505', '40001'], true)
+            || (is_int($driverErrorCode) || is_string($driverErrorCode))
+            && in_array((string) $driverErrorCode, ['1020', '1213'], true);
     }
 
     /** @return array<string, string> */
