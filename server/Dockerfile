@@ -66,6 +66,18 @@ RUN test -n "$TEST_FILTER" \
     && composer dump-autoload --no-interaction --optimize \
     && composer test -- --fail-on-empty-test-suite --filter="$TEST_FILTER"
 
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS assets
+
+WORKDIR /app
+
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+
+COPY server/resources ./resources
+COPY server/public ./public
+COPY server/vite.config.js ./
+RUN npm run build
+
 FROM php83-platform-check AS production-dependencies
 
 WORKDIR /app
@@ -74,6 +86,7 @@ COPY server/composer.json server/composer.lock ./
 RUN composer install --no-dev --no-interaction --prefer-dist --no-scripts
 
 COPY server/ ./
+COPY --from=assets /app/public/build ./public/build
 RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
 
 FROM php:8.3-fpm-alpine@sha256:958112faffb434ca47ac10e51ef40506af76505adac4b879f013540a91d32a67 AS production
@@ -139,6 +152,7 @@ RUN php -m | grep -qx pdo_pgsql \
     && test ! -e vendor/.openpay-host-dependency-marker \
     && test -f composer.json \
     && test -f composer.lock \
+    && test -f public/build/manifest.json \
     && test ! -w /var/www/html/vendor \
     && test -w /var/www/html/storage \
     && test -w /var/www/html/bootstrap/cache

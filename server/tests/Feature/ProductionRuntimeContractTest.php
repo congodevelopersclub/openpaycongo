@@ -25,6 +25,9 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertIsString($nginxProxyMap);
         self::assertIsString($proxyRenderer);
         self::assertStringContainsString('php:8.3-fpm-alpine@sha256:', $dockerfile);
+        self::assertStringContainsString('FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS assets', $dockerfile);
+        self::assertStringContainsString('RUN npm ci --ignore-scripts --no-audit --no-fund', $dockerfile);
+        self::assertStringContainsString('COPY --from=assets /app/public/build ./public/build', $dockerfile);
         self::assertStringContainsString('FROM php83-platform-check AS production-dependencies', $dockerfile);
         self::assertStringContainsString("COPY server/composer.json server/composer.lock ./\nRUN composer install --no-dev --no-interaction --prefer-dist --no-scripts\n\nCOPY server/ ./", $dockerfile);
         self::assertStringContainsString('pdo_pgsql pdo_mysql pdo_sqlite pcntl', $dockerfile);
@@ -32,6 +35,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringNotContainsString('production-security-contract', $dockerfile);
         self::assertStringContainsString('test -f composer.json', $dockerfile);
         self::assertStringContainsString('test -f composer.lock', $dockerfile);
+        self::assertStringContainsString('test -f public/build/manifest.json', $dockerfile);
         self::assertStringNotContainsString('COPY --chown=www-data:www-data --from=production-dependencies /app ./', $dockerfile);
         self::assertStringContainsString('test ! -e node_modules', $dockerfile);
         self::assertStringContainsString('test ! -e vendor/.openpay-host-dependency-marker', $dockerfile);

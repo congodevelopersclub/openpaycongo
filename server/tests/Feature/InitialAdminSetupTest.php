@@ -4,12 +4,15 @@ namespace Tests\Feature;
 
 use App\Models\InitialSetupState;
 use App\Models\Organization;
+use App\Models\SecurityAudit;
 use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
-use Illuminate\Support\Facades\Crypt;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Str;
 use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
+use Laravel\Fortify\Events\RecoveryCodesGenerated;
 use Tests\TestCase;
 
 final class InitialAdminSetupTest extends TestCase
@@ -110,5 +113,97 @@ final class InitialAdminSetupTest extends TestCase
     public function test_setup_security_requires_authentication(): void
     {
         $this->get('/setup/security')->assertRedirect('/login');
+    }
+
+    public function test_the_passkey_boundary_uses_the_explicit_local_trust_contract(): void
+    {
+        $this->assertSame('localhost', config('fortify.passkeys.relying_party_id'));
+        $this->assertSame(['https://localhost'], config('fortify.passkeys.allowed_origins'));
+        $this->assertTrue(in_array('passkeys', config('fortify.features'), true));
+    }
+
+    public function test_a_signed_in_operator_can_access_real_passkey_registration_controls(): void
+    {
+        $operator = User::factory()->create([
+            'is_financial_operator' => true,
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->actingAs($operator)
+            ->get('/setup/security')
+            ->assertOk()
+            ->assertSee('data-passkey-registration', false)
+            ->assertSee('data-passkey-name', false);
+    }
+
+    public function test_password_fallback_sends_a_totp_enabled_operator_to_the_fortify_challenge(): void
+    {
+        $operator = User::factory()->create([
+            'email' => 'operator@example.test',
+            'password' => 'correct-horse-battery-staple',
+            'two_factor_secret' => Crypt::encryptString('test-only-totp-secret'),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->post('/login', [
+            'email' => $operator->email,
+            'password' => 'correct-horse-battery-staple',
+        ])->assertRedirect('/two-factor-challenge');
+    }
+
+    public function test_passkey_registration_requires_fresh_password_confirmation(): void
+    {
+        $operator = User::factory()->create();
+
+        $this->actingAs($operator)
+            ->get('/user/passkeys/options')
+            ->assertRedirect('/user/confirm-password');
+    }
+
+    public function test_an_operator_cannot_remove_another_users_passkey(): void
+    {
+        $operator = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $passkey = $otherUser->passkeys()->create([
+            'name' => 'Other device',
+            'credential_id' => (string) Str::uuid(),
+            'credential' => [],
+        ]);
+
+        $this->actingAs($operator)
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->delete(route('passkey.destroy', $passkey))
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('passkeys', ['id' => $passkey->getKey(), 'user_id' => $otherUser->getKey()]);
+    }
+
+    public function test_the_passkey_trust_configuration_never_uses_request_host_headers(): void
+    {
+        $configuration = file_get_contents(config_path('fortify.php'));
+
+        $this->assertIsString($configuration);
+        $this->assertStringContainsString('OPENPAY_PASSKEY_RP_ID', $configuration);
+        $this->assertStringContainsString('OPENPAY_PASSKEY_ALLOWED_ORIGINS', $configuration);
+        $this->assertStringNotContainsString('HTTP_HOST', $configuration);
+        $this->assertStringNotContainsString('X_FORWARDED_HOST', $configuration);
+    }
+
+    public function test_recovery_code_regeneration_invalidates_acknowledgement_without_auditing_secrets(): void
+    {
+        $operator = User::factory()->create([
+            'two_factor_confirmed_at' => now(),
+            'two_factor_recovery_codes' => Crypt::encryptString('[]'),
+            'recovery_codes_confirmed_at' => now(),
+        ]);
+
+        event(new RecoveryCodesGenerated($operator));
+
+        $this->assertNull($operator->fresh()->recovery_codes_confirmed_at);
+        $this->assertDatabaseHas('security_audits', [
+            'user_id' => $operator->getKey(),
+            'action' => 'recovery_codes_generated',
+        ]);
+        $this->assertSame(['id', 'user_id', 'action', 'created_at'], array_keys(SecurityAudit::query()->firstOrFail()->getAttributes()));
     }
 }

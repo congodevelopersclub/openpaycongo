@@ -3,20 +3,25 @@
 namespace App\Providers;
 
 use App\Listeners\EstablishFinancialOperatorMfaSession;
+use App\Listeners\InvalidateRecoveryCodeAcknowledgement;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
-use Laravel\Fortify\Fortify;
+use Laravel\Fortify\Events\RecoveryCodesGenerated;
+use Laravel\Fortify\Events\TwoFactorAuthenticationEnabled;
 use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
+use Laravel\Fortify\Fortify;
 
 final class FortifyServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
         Event::listen(ValidTwoFactorAuthenticationCodeProvided::class, EstablishFinancialOperatorMfaSession::class);
+        Event::listen(RecoveryCodesGenerated::class, InvalidateRecoveryCodeAcknowledgement::class);
+        Event::listen(TwoFactorAuthenticationEnabled::class, InvalidateRecoveryCodeAcknowledgement::class);
 
         Fortify::loginView(static fn () => view('auth.login'));
         Fortify::twoFactorChallengeView(static fn () => view('auth.two-factor-challenge'));

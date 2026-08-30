@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Secure your administrator account</title>
+    @if (! app()->environment('testing'))
+        @vite(['resources/js/app.js'])
+    @endif
 </head>
 <body>
     <main>
@@ -43,6 +46,40 @@
                     </label>
                     <button type="submit">Continue</button>
                 </form>
+            </section>
+        @endif
+
+        @if ($passkeysAvailable)
+            <section>
+                <h2>Passkeys</h2>
+                <p>Passkeys are strongly recommended as an additional sign-in method. Your password and recovery flow remain available.</p>
+                <p>Confirm your password before adding or removing a passkey.</p>
+
+                <form data-passkey-registration>
+                    <label for="passkey_name">Passkey name</label>
+                    <input id="passkey_name" data-passkey-name type="text" maxlength="120" required>
+                    <button type="submit">Add passkey</button>
+                    <p data-passkey-status aria-live="polite"></p>
+                </form>
+
+                @if ($passkeys->isNotEmpty())
+                    <h3>Your passkeys</h3>
+                    <ul>
+                        @foreach ($passkeys as $passkey)
+                            <li>
+                                {{ $passkey->name }}
+                                @if ($passkey->last_used_at !== null)
+                                    (last used {{ $passkey->last_used_at->toDateString() }})
+                                @endif
+                                <form method="POST" action="{{ route('passkey.destroy', $passkey) }}">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit">Remove passkey</button>
+                                </form>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
             </section>
         @endif
     </main>

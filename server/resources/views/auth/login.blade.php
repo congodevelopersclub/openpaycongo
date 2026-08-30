@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sign in</title>
+    @if (! app()->environment('testing'))
+        @vite(['resources/js/app.js'])
+    @endif
 </head>
 <body>
     <main>
@@ -25,6 +28,13 @@
 
             <button type="submit">Sign in</button>
         </form>
+
+        <section data-passkey-login hidden>
+            <h2>Passkey</h2>
+            <p>Use a passkey registered to this account.</p>
+            <button type="button" data-passkey-login-button>Sign in with a passkey</button>
+            <p data-passkey-status aria-live="polite"></p>
+        </section>
 
         @if (Route::has('password.request'))
             <p><a href="{{ route('password.request') }}">Recover your account</a></p>
