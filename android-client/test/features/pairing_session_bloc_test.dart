@@ -244,7 +244,7 @@ void main() {
     },
   );
   test(
-    'deferred stale save reconciles to the immediate restart session',
+    'restart confirmation waits for a deferred prior save to settle',
     () async {
       final PairingSession newSession = _session(PairingPhase.pending);
       final _DeferredFirstSaveStore store = _DeferredFirstSaveStore(newSession);
@@ -270,11 +270,11 @@ void main() {
         (PairingSessionState state) => state is PairingSessionPending,
       );
       bloc.add(const PairingSessionStarted());
-      await pending;
-      await store.newSavePersisted.future;
-      expect(store.value, same(newSession));
+      expect(bloc.state, isA<PairingSessionLoading>());
 
       store.releaseOldSave.complete();
+      await pending;
+      await store.newSavePersisted.future;
       await gateway.oldBeginReturned.future;
       await store.oldSaveOutcome.future;
 
@@ -315,7 +315,7 @@ void main() {
     await bloc.close();
   });
   test(
-    'deferred cancel cleanup cannot emit idle over an immediate restart',
+    'restart waits for cancellation cleanup before confirming durable pairing',
     () async {
       final PairingSession oldSession = _session(PairingPhase.pending);
       final PairingSession newSession = _session(PairingPhase.pending);
@@ -347,11 +347,16 @@ void main() {
         (PairingSessionState state) =>
             state is PairingSessionPending && state.session == newSession,
       );
+      final Future<void> restartStarted = telemetry.next(
+        PairingTelemetrySignal.started,
+      );
       bloc.add(const PairingSessionStarted());
-      await newPending;
-      expect(store.value, same(newSession));
+      await restartStarted;
+      expect(bloc.state, isA<PairingSessionLoading>());
+      expect(store.value, same(oldSession));
 
       store.releaseClear.complete();
+      await newPending;
       await store.newSessionRestored.future;
 
       expect(bloc.state, isA<PairingSessionPending>());
@@ -361,6 +366,71 @@ void main() {
         telemetry.signals.where(
           (PairingTelemetrySignal signal) =>
               signal == PairingTelemetrySignal.cancelled,
+        ),
+        hasLength(1),
+      );
+      await bloc.close();
+    },
+  );
+  test(
+    'a second cancel owns a superseding start while earlier cleanup is pending',
+    () async {
+      final PairingSession first = _session(PairingPhase.pending);
+      final PairingSession second = PairingSession(
+        sessionId: 'second',
+        phase: PairingPhase.pending,
+        updatedAt: DateTime.utc(2026, 1, 2),
+      );
+      final _TwoStageDeferredClearStore store = _TwoStageDeferredClearStore();
+      final _SupersededCancelGateway gateway = _SupersededCancelGateway(first);
+      final _Telemetry telemetry = _Telemetry();
+      final PairingSessionBloc bloc = PairingSessionBloc(
+        store: store,
+        gateway: gateway,
+        telemetry: telemetry,
+      );
+      final Future<PairingSessionState> firstPending = bloc.stream.firstWhere(
+        (PairingSessionState state) =>
+            state is PairingSessionPending && state.session == first,
+      );
+      bloc.add(const PairingSessionStarted());
+      await firstPending;
+
+      bloc.add(const PairingSessionCancelled());
+      await store.firstClearEntered.future;
+      bloc.add(const PairingSessionStarted());
+      await gateway.secondBeginEntered.future;
+      final Future<void> secondCancelled = telemetry.next(
+        PairingTelemetrySignal.cancelled,
+      );
+      bloc.add(const PairingSessionCancelled());
+      await secondCancelled;
+      expect(
+        telemetry.signals.where(
+          (PairingTelemetrySignal signal) =>
+              signal == PairingTelemetrySignal.cancelled,
+        ),
+        hasLength(2),
+      );
+
+      gateway.completeSecond(second);
+      await gateway.secondBeginReturned.future;
+      final Future<PairingSessionState> idle = bloc.stream.firstWhere(
+        (PairingSessionState state) => state is PairingSessionIdle,
+      );
+      store.releaseFirstClear.complete();
+      await store.secondClearEntered.future;
+      store.releaseSecondClear.complete();
+      await idle;
+
+      expect(bloc.state, isA<PairingSessionIdle>());
+      expect(store.value, isNull);
+      expect(store.saveCalls, 1);
+      expect(
+        telemetry.signals.where(
+          (PairingTelemetrySignal signal) =>
+              signal == PairingTelemetrySignal.pending ||
+              signal == PairingTelemetrySignal.active,
         ),
         hasLength(1),
       );
@@ -727,6 +797,27 @@ final class _DeferredClearStore extends _Store {
   }
 }
 
+final class _TwoStageDeferredClearStore extends _Store {
+  final Completer<void> firstClearEntered = Completer<void>();
+  final Completer<void> releaseFirstClear = Completer<void>();
+  final Completer<void> secondClearEntered = Completer<void>();
+  final Completer<void> releaseSecondClear = Completer<void>();
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    if (clearCalls == 1) {
+      firstClearEntered.complete();
+      await releaseFirstClear.future;
+    } else {
+      secondClearEntered.complete();
+      await releaseSecondClear.future;
+    }
+    value = null;
+  }
+}
+
 final class _FailOnceClearStore extends _Store {
   final Completer<void> firstClearAttempt = Completer<void>();
   final Completer<void> resumedClearEntered = Completer<void>();
@@ -763,6 +854,31 @@ final class _SequenceGateway implements PairingSessionGateway {
 
   @override
   Future<PairingSession> begin() async => sessions[_next++];
+
+  @override
+  Future<PairingSession> refresh(String sessionId) => begin();
+}
+
+final class _SupersededCancelGateway implements PairingSessionGateway {
+  _SupersededCancelGateway(this.first);
+
+  final PairingSession first;
+  final Completer<PairingSession> _second = Completer<PairingSession>();
+  final Completer<void> secondBeginEntered = Completer<void>();
+  final Completer<void> secondBeginReturned = Completer<void>();
+  int calls = 0;
+
+  @override
+  Future<PairingSession> begin() async {
+    calls++;
+    if (calls == 1) return first;
+    secondBeginEntered.complete();
+    final PairingSession session = await _second.future;
+    secondBeginReturned.complete();
+    return session;
+  }
+
+  void completeSecond(PairingSession session) => _second.complete(session);
 
   @override
   Future<PairingSession> refresh(String sessionId) => begin();
