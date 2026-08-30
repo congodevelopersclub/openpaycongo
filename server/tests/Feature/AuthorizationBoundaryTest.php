@@ -34,11 +34,17 @@ final class AuthorizationBoundaryTest extends TestCase
             'GET|HEAD filament/exports/{export}/download' => 'filament.exports.download',
             'GET|HEAD filament/imports/{import}/failed-rows/download' => 'filament.imports.failed-rows.download',
         ];
+        // Passport validates the confidential client credentials in the token exchange itself.
+        // It is intentionally reviewed separately from generic anonymous routes.
+        $confidentialClientTokenExchangeRoutes = [
+            'POST oauth/token' => 'passport.token',
+        ];
         $authorizedRoutes = [];
         $runtimeRouteCount = 0;
 
         self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
+        self::assertCount(1, $confidentialClientTokenExchangeRoutes);
         self::assertCount(0, $authorizedRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
@@ -59,6 +65,16 @@ final class AuthorizationBoundaryTest extends TestCase
                     $signedFrameworkRoutes[$signature],
                     $route->getName(),
                     "Framework route [{$signature}] must retain its explicit signed-route inventory entry.",
+                );
+
+                continue;
+            }
+
+            if (array_key_exists($signature, $confidentialClientTokenExchangeRoutes)) {
+                self::assertSame(
+                    $confidentialClientTokenExchangeRoutes[$signature],
+                    $route->getName(),
+                    "Token exchange [{$signature}] must retain its explicit confidential-client inventory entry.",
                 );
 
                 continue;
@@ -92,6 +108,16 @@ final class AuthorizationBoundaryTest extends TestCase
         foreach ($operationsRoutes as $route) {
             self::assertContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($route));
         }
+    }
+
+    public function test_passport_token_exchange_is_reviewed_as_a_confidential_client_boundary(): void
+    {
+        $route = collect(app('router')->getRoutes()->getRoutes())
+            ->first(static fn ($route): bool => implode('|', $route->methods()).' '.$route->uri() === 'POST oauth/token');
+
+        self::assertNotNull($route);
+        self::assertSame('passport.token', $route->getName());
+        self::assertStringContainsString('AccessTokenController', (string) $route->getAction('controller'));
     }
 
     public function test_lookalike_middleware_aliases_do_not_count_as_authorization(): void
