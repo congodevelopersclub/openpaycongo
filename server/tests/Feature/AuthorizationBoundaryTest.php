@@ -6,6 +6,7 @@ use App\Http\Middleware\RequireFinancialOperatorMfa;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\Authorize;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
+use Laravel\Passport\Http\Middleware\CheckToken;
 use Tests\TestCase;
 
 final class AuthorizationBoundaryTest extends TestCase
@@ -92,7 +93,7 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(40, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(41, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void
@@ -131,6 +132,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertTrue($this->isExpectedBoundaryMiddleware(Authenticate::class));
         self::assertTrue($this->isExpectedBoundaryMiddleware('can:view,deposit'));
         self::assertTrue($this->isExpectedBoundaryMiddleware(Authorize::class));
+        self::assertTrue($this->isExpectedBoundaryMiddleware(CheckToken::class.':payment-requests:read'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('auth.optional'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('authorize-anything'));
 
@@ -176,13 +178,15 @@ final class AuthorizationBoundaryTest extends TestCase
         $isAuthorizationForm = str_starts_with($middleware, 'can:')
             || $middleware === Authorize::class
             || str_starts_with($middleware, Authorize::class.':');
+        $isServiceTokenForm = $middleware === CheckToken::class
+            || str_starts_with($middleware, CheckToken::class.':');
 
-        if (! $isAuthenticationForm && ! $isAuthorizationForm) {
+        if (! $isAuthenticationForm && ! $isAuthorizationForm && ! $isServiceTokenForm) {
             return false;
         }
 
         return collect(app('router')->resolveMiddleware([$middleware]))
             ->map(static fn (string $resolved): string => explode(':', $resolved, 2)[0])
-            ->contains(static fn (string $resolved): bool => $resolved === Authenticate::class || $resolved === Authorize::class);
+            ->contains(static fn (string $resolved): bool => in_array($resolved, [Authenticate::class, Authorize::class, CheckToken::class], true));
     }
 }

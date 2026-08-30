@@ -40,6 +40,11 @@ final class IdentityBoundaryConfigurationTest extends TestCase
         self::assertSame('oauth/token', $oauthRoutes->sole()->uri());
         self::assertSame(['POST'], $oauthRoutes->sole()->methods());
         self::assertSame('passport.token', $oauthRoutes->sole()->getName());
+
+        $sanctumRoutes = collect(app('router')->getRoutes()->getRoutes())
+            ->filter(static fn ($route): bool => str_starts_with($route->uri(), 'sanctum/'));
+
+        self::assertCount(0, $sanctumRoutes);
     }
 
     public function test_mobile_ownership_is_resolved_from_the_authenticated_installation_not_request_input(): void
