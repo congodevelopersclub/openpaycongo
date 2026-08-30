@@ -31,6 +31,7 @@ test('security gate uses local scanners and keeps full controls off ordinary pul
   assert.match(fast, /dir --config=.*--redact --exit-code=1/);
   assert.match(full, /cyclonedx-json/);
   assert.match(full, /image --severity HIGH,CRITICAL --exit-code 1/);
+  assert.match(workflow, /actions\/upload-artifact@[\s\S]*?\n\s+if: always\(\)[\s\S]*?if-no-files-found: error/);
   for (const control of ['vulnerable-composer', 'vulnerable-flutter', 'security-composer-audit-proof', 'security-php-static-proof', 'security-authorization-proof', 'analyze-proof']) {
     assert.match(proofs, new RegExp(control));
   }
