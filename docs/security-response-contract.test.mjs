@@ -21,13 +21,13 @@ const sensitiveTabletopFields = [
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:raw\s+sms|sms\s+body)\s*:/im,
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:phone(?:\s+number)?|customer\s+name|customer\s+reference)\s*:/im,
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:payment\s+(?:amount|reference)|account\s+(?:number|balance))\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:authorization|bearer|jwt|access\s+token)\s*:/im,
-  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:api\s+key|client\s+secret|refresh\s+token|password)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:authorization|bearer|jwt|access(?:\s+|_)token)\s*:/im,
+  /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:api(?:\s+|_)key|client(?:\s+|_)secret|refresh(?:\s+|_)token|password)\s*:/im,
   /^\s*(?:(?:[-*+]\s*)|(?:\d+[.)]\s*))?(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\s*:/im,
   /\b(?:raw\s+sms|sms\s+body)\b\s+(?:is|was|contains)\b/i,
   /\b(?:phone(?:\s+number)?|customer\s+(?:name|reference)|payment\s+(?:amount|reference)|account\s+(?:number|balance))\b\s+(?:is|was|equals)\b/i,
-  /\b(?:authorization|bearer|jwt|access\s+token)\b\s+(?:is|was)\b/i,
-  /\b(?:api\s+key|client\s+secret|refresh\s+token|password)\b\s+(?:is|was|equals|contains)\b/i,
+  /\b(?:authorization|bearer|jwt|access(?:\s+|_)token)\b\s+(?:is|was)\b/i,
+  /\b(?:api(?:\s+|_)key|client(?:\s+|_)secret|refresh(?:\s+|_)token|password)\b\s+(?:is|was|equals|contains)\b/i,
   /\b(?:internal\s+(?:host|url)|topology|private\s+(?:ip|endpoint))\b\s+(?:is|was)\b/i,
   /\+\d{7,15}\b/,
   /\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
@@ -42,15 +42,17 @@ function plainSafetyText(markdown) {
   return markdown
     .replace(/\[([^\]\n]+)\]\([^\)\n]*\)/g, '$1')
     .replace(/<[^>\n]*>/g, '')
-    .replace(/[`*_]/g, '');
+    .replace(/_([^_\n]+):_/g, '$1:')
+    .replace(/[`*]/g, '');
 }
 
 function assertSyntheticTabletop(fixture) {
   for (const field of requiredTabletopFields) assert.match(fixture, field);
 
-  const normalizedSafetyText = plainSafetyText(fixture);
-  for (const field of sensitiveTabletopFields) {
-    assert.doesNotMatch(normalizedSafetyText, field, `synthetic tabletop contains a prohibited field: ${field}`);
+  for (const safetyText of [fixture, plainSafetyText(fixture)]) {
+    for (const field of sensitiveTabletopFields) {
+      assert.doesNotMatch(safetyText, field, `synthetic tabletop contains a prohibited field: ${field}`);
+    }
   }
 
   const stepOneStart = fixture.indexOf('1. A triage owner');
@@ -125,8 +127,11 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     '- Authorization: Bearer synthetic-token-value',
     '- JWT: synthetic-token-value',
     '- API key: sk_live_example',
+    '- api_key: sk_live_REALVALUE',
     '- client secret: synthetic-client-secret-value',
+    '- client_secret: synthetic-client-secret-value',
     '- refresh token: synthetic-refresh-token-value',
+    '- access_token: synthetic-access-token-value',
     'The password is synthetic-password-value.',
     '- Internal host: 10.0.0.1',
     'The raw SMS body contains synthetic message text.',
@@ -140,6 +145,8 @@ test('private-report tabletop fixture is synthetic and excludes sensitive conten
     'Connect to http://[::1]/admin for the synthetic topology.',
     'Connect to http://[fe80::1]/admin for the synthetic topology.',
     'Connect to http://[fd00::1]/admin for the synthetic topology.',
+    '[admin](http://10.0.0.1/private)',
+    '&lt;a href="http://10.0.0.1/private"&gt;admin&lt;/a&gt;',
   ];
 
   for (const mutation of mutations) {
