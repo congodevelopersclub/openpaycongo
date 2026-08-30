@@ -308,8 +308,10 @@ final class RecordProviderDeposit
 
     private function isRetryableTransactionFailure(QueryException $exception): bool
     {
+        $driverErrorCode = $exception->errorInfo[1] ?? null;
+
         return in_array($exception->getCode(), ['23000', '23505'], true)
-            || str_contains($exception->getMessage(), 'Record has changed since last read');
+            || (is_int($driverErrorCode) || is_string($driverErrorCode)) && (string) $driverErrorCode === '1020';
     }
 
     /** @return array<string, string> */
