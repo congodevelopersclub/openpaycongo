@@ -86,7 +86,10 @@ run_pair() {
     expected_credit=25000
   fi
   assert_state "$expected_deposits" "$expected_entries" "$expected_credit"
-  if [[ "$second_sender" == "" && "$second_reference" == "" ]]; then
+  if [[ "$second_reference" != "" ]]; then
+    docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
+    docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$second_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$second_active" --env DEPOSIT_TEST_PROVIDER_REFERENCE="$second_reference" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
+  elif [[ "$second_sender" == "" ]]; then
     docker run "${base_args[@]}" --env DEPOSIT_LOOKUP_TOKEN_KEYS="$first_ring" --env DEPOSIT_LOOKUP_TOKEN_ACTIVE_KEY_ID="$first_active" "$image" php tests/Support/record_provider_deposit.php | grep -Fx replayed
   fi
   assert_state "$expected_deposits" "$expected_entries" "$expected_credit"
