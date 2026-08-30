@@ -22,10 +22,14 @@ final class AuthorizationBoundaryTest extends TestCase
             'GET|HEAD storage/{path}' => 'storage.local',
             'PUT storage/{path}' => 'storage.local.upload',
         ];
+        $authorizedRoutes = [
+            'GET|HEAD reconciliation/deposits/{deposit}' => ['auth', 'can:view,deposit'],
+        ];
         $runtimeRouteCount = 0;
 
         self::assertCount(5, $anonymousRoutes);
         self::assertCount(2, $signedFrameworkRoutes);
+        self::assertCount(1, $authorizedRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
             $runtimeRouteCount++;
@@ -45,13 +49,19 @@ final class AuthorizationBoundaryTest extends TestCase
                 continue;
             }
 
+            if (array_key_exists($signature, $authorizedRoutes)) {
+                self::assertSame($authorizedRoutes[$signature], array_values(array_intersect($authorizedRoutes[$signature], $route->middleware())));
+
+                continue;
+            }
+
             self::assertTrue(
                 collect(app('router')->gatherRouteMiddleware($route))->contains(fn (string $middleware): bool => $this->isExpectedBoundaryMiddleware($middleware)),
                 "Route [{$signature}] is neither in the reviewed anonymous inventory nor protected by authorization middleware.",
             );
         }
 
-        self::assertSame(7, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(8, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_lookalike_middleware_aliases_do_not_count_as_authorization(): void

@@ -16,7 +16,7 @@ class Deposit extends ImmutableFinancialModel
     protected $keyType = 'string';
 
     protected $fillable = [
-        'organization_id', 'customer_id', 'source_installation_id', 'reverses_deposit_id', 'kind',
+        'organization_id', 'customer_id', 'source_installation_id', 'reverses_deposit_id', 'reversal_reason', 'reversed_by_user_id', 'kind',
         'amount_minor', 'currency', 'provider_reference', 'provider_reference_digest', 'provider_reference_lookup_id', 'provider_reference_key_version', 'provider_occurred_at',
         'received_at', 'sender_identifier', 'receiver_identifier', 'idempotency_digest', 'idempotency_key_version',
     ];

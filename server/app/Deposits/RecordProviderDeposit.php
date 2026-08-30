@@ -11,6 +11,7 @@ use App\Models\Deposit;
 use App\Models\LedgerEntry;
 use App\Models\PrivateLookupAlias;
 use App\Models\SourceInstallation;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Database\QueryException;
@@ -103,11 +104,11 @@ final class RecordProviderDeposit
         throw new LogicException('Provider deposit recording retry limit was exhausted.');
     }
 
-    public function reverse(Deposit $deposit): ReverseProviderDepositResult
+    public function reverse(Deposit $deposit, ?User $actor = null, ?string $reason = null): ReverseProviderDepositResult
     {
         for ($attempt = 1; $attempt <= 3; $attempt++) {
             try {
-                return DB::transaction(function () use ($deposit): ReverseProviderDepositResult {
+                return DB::transaction(function () use ($deposit, $actor, $reason): ReverseProviderDepositResult {
                     $original = Deposit::query()->lockForUpdate()->find($deposit->id);
                     if ($original === null || $original->kind !== DepositKind::ProviderCredit->value) {
                         throw new InvalidArgumentException('Deposit cannot be reversed.');
@@ -124,6 +125,8 @@ final class RecordProviderDeposit
                         'customer_id' => $original->customer_id,
                         'source_installation_id' => $original->source_installation_id,
                         'reverses_deposit_id' => $original->id,
+                        'reversal_reason' => $reason,
+                        'reversed_by_user_id' => $actor?->id,
                         'kind' => DepositKind::ProviderReversal->value,
                         'amount_minor' => $original->amount_minor,
                         'currency' => $original->currency,
@@ -131,7 +134,7 @@ final class RecordProviderDeposit
                         'idempotency_digest' => $this->activeDigest($this->digests('reversal', $original->organization_id, $original->id)),
                         'idempotency_key_version' => $this->activeKeyId(),
                     ]);
-                    $this->appendEntries($reversal, $recordedAt, true);
+                    $this->appendEntries($reversal, $recordedAt, true, $original);
                     $this->debitCustomerCredit($reversal);
 
                     return new ReverseProviderDepositResult(ReversalResult::Reversed, $reversal);
@@ -275,19 +278,21 @@ final class RecordProviderDeposit
         );
     }
 
-    private function appendEntries(Deposit $deposit, CarbonImmutable $recordedAt, bool $reverse): void
+    private function appendEntries(Deposit $deposit, CarbonImmutable $recordedAt, bool $reverse, ?Deposit $original = null): void
     {
         $amount = (int) $deposit->amount_minor;
         $entries = $reverse
             ? [['account' => 'customer_credit', 'debit_minor' => $amount, 'credit_minor' => 0], ['account' => 'provider_receivable', 'debit_minor' => 0, 'credit_minor' => $amount]]
             : [['account' => 'provider_receivable', 'debit_minor' => $amount, 'credit_minor' => 0], ['account' => 'customer_credit', 'debit_minor' => 0, 'credit_minor' => $amount]];
 
+        $originalEntries = $original?->ledgerEntries()->get()->keyBy('account');
         foreach ($entries as $entry) {
             LedgerEntry::query()->create([
                 'deposit_id' => $deposit->id,
                 'organization_id' => $deposit->organization_id,
                 'currency' => $deposit->currency,
                 'recorded_at' => $recordedAt,
+                'reverses_ledger_entry_id' => $originalEntries?->get($entry['account'])?->id,
                 ...$entry,
             ]);
         }

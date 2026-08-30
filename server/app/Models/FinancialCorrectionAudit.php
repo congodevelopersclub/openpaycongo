@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class LedgerEntry extends ImmutableFinancialModel
+class FinancialCorrectionAudit extends ImmutableFinancialModel
 {
     use HasUuids;
 
@@ -13,7 +13,7 @@ class LedgerEntry extends ImmutableFinancialModel
 
     protected $keyType = 'string';
 
-    protected $fillable = ['deposit_id', 'organization_id', 'reverses_ledger_entry_id', 'account', 'debit_minor', 'credit_minor', 'currency', 'recorded_at'];
+    protected $fillable = ['deposit_id', 'organization_id', 'actor_user_id', 'correction', 'reason', 'recorded_at'];
 
     protected function casts(): array
     {
@@ -26,9 +26,9 @@ class LedgerEntry extends ImmutableFinancialModel
         return $this->belongsTo(Deposit::class);
     }
 
-    /** @return BelongsTo<LedgerEntry, $this> */
-    public function reversesLedgerEntry(): BelongsTo
+    /** @return BelongsTo<User, $this> */
+    public function actor(): BelongsTo
     {
-        return $this->belongsTo(self::class, 'reverses_ledger_entry_id');
+        return $this->belongsTo(User::class, 'actor_user_id');
     }
 }

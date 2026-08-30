@@ -2,10 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\Deposit;
 use App\Operations\LaravelMigrationReadiness;
 use App\Operations\LedgerProjectionReadiness;
 use App\Operations\MigrationReadiness;
 use App\Operations\ProjectionReadiness;
+use App\Policies\DepositPolicy;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -24,6 +27,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Gate::policy(Deposit::class, DepositPolicy::class);
     }
 }

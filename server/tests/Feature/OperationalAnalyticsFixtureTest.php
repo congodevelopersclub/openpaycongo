@@ -20,7 +20,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
-        $expectedRevision = '2026_09_01_000000_create_payment_request_credit_tables';
+        $expectedRevision = '2026_09_02_000000_add_reconciliation_correction_evidence';
         $this->getJson('/healthz')->assertOk()->assertExactJson(['status' => 'ok']);
         $ready = $this->getJson('/readyz')
             ->assertOk()
@@ -137,7 +137,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 
         $this->getJson('/version')
             ->assertOk()
-            ->assertJson(['migration_revision' => '2026_09_01_000000_create_payment_request_credit_tables']);
+            ->assertJson(['migration_revision' => '2026_09_02_000000_add_reconciliation_correction_evidence']);
     }
 
     public function test_trusted_proxy_https_forwarding_is_recognized(): void
