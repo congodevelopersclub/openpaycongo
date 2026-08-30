@@ -45,7 +45,7 @@ FROM quality AS test
 COPY --from=php83-platform-check /php83-platform-check /php83-platform-check
 RUN composer test
 
-FROM composer:2.8@sha256:5248900ab8b5f7f880c2d62180e40960cd87f60149ec9a1abfd62ac72a02577c AS production-dependencies
+FROM composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d AS production-dependencies
 
 WORKDIR /app
 
@@ -55,35 +55,48 @@ RUN composer install --no-dev --no-interaction --prefer-dist --no-scripts
 COPY server/ ./
 RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
 
-FROM dunglas/frankenphp:1.12.7-php8.3-alpine@sha256:049b8d8356efceb93c91ed42866de890534310bcef4ad4dde902029e4a0d20c3 AS production
+FROM php:8.3-fpm-alpine@sha256:958112faffb434ca47ac10e51ef40506af76505adac4b879f013540a91d32a67 AS production
 
-RUN install-php-extensions pdo_pgsql pdo_mysql pdo_sqlite pcntl \
-    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
-    && addgroup -S -g 10001 openpay \
-    && adduser -S -D -H -u 10001 -G openpay openpay
+RUN apk add --no-cache --upgrade \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
+        openssl=3.5.8-r0 \
+    && apk add --no-cache --virtual .build-deps \
+        autoconf=2.73-r0 \
+        dpkg=1.23.7-r0 \
+        dpkg-dev=1.23.7-r0 \
+        file=5.47-r2 \
+        g++=15.2.0-r5 \
+        gcc=15.2.0-r5 \
+        linux-headers=7.0.0-r1 \
+        make=4.4.1-r4 \
+        musl-dev=1.2.6-r2 \
+        pkgconf=2.5.1-r0 \
+        postgresql18-dev=18.6-r0 \
+        re2c=4.5.1-r0 \
+        sqlite-dev=3.53.4-r0 \
+    && docker-php-ext-install pdo_pgsql pdo_mysql pdo_sqlite pcntl \
+    && apk del .build-deps \
+    && apk add --no-cache libpq=18.6-r0 \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
 WORKDIR /var/www/html
 
-COPY --chown=openpay:openpay --from=production-dependencies /app ./
-COPY server/docker/Caddyfile /etc/frankenphp/Caddyfile
+COPY --chown=www-data:www-data --from=production-dependencies /app ./
 
-RUN mkdir -p /config/caddy /data/caddy bootstrap/cache storage/app storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/home/.config/psysh \
-    && chown -R openpay:openpay /config/caddy /data/caddy bootstrap/cache storage
-
-RUN rm -rf tests phpunit.xml phpstan.neon pint.json .env .env.example
+RUN mkdir -p bootstrap/cache storage/app storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/home/.config/psysh \
+    && chown -R www-data:www-data bootstrap/cache storage \
+    && rm -rf tests phpunit.xml phpstan.neon pint.json .env .env.example
 
 ENV APP_ENV=production \
     APP_DEBUG=false \
     HOME=/var/www/html/storage/home \
-    SERVER_NAME=:8080 \
     LOG_CHANNEL=stderr \
     LOG_LEVEL=warning
 
-USER openpay
+USER www-data
 
-EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD php -r '$headers = @get_headers("http://127.0.0.1:8080/healthz"); exit(($headers[0] ?? "") === "HTTP/1.1 200 OK" ? 0 : 1);'
+EXPOSE 9000
 
 FROM production AS production-contract
 

@@ -1,9 +1,10 @@
 # Self-hosted Laravel runtime
 
 `compose.yaml` runs one small PostgreSQL-backed Laravel installation. The
-application image is built in stages, has no development dependencies, runs as
-the unprivileged `openpay` user, and writes only to `storage/` and
-`bootstrap/cache`. Its Docker health check requests `/healthz`.
+PHP-FPM application image is built in stages, has no development dependencies,
+runs as the unprivileged `www-data` user, and writes only to `storage/` and
+`bootstrap/cache`. A separate pinned nginx container serves only `public/` and
+its Docker health check requests `/healthz`.
 
 This is an operational deployment baseline, not a declaration that the
 unfinished payment, identity, privacy, retention, or recovery protocol is safe
@@ -38,7 +39,7 @@ docker compose up --build -d
 curl --fail http://127.0.0.1:8080/healthz
 ```
 
-Compose first runs the one-shot `migrate` service. The `app`, `queue`, and
+Compose first runs the one-shot `migrate` service. The `php`, `nginx`, `queue`, and
 `scheduler` services wait for PostgreSQL health and successful migrations, use
 `unless-stopped` restart policies, and share the named `app-storage` volume.
 `postgres-data` persists the PostgreSQL cluster. The queue is explicitly
@@ -48,8 +49,7 @@ Terminate TLS before the app with a maintained reverse proxy and certificate
 automation. Keep the app port private to that proxy, set
 `OPENPAY_APP_URL` to the public `https://` URL, and restrict PostgreSQL to the
 Compose network. Do not expose PostgreSQL or the unencrypted application port
-to the internet. The shipped Caddy configuration trusts forwarded headers from
-loopback only.
+to the internet. nginx trusts forwarded headers from loopback only by default.
 If a TLS proxy needs forwarded-header support, set
 `OPENPAY_TRUSTED_PROXY_CIDRS` to a space-separated list containing only that
 proxy's exact CIDR addresses (for example, `172.30.0.2/32`). The safe default
@@ -58,8 +58,9 @@ is loopback-only. Never use `private_ranges` or a broad private network.
 ## Resources and routine checks
 
 One clean idle Docker Compose smoke snapshot measured approximately 151 MiB
-total resident memory: app 52 MiB, queue 30 MiB, scheduler 27 MiB, and
-PostgreSQL 42 MiB. This is an idle observation, not a load or capacity result.
+total resident memory: nginx 13 MiB, PHP-FPM 31 MiB, queue 30 MiB, scheduler
+27 MiB, and PostgreSQL 52 MiB. This is an idle observation, not a load or
+capacity result.
 For a light single-host installation, begin with 1 vCPU and 1 GiB RAM, then
 measure the actual workload and alert on host memory, queue latency, and
 PostgreSQL volume capacity. Size durable storage and backup retention from the
@@ -79,7 +80,7 @@ removes it when observed, and fails on timeout; a stale marker from another run
 cannot make it pass. It places no customer data in logs or fixtures:
 
 ```bash
-docker compose exec -T app php artisan openpay:queue-probe --timeout=30
+docker compose exec -T queue php artisan openpay:queue-probe --timeout=30
 ```
 
 ## Backup, restore, and upgrades
@@ -111,5 +112,5 @@ destructive down migrations.
 ```bash
 docker compose build --pull
 docker compose run --rm migrate
-docker compose up -d --force-recreate app queue scheduler
+docker compose up -d --force-recreate php nginx queue scheduler
 ```

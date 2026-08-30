@@ -6,7 +6,6 @@ x-application-environment: &application-environment
   APP_KEY: ${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}
   DEPOSIT_LOOKUP_TOKEN_KEY: ${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}
   APP_URL: ${OPENPAY_APP_URL:-https://localhost}
-  OPENPAY_TRUSTED_PROXY_CIDRS: ${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
   LOG_CHANNEL: stderr
   LOG_LEVEL: warning
   DB_CONNECTION: pgsql
@@ -21,7 +20,7 @@ x-application-environment: &application-environment
   QUEUE_CONNECTION: database
 
 x-application: &application
-  image: ${OPENPAY_IMAGE:-congo-openpay:local}
+  image: ${OPENPAY_FPM_IMAGE:-congo-openpay-fpm:local}
   environment: *application-environment
   volumes:
     - app-storage:/var/www/html/storage
@@ -50,19 +49,30 @@ services:
     command: ["php", "artisan", "migrate", "--force"]
     restart: "no"
 
-  app:
+  php:
     <<: *application
     build:
       context: .
       dockerfile: server/Dockerfile
       target: production
-    ports:
-      - "${OPENPAY_HTTP_BIND_ADDRESS:-127.0.0.1}:${OPENPAY_HTTP_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: server/docker/nginx.Dockerfile
+    environment:
+      OPENPAY_TRUSTED_PROXY_CIDRS: ${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
+    ports:
+      - "${OPENPAY_HTTP_BIND_ADDRESS:-127.0.0.1}:${OPENPAY_HTTP_PORT:-8080}:8080"
+    depends_on:
+      php:
+        condition: service_started
     restart: unless-stopped
 
   queue:

@@ -8,16 +8,20 @@ use Tests\TestCase;
 
 final class ProductionRuntimeContractTest extends TestCase
 {
-    public function test_production_configuration_uses_frankenphp_and_rejects_builtin_php_servers(): void
+    public function test_production_configuration_uses_pinned_fpm_and_nginx_and_rejects_builtin_php_servers(): void
     {
         $dockerfile = file_get_contents(base_path('Dockerfile'));
         $compose = file_get_contents(file_exists('/compose.yaml') ? '/compose.yaml' : dirname(base_path()).'/compose.yaml');
-        $caddyfile = file_get_contents(base_path('docker/Caddyfile'));
+        $nginxDockerfile = file_get_contents(base_path('docker/nginx.Dockerfile'));
+        $nginxTemplate = file_get_contents(base_path('docker/nginx.conf.template'));
+        $proxyRenderer = file_get_contents(base_path('docker/10-openpay-proxies.sh'));
 
         self::assertIsString($dockerfile);
         self::assertIsString($compose);
-        self::assertIsString($caddyfile);
-        self::assertStringContainsString('dunglas/frankenphp:1.12.7-php8.3-alpine@sha256:', $dockerfile);
+        self::assertIsString($nginxDockerfile);
+        self::assertIsString($nginxTemplate);
+        self::assertIsString($proxyRenderer);
+        self::assertStringContainsString('php:8.3-fpm-alpine@sha256:', $dockerfile);
         self::assertStringContainsString('pdo_pgsql pdo_mysql pdo_sqlite pcntl', $dockerfile);
         self::assertStringContainsString('FROM production AS production-contract', $dockerfile);
         self::assertStringNotContainsString('production-security-contract', $dockerfile);
@@ -26,16 +30,25 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
         self::assertStringContainsString('${DEPOSIT_LOOKUP_TOKEN_KEY:?Set DEPOSIT_LOOKUP_TOKEN_KEY outside the repository}', $compose);
         self::assertMatchesRegularExpression('/postgres:16-alpine@sha256:[a-f0-9]{64}/', $compose);
-        self::assertStringContainsString('php_server', $caddyfile);
-        self::assertStringNotContainsString('trusted_proxies static private_ranges', $caddyfile);
-        self::assertStringContainsString('trusted_proxies static {$OPENPAY_TRUSTED_PROXY_CIDRS:127.0.0.1/32}', $caddyfile);
-        self::assertStringContainsString('trusted_proxies_strict', $caddyfile);
+        self::assertStringContainsString('nginx:', $compose);
+        self::assertStringContainsString('dockerfile: server/docker/nginx.Dockerfile', $compose);
+        self::assertStringContainsString('dockerfile: server/Dockerfile', $compose);
+        self::assertStringContainsString('php:9000', $nginxTemplate);
+        self::assertStringContainsString('__OPENPAY_TRUSTED_PROXY_DIRECTIVES__', $nginxTemplate);
+        self::assertStringContainsString('OPENPAY_TRUSTED_PROXY_CIDRS', $proxyRenderer);
+        self::assertStringNotContainsString('private_ranges', $nginxTemplate.$proxyRenderer);
         self::assertStringContainsString('${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}', $compose);
         $workflow = file_get_contents('/ci.yml');
         self::assertIsString($workflow);
         self::assertStringContainsString('--target production-contract -f server/Dockerfile .', $workflow);
+        self::assertStringContainsString('Run pinned production image vulnerability scans', $workflow);
+        self::assertStringContainsString('aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c', $workflow);
+        self::assertStringContainsString('congo-openpay-fpm:ci', $workflow);
+        self::assertStringContainsString('congo-openpay-nginx:ci', $workflow);
         self::assertStringNotContainsString('production-security-contract', $workflow);
         self::assertMatchesRegularExpression('/^FROM (?!production(?:-contract)?\b)[^\s]+@sha256:[a-f0-9]{64}/m', $dockerfile);
         self::assertDoesNotMatchRegularExpression('/(?:php\s+-S|artisan\s+serve)/', $dockerfile.$compose);
+        self::assertStringNotContainsString('frankenphp', $dockerfile.$compose);
+        self::assertStringNotContainsString('Caddyfile', $dockerfile.$compose);
     }
 }

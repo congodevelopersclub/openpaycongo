@@ -43,6 +43,18 @@ jobs:
         run: docker build --target test -f server/Dockerfile .
       - name: Build and contract-check the production image
         run: docker build --target production-contract -f server/Dockerfile .
+      - name: Build deployable FPM and nginx images
+        run: |
+          docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
+          docker build --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
+      - name: Run pinned production image vulnerability scans
+        run: |
+          set -euo pipefail
+          for image in congo-openpay-fpm:ci congo-openpay-nginx:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+              aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+              image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check "$image"
+          done
 
   postgres-migration:
     runs-on: ubuntu-latest
