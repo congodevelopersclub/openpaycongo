@@ -12,6 +12,7 @@ test('security response policy is private, accountable, and release-blocking', a
 
   for (const heading of [
     '## Private reporting',
+    '## Supported versions',
     '## Severity and release decisions',
     '## Ownership and response targets',
     '## Coordinated disclosure',
@@ -22,6 +23,9 @@ test('security response policy is private, accountable, and release-blocking', a
   }
 
   assert.match(security, /private vulnerability reporting is currently disabled/i);
+  assert.match(security, /No production-supported release currently exists/i);
+  assert.match(security, /Production release \| Not available/i);
+  assert.match(security, /Main branch and pull-request artifacts \| Not supported/i);
   assert.match(security, /Do not publish/i);
   assert.match(security, /Critical findings are release blockers/i);
   assert.match(security, /High findings are release blockers/i);

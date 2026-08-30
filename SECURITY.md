@@ -23,6 +23,22 @@ Safe public reports may describe an affected released version, high-level
 impact, and a synthetic reproduction without exploit payloads or sensitive
 details.
 
+## Supported versions
+
+No production-supported release currently exists. The checked-in Laravel and
+Flutter code, main branch, pull-request artifacts, and debug APKs are prototype
+or test evidence, not a supported security-release channel.
+
+| Version or artifact | Security support status | Notes |
+| --- | --- | --- |
+| Production release | Not available | No version has completed the repository's production release, private-reporting, and maintainer-authority prerequisites. |
+| Main branch and pull-request artifacts | Not supported | They may receive fixes, but they are not an assurance of a supported release or a public upgrade path. |
+
+Before declaring a supported version, maintainers must publish its immutable
+release identity, support window, private reporting route, release authority,
+and user upgrade path. Until then, this policy does not promise a security fix
+or patch timeline for prototype artifacts.
+
 ## Severity and release decisions
 
 The security triage owner classifies a confirmed report using impact,
