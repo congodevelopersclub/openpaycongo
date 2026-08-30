@@ -26,6 +26,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        Passport::ignoreRoutes();
+
         $this->app->bind(ProjectionReadiness::class, LedgerProjectionReadiness::class);
         $this->app->bind(MigrationReadiness::class, LaravelMigrationReadiness::class);
         $this->app->bind(FinancialOperatorMfaSession::class, EstablishedFinancialOperatorMfaSession::class);

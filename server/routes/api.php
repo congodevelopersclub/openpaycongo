@@ -7,9 +7,14 @@ use App\Models\DeveloperApplication;
 use App\Operations\AssessReadiness;
 use App\Operations\MigrationReadiness;
 use Illuminate\Support\Facades\Route;
+use Laravel\Passport\Http\Controllers\AccessTokenController;
 use Laravel\Passport\Http\Middleware\CheckToken;
 
 Route::get('/healthz', static fn () => response()->json(['status' => 'ok']));
+
+Route::post('/oauth/token', [AccessTokenController::class, 'issueToken'])
+    ->middleware('throttle')
+    ->name('passport.token');
 
 Route::get('/readyz', static function (AssessReadiness $readiness) {
     $status = $readiness->assess();

@@ -31,6 +31,14 @@ final class IdentityBoundaryConfigurationTest extends TestCase
         self::assertSame('web', config('fortify.guard'));
     }
 
+    public function test_authorization_code_ui_routes_are_absent_while_client_credentials_token_exchange_remains(): void
+    {
+        $routes = collect(app('router')->getRoutes()->getRoutes());
+
+        self::assertFalse($routes->contains(static fn ($route): bool => $route->uri() === 'oauth/authorize'));
+        self::assertNotNull($routes->first(static fn ($route): bool => $route->getName() === 'passport.token'));
+    }
+
     public function test_mobile_ownership_is_resolved_from_the_authenticated_installation_not_request_input(): void
     {
         $installation = SourceInstallation::query()->create([
