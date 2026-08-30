@@ -9,7 +9,7 @@ use App\Operations\MigrationReadiness;
 use App\Operations\ProjectionReadiness;
 use App\Policies\DepositPolicy;
 use App\Security\FinancialOperatorMfaSession;
-use App\Security\UnavailableFinancialOperatorMfaSession;
+use App\Security\EstablishedFinancialOperatorMfaSession;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -22,7 +22,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(ProjectionReadiness::class, LedgerProjectionReadiness::class);
         $this->app->bind(MigrationReadiness::class, LaravelMigrationReadiness::class);
-        $this->app->bind(FinancialOperatorMfaSession::class, UnavailableFinancialOperatorMfaSession::class);
+        $this->app->bind(FinancialOperatorMfaSession::class, EstablishedFinancialOperatorMfaSession::class);
     }
 
     /**

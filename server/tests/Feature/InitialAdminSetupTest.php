@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Models\InitialSetupState;
 use App\Models\Organization;
 use App\Models\User;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Auth\Access\AuthorizationException;
+use Laravel\Fortify\Events\ValidTwoFactorAuthenticationCodeProvided;
 use Tests\TestCase;
 
 final class InitialAdminSetupTest extends TestCase
@@ -56,5 +59,35 @@ final class InitialAdminSetupTest extends TestCase
         $this->assertDatabaseCount('organizations', 1);
         $this->assertSame(1, User::query()->count());
         $this->assertSame(1, Organization::query()->count());
+    }
+
+    public function test_password_only_operator_session_cannot_access_financial_operations(): void
+    {
+        $operator = User::factory()->create([
+            'is_financial_operator' => true,
+            'two_factor_confirmed_at' => now(),
+            'recovery_codes_confirmed_at' => now(),
+        ]);
+
+        $this->actingAs($operator);
+
+        $this->expectException(AuthorizationException::class);
+
+        app(FinancialOperatorMfaSession::class)->assertVerified($operator);
+    }
+
+    public function test_a_confirmed_totp_challenge_establishes_a_financial_operator_mfa_session(): void
+    {
+        $operator = User::factory()->create([
+            'is_financial_operator' => true,
+            'two_factor_confirmed_at' => now(),
+            'recovery_codes_confirmed_at' => now(),
+        ]);
+
+        $this->actingAs($operator);
+        event(new ValidTwoFactorAuthenticationCodeProvided($operator));
+
+        app(FinancialOperatorMfaSession::class)->assertVerified($operator);
+        $this->assertSame($operator->getAuthIdentifier(), session('financial_operator_mfa.user_id'));
     }
 }

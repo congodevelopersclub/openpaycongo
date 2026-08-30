@@ -16,7 +16,7 @@ use Laravel\Passkeys\Contracts\PasskeyUser;
 use Laravel\Passkeys\PasskeyAuthenticatable;
 
 #[Fillable(['username', 'name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
+#[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class User extends Authenticatable implements FilamentUser, PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
@@ -33,6 +33,7 @@ class User extends Authenticatable implements FilamentUser, PasskeyUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_financial_operator' => 'boolean',
+            'recovery_codes_confirmed_at' => 'datetime',
         ];
     }
 
