@@ -134,7 +134,7 @@ final class SqliteAnalyticsStore
 
     private function assertUtc(mixed $value, string $field): void
     {
-        if (! is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/D', $value) !== 1 || new DateTimeImmutable($value)->format('Y-m-d\\TH:i:s\\Z') !== $value) {
+        if (! is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/D', $value) !== 1 || (new DateTimeImmutable($value))->format('Y-m-d\\TH:i:s\\Z') !== $value) {
             throw new InvalidArgumentException($field.' must be a canonical UTC timestamp');
         }
     }
