@@ -33,7 +33,8 @@ final class ReverseDeposit
             if ($original->kind !== DepositKind::ProviderCredit->value) {
                 throw ValidationException::withMessages(['deposit' => 'Deposit cannot be reversed.']);
             }
-            if (! $this->reconciliation->report($original)->isReconciled) {
+            $originalDiscrepancies = $this->reconciliation->report($original)->discrepancies;
+            if (array_diff($originalDiscrepancies, ['customer_credit_balance']) !== []) {
                 throw ValidationException::withMessages(['deposit' => 'Deposit must reconcile before reversal.']);
             }
             $reversal = Deposit::query()->where('reverses_deposit_id', $original->id)->first();
