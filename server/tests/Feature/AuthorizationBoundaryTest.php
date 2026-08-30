@@ -67,7 +67,22 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(10, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(12, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+    }
+
+    public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void
+    {
+        $routes = collect(app('router')->getRoutes()->getRoutes());
+        $livewireUpdate = $routes->first(static fn ($route): bool => $route->getName() === 'default-livewire.update');
+        $operationsRoutes = $routes->filter(static fn ($route): bool => str_starts_with($route->uri(), 'operations'));
+
+        self::assertNotNull($livewireUpdate);
+        self::assertNotContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($livewireUpdate));
+        self::assertCount(3, $operationsRoutes);
+
+        foreach ($operationsRoutes as $route) {
+            self::assertContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($route));
+        }
     }
 
     public function test_lookalike_middleware_aliases_do_not_count_as_authorization(): void
