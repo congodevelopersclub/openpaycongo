@@ -5,6 +5,9 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
+use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 $trustedProxyCidrs = preg_split(
     '/\\s+/',
@@ -25,6 +28,10 @@ return Application::configure(basePath: dirname(__DIR__))
         __DIR__.'/../app/Console/Commands',
     ])
     ->withMiddleware(function (Middleware $middleware) use ($trustedProxyCidrs): void {
+        $middleware->alias([
+            'abilities' => CheckAbilities::class,
+            'ability' => CheckForAnyAbility::class,
+        ]);
         $middleware->appendToGroup('web', RequireConfirmedTwoFactorForPasskeys::class);
 
         $middleware->trustProxies(
@@ -34,6 +41,11 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(static function (HttpExceptionInterface $exception, Request $request) {
+            return $exception->getStatusCode() === 403 && $request->expectsJson()
+                ? response()->json(['message' => 'Forbidden'], 403)
+                : null;
+        });
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );

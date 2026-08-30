@@ -21,3 +21,9 @@ Route::get('/version', static fn (MigrationReadiness $migrations) => response()-
     'adapter' => config('database.default'),
     'migration_revision' => $migrations->revision(),
 ], 200, ['cache-control' => 'no-store']));
+
+Route::get('/mobile/identity', static function () {
+    $installation = request()->user('mobile');
+
+    return response()->json(['organization_id' => $installation->organization_id], 200, ['cache-control' => 'no-store']);
+})->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'throttle:mobile-api']);

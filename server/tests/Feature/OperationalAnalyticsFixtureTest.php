@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_03_000004_create_security_audits_table';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_04_000000_create_personal_access_tokens_table';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {

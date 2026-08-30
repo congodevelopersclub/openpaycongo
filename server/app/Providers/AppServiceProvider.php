@@ -11,9 +11,13 @@ use App\Operations\ProjectionReadiness;
 use App\Policies\DepositPolicy;
 use App\Security\EstablishedFinancialOperatorMfaSession;
 use App\Security\FinancialOperatorMfaSession;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passkeys\Contracts\PasskeyLoginResponse as PasskeyLoginResponseContract;
+use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -34,6 +38,17 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         config()->set('passkeys', config('openpay.passkeys'));
+
+        Passport::tokensCan([
+            'payment-requests:read' => 'Read payment requests.',
+            'payment-requests:write' => 'Create or update payment requests.',
+            'deposits:read' => 'Read deposits.',
+            'wallets:read' => 'Read customer credit balances.',
+            'customers:read' => 'Read customer references.',
+            'customers:pii:read' => 'Read customer PII when separately authorized.',
+        ]);
+        Passport::tokensExpireIn(now()->addMinutes(15));
+        RateLimiter::for('mobile-api', static fn (Request $request): Limit => Limit::perMinute(60)->by((string) $request->user('mobile')?->getAuthIdentifier()));
 
         Gate::policy(Deposit::class, DepositPolicy::class);
     }
