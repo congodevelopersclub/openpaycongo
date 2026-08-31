@@ -25,12 +25,15 @@ final class PairingIntent extends Model
         'enrollment_signing_fingerprint',
         'server_key_agreement_public_key',
         'trust_mode',
+        'invalid_proof_attempts',
+        'completion_request_digest',
+        'completion_result',
     ];
 
-    protected $hidden = ['protected_server_private_material'];
+    protected $hidden = ['protected_server_private_material', 'completion_request_digest', 'completion_result'];
 
     protected function casts(): array
     {
-        return ['expires_at' => 'immutable_datetime'];
+        return ['expires_at' => 'immutable_datetime', 'invalid_proof_attempts' => 'integer'];
     }
 }
