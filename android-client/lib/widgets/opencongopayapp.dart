@@ -7,6 +7,9 @@ import '../features/app_lock/infrastructure/platform_app_lock_port.dart';
 import '../features/app_lock/presentation/app_lock_bloc.dart';
 import '../features/app_lock/presentation/app_lock_gate.dart';
 import '../features/pairing/presentation/pairing_enrollment_bloc.dart';
+import '../features/pairing/infrastructure/platform_pairing_qr_scanner.dart';
+import '../features/pairing/infrastructure/platform_pairing_qr_trust_store.dart';
+import '../features/pairing/presentation/pairing_qr_bloc.dart';
 import '../features/pairing/presentation/pairing_session_bloc.dart';
 import '../features/payment_inbox/presentation/payment_inbox_screen.dart';
 import '../features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
@@ -20,8 +23,10 @@ import '../screens/regex_builder_screen.dart';
 import '../services/Config/config_service.dart';
 import '../services/Parsers/parser_store.dart';
 
-/// Only the app-lock BLoC exists before unlock. Payment content and native
-/// gateways are created by the protected branch below it.
+/// The root owns app-lock and QR-verification BLoCs so an active scanner can
+/// resolve to sanitized state while locked. The verifier's narrow scanner and
+/// trust dependencies are the exception; payment content and other native
+/// gateways remain created only by the protected branch below it.
 class OpenCongoPayApp extends StatefulWidget {
   const OpenCongoPayApp({
     super.key,
@@ -30,6 +35,7 @@ class OpenCongoPayApp extends StatefulWidget {
     this.paymentRequestLifecycle,
     this.pairingEnrollment,
     this.pairingSession,
+    this.pairingQr,
     this.syncCursor,
   });
 
@@ -38,6 +44,7 @@ class OpenCongoPayApp extends StatefulWidget {
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
+  final PairingQrBloc? pairingQr;
   final SyncCursorBloc? syncCursor;
 
   @override
@@ -48,10 +55,18 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
   late final AppLockBloc _appLock =
       widget.appLock ?? AppLockBloc(port: const PlatformAppLockPort());
   late final bool _ownsAppLock = widget.appLock == null;
+  late final PairingQrBloc _pairingQr =
+      widget.pairingQr ??
+      PairingQrBloc(
+        trustStore: const PlatformPairingQrTrustStore(),
+        scanner: const PlatformPairingQrScanner(),
+      );
+  late final bool _ownsPairingQr = widget.pairingQr == null;
 
   @override
   void dispose() {
     if (_ownsAppLock) _appLock.close();
+    if (_ownsPairingQr) _pairingQr.close();
     super.dispose();
   }
 
@@ -69,12 +84,17 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
     ),
     home: AppLockGate(
       bloc: _appLock,
-      protectedBuilder: (_) => _UnlockedOpenCongoPayApp(
-        paymentLifecycle: widget.paymentLifecycle,
-        paymentRequestLifecycle: widget.paymentRequestLifecycle,
-        pairingEnrollment: widget.pairingEnrollment,
-        pairingSession: widget.pairingSession,
-        syncCursor: widget.syncCursor,
+      protectedBuilder: (_) => Navigator(
+        onGenerateRoute: (_) => MaterialPageRoute<void>(
+          builder: (_) => _UnlockedOpenCongoPayApp(
+            paymentLifecycle: widget.paymentLifecycle,
+            paymentRequestLifecycle: widget.paymentRequestLifecycle,
+            pairingEnrollment: widget.pairingEnrollment,
+            pairingSession: widget.pairingSession,
+            pairingQr: _pairingQr,
+            syncCursor: widget.syncCursor,
+          ),
+        ),
       ),
     ),
   );
@@ -86,6 +106,7 @@ final class _UnlockedOpenCongoPayApp extends StatefulWidget {
     this.paymentRequestLifecycle,
     this.pairingEnrollment,
     this.pairingSession,
+    required this.pairingQr,
     this.syncCursor,
   });
 
@@ -93,6 +114,7 @@ final class _UnlockedOpenCongoPayApp extends StatefulWidget {
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
+  final PairingQrBloc pairingQr;
   final SyncCursorBloc? syncCursor;
 
   @override
@@ -129,6 +151,7 @@ final class _UnlockedOpenCongoPayAppState
       paymentRequestLifecycle: widget.paymentRequestLifecycle,
       pairingEnrollment: widget.pairingEnrollment,
       pairingSession: widget.pairingSession,
+      pairingQr: widget.pairingQr,
       syncCursor: widget.syncCursor,
     ),
     const ParsersScreen(),
