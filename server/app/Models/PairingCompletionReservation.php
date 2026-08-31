@@ -16,9 +16,14 @@ final class PairingCompletionReservation extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['pairing_intent_id', 'request_digest', 'state'];
+    protected $fillable = ['pairing_intent_id', 'request_digest', 'state', 'lease_expires_at'];
 
     protected $hidden = ['request_digest'];
+
+    protected function casts(): array
+    {
+        return ['lease_expires_at' => 'immutable_datetime'];
+    }
 
     /** @return BelongsTo<PairingIntent, $this> */
     public function intent(): BelongsTo

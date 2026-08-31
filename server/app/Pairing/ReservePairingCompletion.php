@@ -19,7 +19,7 @@ use Throwable;
  */
 final readonly class ReservePairingCompletion
 {
-    private const int MAX_IN_FLIGHT = 8;
+    private const int RESERVATION_LEASE_SECONDS = 30;
 
     public function __construct(private int $invalidProofAttemptBudget = 3)
     {
@@ -36,6 +36,7 @@ final readonly class ReservePairingCompletion
 
         try {
             return DB::transaction(function () use ($intentIdBytes, $requestDigest): PairingCompletionReservationResult {
+                $now = CarbonImmutable::now('UTC');
                 $intent = PairingIntent::query()->lockForUpdate()
                     ->where('intent_id_bytes', $intentIdBytes)
                     ->first();
@@ -50,7 +51,7 @@ final readonly class ReservePairingCompletion
                 if ($intent->state !== 'pending') {
                     return PairingCompletionReservationResult::unavailable();
                 }
-                if (CarbonImmutable::parse($intent->expires_at)->lessThanOrEqualTo(CarbonImmutable::now('UTC'))) {
+                if (CarbonImmutable::parse($intent->expires_at)->lessThanOrEqualTo($now)) {
                     $this->terminal($intent, 'expired');
 
                     return PairingCompletionReservationResult::unavailable();
@@ -60,11 +61,11 @@ final readonly class ReservePairingCompletion
 
                     return PairingCompletionReservationResult::unavailable();
                 }
-                $reservations = PairingCompletionReservation::query()
+                $this->expireLeases($intent, $now);
+                if (PairingCompletionReservation::query()
                     ->where('pairing_intent_id', $intent->id)
-                    ->where('state', 'reserved');
-                if ((clone $reservations)->where('request_digest', $requestDigest)->exists()
-                    || $reservations->count() >= self::MAX_IN_FLIGHT) {
+                    ->where('state', 'reserved')
+                    ->exists()) {
                     return PairingCompletionReservationResult::unavailable();
                 }
 
@@ -73,6 +74,7 @@ final readonly class ReservePairingCompletion
                     'pairing_intent_id' => $intent->id,
                     'request_digest' => $requestDigest,
                     'state' => 'reserved',
+                    'lease_expires_at' => $now->addSeconds(self::RESERVATION_LEASE_SECONDS),
                 ]);
 
                 return PairingCompletionReservationResult::reserved($reservation->id);
@@ -82,27 +84,16 @@ final readonly class ReservePairingCompletion
         }
     }
 
-    public function releaseRetryable(string $reservationId): void
+    public function releaseRetryable(string $reservationId): PairingCompletionSettlementOutcome
     {
-        $this->settle($reservationId, static function (PairingCompletionReservation $reservation): void {
-            if ($reservation->state === 'reserved') {
-                $reservation->forceFill(['state' => 'released'])->save();
-            }
+        return $this->settle($reservationId, static function (PairingIntent $intent, PairingCompletionReservation $reservation): void {
+            $reservation->forceFill(['state' => 'released'])->save();
         });
     }
 
-    public function rejectInvalidProof(string $reservationId): void
+    public function rejectInvalidProof(string $reservationId): PairingCompletionSettlementOutcome
     {
-        $this->settle($reservationId, function (PairingCompletionReservation $reservation): void {
-            if ($reservation->state !== 'reserved') {
-                return;
-            }
-            $intent = PairingIntent::query()->lockForUpdate()->find($reservation->pairing_intent_id);
-            if (! $intent instanceof PairingIntent || $intent->state !== 'pending') {
-                $reservation->forceFill(['state' => 'invalid'])->save();
-
-                return;
-            }
+        return $this->settle($reservationId, function (PairingIntent $intent, PairingCompletionReservation $reservation): void {
             $attempts = (int) $intent->invalid_proof_attempts + 1;
             $intent->forceFill(['invalid_proof_attempts' => $attempts]);
             if ($attempts >= $this->invalidProofAttemptBudget) {
@@ -114,19 +105,13 @@ final readonly class ReservePairingCompletion
         });
     }
 
-    public function commit(string $reservationId, string $opaqueEncryptedResult): void
+    public function commit(string $reservationId, string $opaqueEncryptedResult): PairingCompletionSettlementOutcome
     {
         if ($opaqueEncryptedResult === '' || strlen($opaqueEncryptedResult) > 4096) {
             throw new \InvalidArgumentException('Invalid pairing completion result.');
         }
-        $this->settle($reservationId, function (PairingCompletionReservation $reservation) use ($opaqueEncryptedResult): void {
-            if ($reservation->state !== 'reserved') {
-                return;
-            }
-            $intent = PairingIntent::query()->lockForUpdate()->find($reservation->pairing_intent_id);
-            if (! $intent instanceof PairingIntent || $intent->state !== 'pending') {
-                return;
-            }
+
+        return $this->settle($reservationId, static function (PairingIntent $intent, PairingCompletionReservation $reservation) use ($opaqueEncryptedResult): void {
             $intent->forceFill([
                 'state' => 'pending_confirmation',
                 'completion_request_digest' => $reservation->getRawOriginal('request_digest'),
@@ -137,21 +122,44 @@ final readonly class ReservePairingCompletion
         });
     }
 
-    private function settle(string $reservationId, callable $settlement): void
+    private function settle(string $reservationId, callable $settlement): PairingCompletionSettlementOutcome
     {
         if (! Str::isUuid($reservationId)) {
-            return;
+            return PairingCompletionSettlementOutcome::Stale;
         }
         try {
-            DB::transaction(function () use ($reservationId, $settlement): void {
-                $reservation = PairingCompletionReservation::query()->lockForUpdate()->find($reservationId);
-                if ($reservation instanceof PairingCompletionReservation) {
-                    $settlement($reservation);
+            return DB::transaction(function () use ($reservationId, $settlement): PairingCompletionSettlementOutcome {
+                $candidate = PairingCompletionReservation::query()->find($reservationId);
+                if (! $candidate instanceof PairingCompletionReservation) {
+                    return PairingCompletionSettlementOutcome::Stale;
                 }
+                $intent = PairingIntent::query()->lockForUpdate()->find($candidate->pairing_intent_id);
+                $reservation = PairingCompletionReservation::query()->lockForUpdate()->find($reservationId);
+                if (! $intent instanceof PairingIntent || ! $reservation instanceof PairingCompletionReservation
+                    || $intent->state !== 'pending' || $reservation->state !== 'reserved') {
+                    return PairingCompletionSettlementOutcome::Stale;
+                }
+                if (CarbonImmutable::parse($reservation->lease_expires_at)->lessThanOrEqualTo(CarbonImmutable::now('UTC'))) {
+                    $reservation->forceFill(['state' => 'expired'])->save();
+
+                    return PairingCompletionSettlementOutcome::Stale;
+                }
+                $settlement($intent, $reservation);
+
+                return PairingCompletionSettlementOutcome::Settled;
             });
         } catch (Throwable) {
-            // Retryable settlement failures are deliberately not exposed here.
+            return PairingCompletionSettlementOutcome::Unknown;
         }
+    }
+
+    private function expireLeases(PairingIntent $intent, CarbonImmutable $now): void
+    {
+        PairingCompletionReservation::query()
+            ->where('pairing_intent_id', $intent->id)
+            ->where('state', 'reserved')
+            ->where('lease_expires_at', '<=', $now)
+            ->update(['state' => 'expired', 'updated_at' => $now]);
     }
 
     private function terminal(PairingIntent $intent, string $state): void
