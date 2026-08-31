@@ -28,6 +28,8 @@ import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustStorageExceptio
 import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustVault
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanGate
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
+import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyStorageException
+import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyVault
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -43,12 +45,14 @@ class MainActivity : FlutterFragmentActivity() {
     private val appLockChannelName = "openpaycongo/app_lock"
     private val pairingQrTrustChannelName = "openpaycongo/pairing_qr_trust"
     private val pairingQrScannerChannelName = "openpaycongo/pairing_qr_scanner"
+    private val pairingDirectionalKeysChannelName = "openpaycongo/pairing_directional_keys"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val appLockTasks = Executors.newSingleThreadExecutor()
     private val pairingQrTrustTasks = Executors.newSingleThreadExecutor()
+    private val pairingDirectionalKeyTasks = Executors.newSingleThreadExecutor()
     private val pairingQrScanGate = PairingQrScanGate()
     private val smsTasks = GuardedTaskRunner(
         isCurrent = { generation -> smsAccessDenial(generation) == null },
@@ -74,6 +78,8 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handlePairingQrTrustCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingQrScannerChannelName)
             .setMethodCallHandler(::handlePairingQrScannerCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingDirectionalKeysChannelName)
+            .setMethodCallHandler(::handlePairingDirectionalKeyCall)
     }
 
     override fun onResume() {
@@ -90,6 +96,7 @@ class MainActivity : FlutterFragmentActivity() {
         pairingQrScanGate.fail()
         appLockTasks.shutdownNow()
         pairingQrTrustTasks.shutdownNow()
+        pairingDirectionalKeyTasks.shutdownNow()
         smsTasks.close()
         super.onDestroy()
     }
@@ -243,6 +250,36 @@ class MainActivity : FlutterFragmentActivity() {
                 .addOnFailureListener { pairingQrScanGate.fail() }
         } catch (_: Exception) {
             pairingQrScanGate.fail()
+        }
+    }
+
+    private fun handlePairingDirectionalKeyCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "save") {
+            result.notImplemented()
+            return
+        }
+        val arguments = call.arguments as? Map<*, *>
+        val sendKey = arguments?.get("send_key") as? ByteArray
+        val receiveKey = arguments?.get("receive_key") as? ByteArray
+        if (arguments == null || arguments.keys != setOf("send_key", "receive_key") ||
+            sendKey == null || receiveKey == null || sendKey.size != 32 || receiveKey.size != 32
+        ) {
+            result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
+            return
+        }
+        pairingDirectionalKeyTasks.execute {
+            try {
+                PairingDirectionalKeyVault(applicationContext).save(sendKey, receiveKey)
+                mainHandler.post { result.success(null) }
+            } catch (_: PairingDirectionalKeyStorageException) {
+                mainHandler.post {
+                    result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
+                }
+            } catch (_: Exception) {
+                mainHandler.post {
+                    result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
+                }
+            }
         }
     }
 
