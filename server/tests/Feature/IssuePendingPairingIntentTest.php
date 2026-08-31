@@ -7,6 +7,7 @@ use App\Pairing\IssuePendingPairingIntent;
 use App\Pairing\KeyProtector;
 use App\Pairing\PairingIntentUnavailable;
 use App\Pairing\PairingRandom;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use RuntimeException;
@@ -98,6 +99,38 @@ final class IssuePendingPairingIntentTest extends TestCase
             $this->assertSame('', $protector->material);
             $this->assertDatabaseCount('pairing_intents', 0);
         }
+    }
+
+    public function test_fractional_issue_time_never_rounds_the_requested_lifetime_down(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-01 12:00:00.900000 UTC'));
+        $organization = Organization::query()->create();
+        $this->pairingConfig();
+
+        $issued = (new IssuePendingPairingIntent(new IssuanceRecordingProtector, new SequencePairingRandom([
+            hex2bin('000102030405060708090a0b0c0d0e0f'), str_repeat("\x22", 32), str_repeat("\x11", 32),
+        ])))->execute($organization->getKey(), 60);
+
+        $this->assertSame('2026-09-01T12:01:01Z', $issued->qr['expires_at']);
+        $this->assertSame(
+            $issued->qr['expires_at'],
+            $issued->intent->fresh()->expires_at->setTimezone('UTC')->format('Y-m-d\\TH:i:s\\Z'),
+        );
+        $this->assertTrue(
+            $issued->intent->expires_at->greaterThanOrEqualTo(CarbonImmutable::now('UTC')->addSeconds(60)),
+        );
+    }
+
+    public function test_canonical_endpoint_allows_a_numeric_final_dns_label(): void
+    {
+        $organization = Organization::query()->create();
+        $this->pairingConfig(['endpoint' => 'https://pairing.123/v1/pairing/complete']);
+
+        $issued = (new IssuePendingPairingIntent(new IssuanceRecordingProtector, new SequencePairingRandom([
+            hex2bin('000102030405060708090a0b0c0d0e0f'), str_repeat("\x22", 32), str_repeat("\x11", 32),
+        ])))->execute($organization->getKey(), 60);
+
+        $this->assertSame('https://pairing.123/v1/pairing/complete', $issued->qr['endpoint']);
     }
 
     public function test_out_of_bounds_expiry_and_trust_mode_fail_before_persistence(): void

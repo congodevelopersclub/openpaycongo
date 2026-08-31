@@ -14,10 +14,22 @@ security:
 paths:
   /v1/pairing/intents:
     post:
-      summary: Issue one short-lived signed enrollment QR for the authenticated tenant
+      summary: Issue one short-lived signed enrollment QR from the verified administrator session
+      description: Internal same-origin administrator-session endpoint. The server derives the organization from the session and does not accept OAuth or bearer credentials for this operation.
       operationId: issuePairingIntent
       security:
-        - AdministratorOAuth: [pairing:intent:create]
+        - AdministratorSession: []
+          AdministratorCsrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lifetime_seconds]
+              properties:
+                lifetime_seconds: { type: integer, minimum: 30, maximum: 300 }
       responses:
         '201':
           description: Enrollment QR issued; display transiently and never retain a screenshot
@@ -412,6 +424,16 @@ paths:
                   migration_revision: { type: string }
 components:
   securitySchemes:
+    AdministratorSession:
+      type: apiKey
+      in: cookie
+      name: laravel-session
+      description: Laravel `SESSION_COOKIE` value for a verified financial-operator administrator session. The configured cookie name may differ from this default.
+    AdministratorCsrf:
+      type: apiKey
+      in: header
+      name: X-CSRF-TOKEN
+      description: Same-origin Laravel CSRF token from the rendered administrator page. It is required with AdministratorSession and is not an OAuth credential.
     PairingStatusBearer:
       type: http
       scheme: bearer

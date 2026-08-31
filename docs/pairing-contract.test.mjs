@@ -137,6 +137,7 @@ test('canonical completion endpoint grammar is identical at the public schema bo
     assert.equal(validate({ ...qr, endpoint }), false, `${endpoint} escaped canonical grammar`);
   }
   assert.equal(validate({ ...qr, endpoint: 'https://pairing.example.test:8443/v1/pairing/complete' }), true);
+  assert.equal(validate({ ...qr, endpoint: 'https://pairing.123/v1/pairing/complete' }), true);
 });
 
 test('pairing key schedule and unbiased short code match the portable vector', async () => {
@@ -276,7 +277,20 @@ test('OpenAPI exposes bounded pairing and administrator confirmation entry point
   const confirmationState = confirmationPath.get;
   const confirm = confirmationPath.post;
 
-  assert.deepEqual(issue.security, [{ AdministratorOAuth: ['pairing:intent:create'] }]);
+  assert.deepEqual(issue.security, [{ AdministratorSession: [], AdministratorCsrf: [] }]);
+  assert.equal(Object.hasOwn(issue.security[0], 'AdministratorOAuth'), false);
+  assert.equal(issue.requestBody.required, true);
+  const issuanceSchema = issue.requestBody.content['application/json'].schema;
+  assert.deepEqual(issuanceSchema.required, ['lifetime_seconds']);
+  const issuanceProperties = issuanceSchema.properties;
+  assert.deepEqual(Object.keys(issuanceProperties), ['lifetime_seconds']);
+  assert.deepEqual(issuanceProperties.lifetime_seconds, {
+    type: 'integer', minimum: 30, maximum: 300,
+  });
+  assert.equal(Object.hasOwn(issuanceProperties, 'organization_id'), false);
+  assert.equal(contract.components.securitySchemes.AdministratorSession.in, 'cookie');
+  assert.equal(contract.components.securitySchemes.AdministratorCsrf.in, 'header');
+  assert.equal(contract.components.securitySchemes.AdministratorCsrf.name, 'X-CSRF-TOKEN');
   assert.deepEqual(complete.security, []);
   assert.deepEqual(confirmationState.security, [{ AdministratorOAuth: ['pairing:confirm'] }]);
   assert.deepEqual(confirm.security, [{ AdministratorOAuth: ['pairing:confirm'] }]);

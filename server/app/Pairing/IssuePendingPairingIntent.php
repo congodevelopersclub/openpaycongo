@@ -28,7 +28,10 @@ final readonly class IssuePendingPairingIntent
         $intentNonce = $this->base64Url($this->random->bytes(32));
         $serverPrivateKey = $this->random->bytes(32);
         $serverPublicKey = sodium_crypto_scalarmult_base($serverPrivateKey);
-        $expiresAt = CarbonImmutable::now('UTC')->startOfSecond()->addSeconds($lifetimeSeconds);
+        $expiresAt = CarbonImmutable::now('UTC')->addSeconds($lifetimeSeconds);
+        if ($expiresAt->microsecond !== 0) {
+            $expiresAt = $expiresAt->addSecond()->startOfSecond();
+        }
         $keypair = sodium_crypto_sign_seed_keypair($signingSeed);
         $signingPublicKey = sodium_crypto_sign_publickey($keypair);
         $signingFingerprint = hash('sha256', $signingPublicKey, true);
@@ -131,7 +134,7 @@ final readonly class IssuePendingPairingIntent
 
     private function isCanonicalEndpoint(string $endpoint): bool
     {
-        if (preg_match('#\\Ahttps://(?<host>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?))(?::(?<port>[1-9][0-9]{0,4}))?/v1/pairing/complete\\z#D', $endpoint, $matches) !== 1) {
+        if (preg_match('#\\Ahttps://(?<host>(?=[^/:]*[a-z])[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)(?::(?<port>[1-9][0-9]{0,4}))?/v1/pairing/complete\\z#D', $endpoint, $matches) !== 1) {
             return false;
         }
 
