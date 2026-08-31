@@ -18,6 +18,11 @@ $passkeysConfigured = is_string($relyingPartyId)
     && strlen($userHandleSecret) >= 32;
 
 return [
+    'pairing' => [
+        'endpoint' => env('OPENPAY_PAIRING_ENDPOINT'),
+        'enrollment_signing_secret' => env('OPENPAY_PAIRING_ENROLLMENT_SIGNING_SECRET'),
+        'trust_mode' => env('OPENPAY_PAIRING_TRUST_MODE'),
+    ],
     'passport_keys_path' => $passportKeysPath,
     'passkeys_configured' => $passkeysConfigured,
     'passkeys' => [

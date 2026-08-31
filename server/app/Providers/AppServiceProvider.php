@@ -11,6 +11,8 @@ use App\Operations\MigrationReadiness;
 use App\Operations\ProjectionReadiness;
 use App\Pairing\KeyProtector;
 use App\Pairing\LaravelKeyProtector;
+use App\Pairing\PairingRandom;
+use App\Pairing\SecurePairingRandom;
 use App\Policies\DepositPolicy;
 use App\Security\EstablishedFinancialOperatorMfaSession;
 use App\Security\FinancialOperatorMfaSession;
@@ -39,6 +41,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(MigrationReadiness::class, LaravelMigrationReadiness::class);
         $this->app->bind(FinancialOperatorMfaSession::class, EstablishedFinancialOperatorMfaSession::class);
         $this->app->singleton(KeyProtector::class, LaravelKeyProtector::class);
+        $this->app->singleton(PairingRandom::class, SecurePairingRandom::class);
         $this->app->singleton(PasskeyLoginResponseContract::class, PasskeyLoginResponse::class);
     }
 
