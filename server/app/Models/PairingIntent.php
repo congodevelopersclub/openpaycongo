@@ -20,6 +20,11 @@ final class PairingIntent extends Model
         'state',
         'expires_at',
         'protected_server_private_material',
+        'intent_nonce',
+        'enrollment_signing_public_key',
+        'enrollment_signing_fingerprint',
+        'server_key_agreement_public_key',
+        'trust_mode',
     ];
 
     protected $hidden = ['protected_server_private_material'];

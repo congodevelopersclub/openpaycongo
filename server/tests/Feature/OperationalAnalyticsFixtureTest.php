@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_05_000000_create_pairing_intents_table';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_06_000000_add_issued_qr_fields_to_pairing_intents_table';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
