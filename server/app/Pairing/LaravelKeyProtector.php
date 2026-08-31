@@ -14,10 +14,17 @@ final class LaravelKeyProtector implements KeyProtector
         $this->assertInput($material, $aad);
 
         try {
-            return Crypt::encryptString(json_encode([
+            $protected = Crypt::encryptString(json_encode([
                 'aad' => $aad,
                 'material' => base64_encode($material),
             ], JSON_THROW_ON_ERROR));
+            if (strlen($protected) > 1024) {
+                throw new PairingIntentUnavailable;
+            }
+
+            return $protected;
+        } catch (PairingIntentUnavailable $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             throw new PairingIntentUnavailable(previous: $exception);
         }

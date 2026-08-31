@@ -7,6 +7,8 @@ use App\Pairing\CreatePendingPairingIntent;
 use App\Pairing\KeyProtector;
 use App\Pairing\LaravelKeyProtector;
 use App\Pairing\PairingIntentUnavailable;
+use DateTimeImmutable;
+use DateTimeZone;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use RuntimeException;
@@ -152,6 +154,28 @@ final class CreatePendingPairingIntentTest extends TestCase
                 $this->assertTrue(true);
             }
         }
+    }
+
+    public function test_laravel_protection_rejects_maximum_accepted_aad_when_ciphertext_would_exceed_storage_bound(): void
+    {
+        $protector = app(KeyProtector::class);
+
+        $this->expectException(PairingIntentUnavailable::class);
+        $protector->protect(random_bytes(32), str_repeat('a', 512));
+    }
+
+    public function test_non_utc_expiry_persists_as_the_same_utc_instant(): void
+    {
+        $organization = Organization::query()->create();
+        $expiresAt = new DateTimeImmutable('+60 seconds', new DateTimeZone('Asia/Kolkata'));
+        $intent = (new CreatePendingPairingIntent(new RecordingKeyProtector))->execute(
+            $organization->getKey(), rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '='), $expiresAt, random_bytes(32),
+        );
+
+        $this->assertSame(
+            $expiresAt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\\TH:i:sP'),
+            $intent->fresh()->expires_at->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\\TH:i:sP'),
+        );
     }
 
     public function test_duplicate_intent_id_fails_closed_without_replacing_original_record(): void

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Pairing;
 
 use App\Models\PairingIntent;
+use DateTimeImmutable;
 use DateTimeInterface;
+use DateTimeZone;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -18,6 +20,7 @@ final readonly class CreatePendingPairingIntent
     public function execute(string $organizationId, string $intentId, DateTimeInterface $expiresAt, string $serverPrivateMaterial): PairingIntent
     {
         $intentIdBytes = $this->assertInput($organizationId, $intentId, $expiresAt, $serverPrivateMaterial);
+        $expiresAt = DateTimeImmutable::createFromInterface($expiresAt)->setTimezone(new DateTimeZone('UTC'));
 
         $protectedMaterial = $this->protector->protect(
             $serverPrivateMaterial,
