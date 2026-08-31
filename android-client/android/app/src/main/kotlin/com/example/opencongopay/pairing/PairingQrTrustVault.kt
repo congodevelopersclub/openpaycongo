@@ -4,11 +4,11 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
+import android.util.Base64
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.SecureRandom
-import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -16,22 +16,42 @@ import javax.crypto.spec.GCMParameterSpec
 
 internal class PairingQrTrustStorageException : Exception()
 
+internal interface PairingQrTrustBase64 {
+    fun decodeUrlSafeUnpadded(value: String): ByteArray
+    fun encodeUrlSafeUnpadded(value: ByteArray): String
+}
+
+/** Android API 24+ implementation; Android Keystore vault never depends on java.util.Base64. */
+internal object AndroidPairingQrTrustBase64 : PairingQrTrustBase64 {
+    private const val FLAGS = Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+
+    override fun decodeUrlSafeUnpadded(value: String): ByteArray = Base64.decode(value, FLAGS)
+
+    override fun encodeUrlSafeUnpadded(value: ByteArray): String =
+        Base64.encodeToString(value, FLAGS)
+}
+
 /** Exact, portable QR fingerprint representation. */
 internal object PairingQrTrustFormat {
     const val FINGERPRINT_BYTES = 32
     private const val FINGERPRINT_LENGTH = 43
 
-    fun canonicalFingerprint(value: String): String {
+    fun canonicalFingerprint(
+        value: String,
+        base64: PairingQrTrustBase64 = AndroidPairingQrTrustBase64,
+    ): String {
         if (value.length != FINGERPRINT_LENGTH || !value.all { it.isAsciiFingerprintCharacter() }) {
             throw PairingQrTrustStorageException()
         }
         val decoded = try {
-            Base64.getUrlDecoder().decode(value)
+            base64.decodeUrlSafeUnpadded(value)
         } catch (_: IllegalArgumentException) {
             throw PairingQrTrustStorageException()
         }
         try {
-            if (decoded.size != FINGERPRINT_BYTES || Base64.getUrlEncoder().withoutPadding().encodeToString(decoded) != value) {
+            if (decoded.size != FINGERPRINT_BYTES ||
+                base64.encodeUrlSafeUnpadded(decoded) != value
+            ) {
                 throw PairingQrTrustStorageException()
             }
             return value
@@ -42,6 +62,7 @@ internal object PairingQrTrustFormat {
 
     private fun Char.isAsciiFingerprintCharacter(): Boolean =
         this in 'A'..'Z' || this in 'a'..'z' || this in '0'..'9' || this == '_' || this == '-'
+
 }
 
 /**
