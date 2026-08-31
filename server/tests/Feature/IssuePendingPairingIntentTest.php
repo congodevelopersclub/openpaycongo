@@ -80,6 +80,26 @@ final class IssuePendingPairingIntentTest extends TestCase
         }
     }
 
+    public function test_uppercase_organization_uuid_fails_before_configuration_crypto_or_persistence(): void
+    {
+        $organization = Organization::query()->create();
+        $protector = new IssuanceRecordingProtector;
+        config()->set('openpay.pairing', null);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid pairing intent input.');
+
+        try {
+            (new IssuePendingPairingIntent($protector, new SequencePairingRandom([])))->execute(
+                strtoupper($organization->getKey()),
+                60,
+            );
+        } finally {
+            $this->assertSame('', $protector->material);
+            $this->assertDatabaseCount('pairing_intents', 0);
+        }
+    }
+
     public function test_out_of_bounds_expiry_and_trust_mode_fail_before_persistence(): void
     {
         $organization = Organization::query()->create();

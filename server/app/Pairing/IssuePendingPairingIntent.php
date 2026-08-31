@@ -21,8 +21,8 @@ final readonly class IssuePendingPairingIntent
 
     public function execute(string $organizationId, int $lifetimeSeconds): IssuedPairingIntent
     {
-        [$endpoint, $signingSeed, $trustMode] = $this->configuration();
         $this->assertInput($organizationId, $lifetimeSeconds);
+        [$endpoint, $signingSeed, $trustMode] = $this->configuration();
 
         $intentId = $this->base64Url($this->random->bytes(16));
         $intentNonce = $this->base64Url($this->random->bytes(32));
@@ -95,7 +95,10 @@ final readonly class IssuePendingPairingIntent
 
     private function assertInput(string $organizationId, int $lifetimeSeconds): void
     {
-        if (! Str::isUuid($organizationId) || $lifetimeSeconds < 30 || $lifetimeSeconds > 300) {
+        if (! Str::isUuid($organizationId)
+            || strtolower($organizationId) !== $organizationId
+            || $lifetimeSeconds < 30
+            || $lifetimeSeconds > 300) {
             throw new InvalidArgumentException('Invalid pairing intent input.');
         }
     }
