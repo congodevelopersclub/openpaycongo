@@ -30,9 +30,13 @@ final class IssuePairingIntentHttpTest extends TestCase
         $administrator->forceFill([
             'organization_id' => $organization->getKey(),
             'is_financial_operator' => true,
+            'two_factor_confirmed_at' => now(),
+            'recovery_codes_confirmed_at' => now(),
         ])->save();
 
-        $response = $this->actingAs($administrator)->postJson('/v1/pairing/intents', [
+        $response = $this->actingAs($administrator)->withSession([
+            'financial_operator_mfa.user_id' => $administrator->getAuthIdentifier(),
+        ])->postJson('/v1/pairing/intents', [
             'lifetime_seconds' => 60,
         ]);
 
@@ -73,6 +77,16 @@ final class IssuePairingIntentHttpTest extends TestCase
         self::assertDatabaseCount('pairing_intents', 0);
     }
 
+    public function test_a_financial_operator_without_an_established_mfa_session_is_rejected(): void
+    {
+        $operator = $this->financialOperator();
+
+        $this->actingAs($operator)->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60])
+            ->assertForbidden();
+
+        self::assertDatabaseCount('pairing_intents', 0);
+    }
+
     public function test_only_a_short_integer_lifetime_is_accepted(): void
     {
         $user = $this->financialOperator();
@@ -103,6 +117,8 @@ final class IssuePairingIntentHttpTest extends TestCase
         return User::factory()->create([
             'organization_id' => Organization::query()->create()->getKey(),
             'is_financial_operator' => true,
+            'two_factor_confirmed_at' => now(),
+            'recovery_codes_confirmed_at' => now(),
         ]);
     }
 }

@@ -7,12 +7,18 @@ namespace App\Http\Controllers;
 use App\Http\Requests\IssuePairingIntentRequest;
 use App\Http\Resources\PairingIntentQrResource;
 use App\Pairing\IssuePendingPairingIntent;
+use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Http\JsonResponse;
 
 final class IssuePairingIntentController
 {
-    public function __invoke(IssuePairingIntentRequest $request, IssuePendingPairingIntent $issue): JsonResponse
-    {
+    public function __invoke(
+        IssuePairingIntentRequest $request,
+        IssuePendingPairingIntent $issue,
+        FinancialOperatorMfaSession $mfa,
+    ): JsonResponse {
+        $mfa->assertVerified($request->issuer());
+
         $issued = $issue->execute(
             organizationId: $request->organizationId(),
             lifetimeSeconds: $request->integer('lifetime_seconds'),

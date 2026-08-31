@@ -33,10 +33,15 @@ final class IssuePairingIntentRequest extends FormRequest
 
     public function organizationId(): string
     {
+        return $this->issuer()->organization_id;
+    }
+
+    public function issuer(): User
+    {
         /** @var User $user */
         $user = $this->user();
 
-        return $user->organization_id;
+        return $user;
     }
 
     /** @return array<int, callable(Validator): void> */
