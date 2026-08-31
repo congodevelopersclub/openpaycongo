@@ -71,6 +71,25 @@ final class IdentityBoundaryConfigurationTest extends TestCase
         self::assertCount(0, $sanctumRoutes);
     }
 
+    public function test_token_exchange_rejects_every_non_service_grant_before_issuing_a_token(): void
+    {
+        foreach (['authorization_code', 'password', 'refresh_token'] as $grantType) {
+            $this->postJson('/oauth/token', ['grant_type' => $grantType])
+                ->assertStatus(400)
+                ->assertExactJson([
+                    'error' => 'unsupported_grant_type',
+                    'error_description' => 'Only the client_credentials grant is supported.',
+                ]);
+        }
+
+        $this->postJson('/oauth/token')
+            ->assertStatus(400)
+            ->assertExactJson([
+                'error' => 'unsupported_grant_type',
+                'error_description' => 'Only the client_credentials grant is supported.',
+            ]);
+    }
+
     public function test_mobile_ownership_is_resolved_from_the_authenticated_installation_not_request_input(): void
     {
         $installation = SourceInstallation::query()->create([
@@ -96,6 +115,21 @@ final class IdentityBoundaryConfigurationTest extends TestCase
         $this->actingAs($web)->getJson('/mobile/identity')->assertUnauthorized()->assertJson(['message' => 'Unauthenticated.']);
         Sanctum::actingAs($installation, ['mobile:sync:write'], 'mobile');
         $this->getJson('/mobile/identity')->assertForbidden()->assertJson(['message' => 'Forbidden']);
+    }
+
+    public function test_prefixless_api_auth_failures_are_json_without_an_accept_header(): void
+    {
+        $this->get('/mobile/identity')
+            ->assertUnauthorized()
+            ->assertExactJson(['message' => 'Unauthenticated.']);
+
+        [, $client] = $this->developerApplication('00000000-0000-4000-8000-000000000015');
+        $wrongScopeToken = $this->serviceAccessToken($client, ['wallets:read']);
+
+        $this->withToken($wrongScopeToken)
+            ->get('/services/identity')
+            ->assertForbidden()
+            ->assertExactJson(['message' => 'Forbidden']);
     }
 
     public function test_revoked_and_expired_mobile_tokens_fail_closed_without_secret_output(): void
