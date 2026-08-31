@@ -34,6 +34,7 @@ paths:
         '429':
           description: More than five issuance requests per minute from one verified financial operator for one organization
           headers:
+            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
             Retry-After:
               required: true
               schema: { type: integer, minimum: 1 }
