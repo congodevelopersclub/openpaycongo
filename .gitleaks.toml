@@ -16,6 +16,9 @@ regexes = [
   '''^zM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6us$''',
   '''^AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8$''',
   '''^ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8$''',
+  '''^QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8$''',
+  '''^T6A6mKc3agbwQxUbvErlwQr0i2JdqvzNpkeoO50nsuo$''',
+  '''^bT6HIGTInA6sc_RxP_u-3MKGpl96-emT_p387SQE7Jw$''',
 ]
 
 [[rules]]
