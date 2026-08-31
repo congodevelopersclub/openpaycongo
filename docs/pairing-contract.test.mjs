@@ -21,14 +21,16 @@ test('pairing contract states the bootstrap trust boundary without edge-resistan
   assert.doesNotMatch(adr, /blind HTTPS prox(?:y|ies)/i);
 });
 
-test('pairing contract makes key destruction and protector failure semantics normative', async () => {
+test('pairing contract makes key destruction and Laravel protector failure semantics normative', async () => {
   const adr = await readFile(asset('adr-004-secure-device-enrollment.md'), 'utf8');
 
   assert.match(adr, /clears the protected ephemeral X25519 private key/i);
   assert.match(adr, /preserving\s+non-secret replay metadata/i);
   assert.match(adr, /opaque protected material\s+of at most 1024 bytes/i);
-  assert.match(adr, /unique nonce/i);
-  assert.match(adr, /unknown key ID, malformed or oversized blobs, wrong AAD, or integrity\s+failure/i);
+  assert.match(adr, /framework's application encrypter \(`Crypt`\)/i);
+  assert.match(adr, /Application-key rotation follows Laravel's `APP_PREVIOUS_KEYS` mechanism/i);
+  assert.match(adr, /Malformed\s+or oversized blobs, an AAD mismatch, and any Laravel decryption or integrity failure fail closed/i);
+  assert.match(adr, /rather\s+than a pairing-specific encryption format/i);
   assert.match(adr, /unique, fixed-size reservation under the independent in-flight bound/i);
   assert.match(adr, /Reservation alone never increments the invalid-proof counter/i);
   assert.match(adr, /repeated cleanup is idempotent/i);

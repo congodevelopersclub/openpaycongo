@@ -121,11 +121,13 @@ All pairing successes and errors require `Cache-Control: private, no-store`. Thi
 status only; it cannot authorize ledger sync or general application requests.
 
 `KeyProtector` accepts exactly 32-byte secret material plus bounded AAD and returns opaque protected material
-of at most 1024 bytes. Production implementations must use an audited AEAD with a unique nonce of at most
-32 bytes, embed a key identifier/version of at most 64 bytes for rotation, bind the exact domain-separated `(protocol, purpose, tenant,
-record ID)` AAD, and fail closed on unknown key ID, malformed or oversized blobs, wrong AAD, or integrity
-failure without returning partial plaintext. The deterministic authenticated protector in Go tests is only a
-conformance fake; it is not a production protector.
+of at most 1024 bytes. The Laravel implementation uses the framework's application encrypter (`Crypt`) rather
+than a pairing-specific encryption format. It stores the exact domain-separated `(protocol, purpose, tenant,
+record ID)` AAD inside the Laravel-protected value and compares it in constant time after decryption. Malformed
+or oversized blobs, an AAD mismatch, and any Laravel decryption or integrity failure fail closed without
+returning partial plaintext. Application-key rotation follows Laravel's `APP_PREVIOUS_KEYS` mechanism; no
+pairing-specific key envelope or custom cryptography is introduced. The deterministic authenticated protector
+in historical tests is only a conformance fake; it is not a production protector.
 
 ## Atomicity, replay, and limits
 
