@@ -24,6 +24,8 @@ import com.congodeveloperclub.opencongopay.sms.SmsAccessGuard
 import com.congodeveloperclub.opencongopay.sms.SmsVaultProvider
 import com.congodeveloperclub.opencongopay.lock.AppLockRecoveryRequiredException
 import com.congodeveloperclub.opencongopay.lock.AppLockVault
+import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustStorageException
+import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustVault
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -34,11 +36,13 @@ class MainActivity : FlutterFragmentActivity() {
     private val channelName = "openpaycongo/sms_gateway"
     private val outboxChannelName = "openpaycongo/payment_outbox"
     private val appLockChannelName = "openpaycongo/app_lock"
+    private val pairingQrTrustChannelName = "openpaycongo/pairing_qr_trust"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val appLockTasks = Executors.newSingleThreadExecutor()
+    private val pairingQrTrustTasks = Executors.newSingleThreadExecutor()
     private val smsTasks = GuardedTaskRunner(
         isCurrent = { generation -> smsAccessDenial(generation) == null },
         deliver = { callback -> mainHandler.post(callback) },
@@ -59,6 +63,8 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handleOutboxCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, appLockChannelName)
             .setMethodCallHandler(::handleAppLockCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingQrTrustChannelName)
+            .setMethodCallHandler(::handlePairingQrTrustCall)
     }
 
     override fun onResume() {
@@ -73,6 +79,7 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onDestroy() {
         appLockTasks.shutdownNow()
+        pairingQrTrustTasks.shutdownNow()
         smsTasks.close()
         super.onDestroy()
     }
@@ -157,6 +164,36 @@ class MainActivity : FlutterFragmentActivity() {
             } catch (_: Exception) {
                 mainHandler.post {
                     result.error("recovery_required", "App lock recovery is required", null)
+                }
+            }
+        }
+    }
+
+    private fun handlePairingQrTrustCall(call: MethodCall, result: MethodChannel.Result) {
+        val fingerprint = call.arguments as? String
+        if (fingerprint == null) {
+            result.error("secure_storage_failure", "Pairing trust storage is unavailable", null)
+            return
+        }
+        pairingQrTrustTasks.execute {
+            try {
+                val vault = PairingQrTrustVault(applicationContext)
+                val value = when (call.method) {
+                    "lookup" -> vault.lookup(fingerprint)
+                    "persistVerifiedFingerprint" -> vault.persistVerifiedFingerprint(fingerprint)
+                    else -> {
+                        mainHandler.post { result.notImplemented() }
+                        return@execute
+                    }
+                }
+                mainHandler.post { result.success(value) }
+            } catch (_: PairingQrTrustStorageException) {
+                mainHandler.post {
+                    result.error("secure_storage_failure", "Pairing trust storage is unavailable", null)
+                }
+            } catch (_: Exception) {
+                mainHandler.post {
+                    result.error("secure_storage_failure", "Pairing trust storage is unavailable", null)
                 }
             }
         }
