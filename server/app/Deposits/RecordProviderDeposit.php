@@ -18,8 +18,12 @@ use LogicException;
 
 final class RecordProviderDeposit
 {
-    public function record(ProviderTransfer $transfer): RecordProviderDepositResult
+    public function record(ProviderTransfer $transfer, ?SourceInstallation $sourceInstallation = null): RecordProviderDepositResult
     {
+        if ($sourceInstallation !== null && $sourceInstallation->organization_id !== $transfer->organizationId) {
+            throw new InvalidArgumentException('Invalid provider transfer.');
+        }
+
         $this->assertValid($transfer);
         $transfer = $this->normalise($transfer);
         $this->assertPortableProviderOccurrence($transfer->providerOccurredAt);
@@ -43,7 +47,7 @@ final class RecordProviderDeposit
 
         for ($attempt = 1; $attempt <= 3; $attempt++) {
             try {
-                return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests): RecordProviderDepositResult {
+                return DB::transaction(function () use ($transfer, $providerReferenceDigests, $idempotencyDigests, $sourceInstallation): RecordProviderDepositResult {
                     $existing = $this->existing($transfer->organizationId, $providerReferenceDigests, true);
                     if ($existing !== null) {
                         return $this->replayResult($existing, $idempotencyDigests);
@@ -58,7 +62,7 @@ final class RecordProviderDeposit
                     }
 
                     $customer = $this->customer($transfer);
-                    $installation = $this->installation($transfer);
+                    $installation = $sourceInstallation ?? $this->installation($transfer);
                     $receivedAt = CarbonImmutable::now();
                     $deposit = Deposit::query()->create([
                         'organization_id' => $transfer->organizationId,

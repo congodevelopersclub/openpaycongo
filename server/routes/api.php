@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Middleware\RequireClientCredentialsGrant;
 use App\Http\Middleware\ResolveDeveloperApplication;
 use App\Models\DeveloperApplication;
@@ -37,6 +38,10 @@ Route::get('/mobile/identity', static function () {
     return response()->json(['organization_id' => $installation->organization_id], 200, ['cache-control' => 'no-store']);
 })->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'throttle:mobile-api'])
     ->name('mobile.identity');
+
+Route::post('/mobile/deposits', StoreMobileDepositController::class)
+    ->middleware(['auth:mobile', 'abilities:mobile:deposits:write', 'throttle:mobile-api'])
+    ->name('mobile.deposits.store');
 
 Route::get('/services/identity', static function () {
     /** @var DeveloperApplication $application */
