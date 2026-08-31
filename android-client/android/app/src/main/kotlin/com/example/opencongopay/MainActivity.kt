@@ -26,6 +26,11 @@ import com.congodeveloperclub.opencongopay.lock.AppLockRecoveryRequiredException
 import com.congodeveloperclub.opencongopay.lock.AppLockVault
 import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustStorageException
 import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustVault
+import com.congodeveloperclub.opencongopay.pairing.PairingQrScanGate
+import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -37,12 +42,14 @@ class MainActivity : FlutterFragmentActivity() {
     private val outboxChannelName = "openpaycongo/payment_outbox"
     private val appLockChannelName = "openpaycongo/app_lock"
     private val pairingQrTrustChannelName = "openpaycongo/pairing_qr_trust"
+    private val pairingQrScannerChannelName = "openpaycongo/pairing_qr_scanner"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val appLockTasks = Executors.newSingleThreadExecutor()
     private val pairingQrTrustTasks = Executors.newSingleThreadExecutor()
+    private val pairingQrScanGate = PairingQrScanGate()
     private val smsTasks = GuardedTaskRunner(
         isCurrent = { generation -> smsAccessDenial(generation) == null },
         deliver = { callback -> mainHandler.post(callback) },
@@ -65,6 +72,8 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handleAppLockCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingQrTrustChannelName)
             .setMethodCallHandler(::handlePairingQrTrustCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingQrScannerChannelName)
+            .setMethodCallHandler(::handlePairingQrScannerCall)
     }
 
     override fun onResume() {
@@ -78,6 +87,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun onDestroy() {
+        pairingQrScanGate.fail()
         appLockTasks.shutdownNow()
         pairingQrTrustTasks.shutdownNow()
         smsTasks.close()
@@ -196,6 +206,43 @@ class MainActivity : FlutterFragmentActivity() {
                     result.error("secure_storage_failure", "Pairing trust storage is unavailable", null)
                 }
             }
+        }
+    }
+
+    private fun handlePairingQrScannerCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "scan") {
+            result.notImplemented()
+            return
+        }
+        if (!pairingQrScanGate.begin { outcome ->
+                mainHandler.post {
+                    when (outcome) {
+                        is PairingQrScanOutcome.Raw -> result.success(outcome.value)
+                        PairingQrScanOutcome.Cancelled -> result.success(null)
+                        PairingQrScanOutcome.Unavailable -> result.error(
+                            "scanner_unavailable",
+                            "QR scanner is unavailable",
+                            null,
+                        )
+                    }
+                }
+            }
+        ) {
+            result.error("scan_in_progress", "QR scan is already active", null)
+            return
+        }
+        try {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(this, options)
+                .startScan()
+                .addOnSuccessListener { barcode -> pairingQrScanGate.succeed(barcode.rawValue) }
+                .addOnCanceledListener { pairingQrScanGate.cancel() }
+                .addOnFailureListener { pairingQrScanGate.fail() }
+        } catch (_: Exception) {
+            pairingQrScanGate.fail()
         }
     }
 
