@@ -282,7 +282,11 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
       }
       final bool accepted = switch ((qr.trustMode, pin)) {
         (PairingQrTrustMode.pinnedContinuity, PairingQrMatchingPin()) => true,
-        (PairingQrTrustMode.firstUseRequiresSas, PairingQrNoPin()) => false,
+        // This only starts the encrypted completion flow. It neither trusts
+        // the enrollment key nor activates the device: the independently
+        // compared SAS and a later authenticated server decision are still
+        // mandatory before either can happen.
+        (PairingQrTrustMode.firstUseRequiresSas, PairingQrNoPin()) => true,
         _ => false,
       };
       if (!accepted) {

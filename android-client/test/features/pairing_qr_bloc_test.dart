@@ -108,10 +108,25 @@ void main() {
     expect(store.lookups, 0);
   });
 
-  test('validator-only flow rejects signed first use', () async {
+  test('first use starts only provisional SAS flow without pin persistence',
+      () async {
     final String qr = await _firstUseQr();
+    final _FirstUseStore store = _FirstUseStore();
+    final _RecordingCredentialSink sink = _RecordingCredentialSink();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: store,
+      credentialSink: sink,
+      now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+    );
+    final Future<PairingQrState> result = bloc.stream.first;
 
-    expect(await _scan(qr, const _NoPinStore()), isA<PairingQrRejected>());
+    bloc.add(PairingQrScanned(qr));
+
+    final PairingQrAccepted state = await result as PairingQrAccepted;
+    expect(state.trustMode, PairingQrTrustMode.firstUseRequiresSas);
+    expect(sink.receivedExpectedMaterial, isTrue);
+    expect(store.persistCalls, 0);
+    await bloc.close();
   });
 
   test('hands typed credential to pairing infrastructure, never BLoC state',
@@ -345,7 +360,7 @@ Future<String> _firstUseQr() async {
       List<int>.generate(32, (int index) => index + 48),
     ),
     'pairing_secret': _b64(
-      List<int>.generate(32, (int index) => index + 80),
+      List<int>.generate(32, (int index) => index + 64),
     ),
     'trust_mode': 'first_use_requires_sas',
   };
@@ -462,6 +477,20 @@ final class _NoPinStore implements PairingQrTrustStore {
   @override
   Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
       const PairingQrPinWrite.stored();
+}
+
+final class _FirstUseStore implements PairingQrTrustStore {
+  var persistCalls = 0;
+
+  @override
+  Future<PairingQrPinState> lookup(String fingerprint) async =>
+      const PairingQrPinState.none();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async {
+    persistCalls++;
+    return const PairingQrPinWrite.stored();
+  }
 }
 
 final class _ConflictStore implements PairingQrTrustStore {
