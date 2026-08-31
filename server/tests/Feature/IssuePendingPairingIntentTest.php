@@ -21,11 +21,12 @@ final class IssuePendingPairingIntentTest extends TestCase
     {
         $this->travelTo('2026-09-01 12:00:00 UTC');
         $organization = Organization::query()->create();
-        $privateKey = str_repeat("\x11", 32);
+        $pairingSeed = str_repeat("\x33", 32);
         $random = new SequencePairingRandom([
             hex2bin('000102030405060708090a0b0c0d0e0f'),
             str_repeat("\x22", 32),
-            $privateKey,
+            $pairingSeed,
+            str_repeat("\x11", 32),
         ]);
         $protector = new IssuanceRecordingProtector;
         $this->pairingConfig();
@@ -39,7 +40,7 @@ final class IssuePendingPairingIntentTest extends TestCase
         $this->assertSame('https://pairing.example.test/v1/pairing/complete', $qr['endpoint']);
         $this->assertSame('pinned_continuity', $qr['trust_mode']);
         $this->assertSame(
-            sodium_crypto_scalarmult_base($privateKey),
+            sodium_crypto_kx_publickey(sodium_crypto_kx_seed_keypair($pairingSeed)),
             base64_decode(strtr($qr['server_key_agreement_public_key'], '-_', '+/'), true),
         );
         $this->assertSame(
@@ -51,14 +52,14 @@ final class IssuePendingPairingIntentTest extends TestCase
             $this->qrTranscript($qr),
             base64_decode(strtr($qr['enrollment_signing_public_key'], '-_', '+/'), true),
         ));
-        $this->assertSame($privateKey, $protector->material);
+        $this->assertSame($pairingSeed, $protector->material);
         $this->assertSame(
             'openpaycongo/pairing/intent-server-private-material/v1/'.$organization->getKey().'/'.$qr['intent_id'],
             $protector->aad,
         );
-        $this->assertDatabaseMissing('pairing_intents', ['protected_server_private_material' => $privateKey]);
+        $this->assertDatabaseMissing('pairing_intents', ['protected_server_private_material' => $pairingSeed]);
         $this->assertNotContains('protected_server_private_material', array_keys($issued->intent->toArray()));
-        $this->assertStringNotContainsString($privateKey, json_encode($issued, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString($pairingSeed, json_encode($issued, JSON_THROW_ON_ERROR));
     }
 
     public function test_malformed_configuration_fails_before_protection_or_persistence(): void
@@ -108,7 +109,7 @@ final class IssuePendingPairingIntentTest extends TestCase
         $this->pairingConfig();
 
         $issued = (new IssuePendingPairingIntent(new IssuanceRecordingProtector, new SequencePairingRandom([
-            hex2bin('000102030405060708090a0b0c0d0e0f'), str_repeat("\x22", 32), str_repeat("\x11", 32),
+            hex2bin('000102030405060708090a0b0c0d0e0f'), str_repeat("\x22", 32), str_repeat("\x33", 32), str_repeat("\x11", 32),
         ])))->execute($organization->getKey(), 60);
 
         $this->assertSame('2026-09-01T12:01:01Z', $issued->qr['expires_at']);
@@ -127,7 +128,7 @@ final class IssuePendingPairingIntentTest extends TestCase
         $this->pairingConfig(['endpoint' => 'https://pairing.123/v1/pairing/complete']);
 
         $issued = (new IssuePendingPairingIntent(new IssuanceRecordingProtector, new SequencePairingRandom([
-            hex2bin('000102030405060708090a0b0c0d0e0f'), str_repeat("\x22", 32), str_repeat("\x11", 32),
+            hex2bin('000102030405060708090a0b0c0d0e0f'), str_repeat("\x22", 32), str_repeat("\x33", 32), str_repeat("\x11", 32),
         ])))->execute($organization->getKey(), 60);
 
         $this->assertSame('https://pairing.123/v1/pairing/complete', $issued->qr['endpoint']);
@@ -163,14 +164,14 @@ final class IssuePendingPairingIntentTest extends TestCase
         $this->pairingConfig();
         $id = hex2bin('000102030405060708090a0b0c0d0e0f');
         $first = (new IssuePendingPairingIntent(new IssuanceRecordingProtector, new SequencePairingRandom([
-            $id, str_repeat("\x02", 32), str_repeat("\x03", 32),
+            $id, str_repeat("\x02", 32), str_repeat("\x04", 32), str_repeat("\x03", 32),
         ])))->execute($organization->getKey(), 60);
 
         $this->expectException(PairingIntentUnavailable::class);
 
         try {
             (new IssuePendingPairingIntent(new IssuanceRecordingProtector, new SequencePairingRandom([
-                $id, str_repeat("\x04", 32), str_repeat("\x05", 32),
+                $id, str_repeat("\x04", 32), str_repeat("\x06", 32), str_repeat("\x05", 32),
             ])))->execute($organization->getKey(), 60);
         } finally {
             $this->assertDatabaseCount('pairing_intents', 1);
@@ -198,7 +199,7 @@ final class IssuePendingPairingIntentTest extends TestCase
             'openpaycongo/pairing/qr', $qr['version'], $qr['endpoint'], $decode($qr['intent_id']),
             $decode($qr['intent_nonce']), $qr['expires_at'], $qr['algorithms'],
             $decode($qr['enrollment_signing_public_key']), $decode($qr['enrollment_signing_fingerprint']),
-            $decode($qr['server_key_agreement_public_key']), $qr['trust_mode'],
+            $decode($qr['server_key_agreement_public_key']), $decode($qr['pairing_secret']), $qr['trust_mode'],
         ]));
     }
 

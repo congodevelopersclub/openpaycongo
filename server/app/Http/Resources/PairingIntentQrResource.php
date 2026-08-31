@@ -27,6 +27,7 @@ final class PairingIntentQrResource extends JsonResource
             'enrollment_signing_fingerprint' => $issued->qr['enrollment_signing_fingerprint'],
             'enrollment_signing_public_key' => $issued->qr['enrollment_signing_public_key'],
             'server_key_agreement_public_key' => $issued->qr['server_key_agreement_public_key'],
+            'pairing_secret' => $issued->qr['pairing_secret'],
             'trust_mode' => $issued->qr['trust_mode'],
             'signature' => $issued->qr['signature'],
         ];

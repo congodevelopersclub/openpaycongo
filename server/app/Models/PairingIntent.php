@@ -28,12 +28,25 @@ final class PairingIntent extends Model
         'invalid_proof_attempts',
         'completion_request_digest',
         'completion_result',
+        'pairing_secret_digest',
+        'server_receive_key',
+        'server_send_key',
+        'short_authentication_code',
     ];
 
-    protected $hidden = ['protected_server_private_material', 'completion_request_digest', 'completion_result'];
+    protected $hidden = [
+        'protected_server_private_material', 'completion_request_digest', 'completion_result',
+        'pairing_secret_digest', 'server_receive_key', 'server_send_key', 'short_authentication_code',
+    ];
 
     protected function casts(): array
     {
-        return ['expires_at' => 'immutable_datetime', 'invalid_proof_attempts' => 'integer'];
+        return [
+            'expires_at' => 'immutable_datetime',
+            'invalid_proof_attempts' => 'integer',
+            'server_receive_key' => 'encrypted',
+            'server_send_key' => 'encrypted',
+            'short_authentication_code' => 'encrypted',
+        ];
     }
 }

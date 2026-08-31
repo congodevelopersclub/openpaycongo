@@ -1,0 +1,41 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Http\Responses\PairingProblem;
+use App\Pairing\CompletePairingEnvelope;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+
+final class CompletePairingEnvelopeController
+{
+    public function __invoke(Request $request, CompletePairingEnvelope $complete): JsonResponse
+    {
+        $limitKey = 'pairing.complete:'.hash('sha256', (string) $request->ip());
+        if (RateLimiter::tooManyAttempts($limitKey, 10)) {
+            return PairingProblem::requestFailed(429);
+        }
+        RateLimiter::hit($limitKey, 60);
+        $decode = static fn (mixed $value): string|false => is_string($value) && preg_match('/^[A-Za-z0-9_-]+$/D', $value) === 1
+            ? base64_decode(strtr($value, '-_', '+/').str_repeat('=', (4 - strlen($value) % 4) % 4), true)
+            : false;
+        $client = $decode($request->input('client_public_key'));
+        $nonce = $decode($request->input('nonce'));
+        $ciphertext = $decode($request->input('ciphertext'));
+        $result = is_string($client) && is_string($nonce) && is_string($ciphertext) && is_string($request->input('intent_id'))
+            ? $complete->execute($request->input('intent_id'), $client, $nonce, $ciphertext, hash('sha256', implode('', [$request->input('intent_id'), $client, $nonce, $ciphertext]), true))
+            : null;
+        if ($result === null) {
+            return PairingProblem::requestFailed(404);
+        }
+
+        return response()->json([
+            'state' => $result['state'],
+            'nonce' => rtrim(strtr(base64_encode($result['nonce']), '+/', '-_'), '='),
+            'ciphertext' => rtrim(strtr(base64_encode($result['ciphertext']), '+/', '-_'), '='),
+        ], 201, ['Cache-Control' => 'private, no-store']);
+    }
+}

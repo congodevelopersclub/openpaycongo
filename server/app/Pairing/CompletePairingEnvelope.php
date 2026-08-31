@@ -1,0 +1,102 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Pairing;
+
+use App\Models\PairingIntent;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
+use Throwable;
+
+final class CompletePairingEnvelope
+{
+    public function __construct(private readonly KeyProtector $protector) {}
+
+    public function execute(string $intentId, string $clientPublicKey, string $nonce, string $ciphertext, string $requestDigest): ?array
+    {
+        if (strlen($clientPublicKey) !== SODIUM_CRYPTO_KX_PUBLICKEYBYTES
+            || strlen($nonce) !== SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES
+            || $ciphertext === '' || strlen($ciphertext) > 256 || strlen($requestDigest) !== 32) {
+            return null;
+        }
+
+        try {
+            return DB::transaction(function () use ($intentId, $clientPublicKey, $nonce, $ciphertext, $requestDigest): ?array {
+                $intent = PairingIntent::query()->lockForUpdate()->where('intent_id', $intentId)->first();
+                if ($intent instanceof PairingIntent
+                    && $intent->state === 'pending_confirmation'
+                    && hash_equals((string) $intent->completion_request_digest, bin2hex($requestDigest))
+                    && is_string($intent->completion_result)) {
+                    /** @var array{state: string, nonce: string, ciphertext: string} $result */
+                    $result = json_decode($intent->completion_result, true, 3, JSON_THROW_ON_ERROR);
+
+                    return [
+                        'state' => $result['state'],
+                        'nonce' => base64_decode($result['nonce'], true),
+                        'ciphertext' => base64_decode($result['ciphertext'], true),
+                    ];
+                }
+                if (! ($intent instanceof PairingIntent) || $intent->state !== 'pending' || CarbonImmutable::parse($intent->expires_at)->isPast()) {
+                    return null;
+                }
+                $seed = $this->protector->unprotect(
+                    (string) $intent->protected_server_private_material,
+                    $this->intentAad($intent->organization_id, $intent->intent_id),
+                );
+                if (strlen($seed) !== SODIUM_CRYPTO_KX_SEEDBYTES) {
+                    return null;
+                }
+                $serverPair = sodium_crypto_kx_seed_keypair($seed);
+                $keys = sodium_crypto_kx_server_session_keys($serverPair, $clientPublicKey);
+                $secret = sodium_crypto_aead_xchacha20poly1305_ietf_decrypt($ciphertext, $this->aad($intent->intent_id_bytes, $clientPublicKey), $nonce, $keys[0]);
+                if (! is_string($secret) || ! hash_equals((string) $intent->pairing_secret_digest, hash('sha256', $secret))) {
+                    return null;
+                }
+                $sas = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $intent->forceFill([
+                    'state' => 'pending_confirmation',
+                    'server_receive_key' => $keys[0],
+                    'server_send_key' => $keys[1],
+                    'short_authentication_code' => $sas,
+                    'protected_server_private_material' => '',
+                    'pairing_secret_digest' => null,
+                ])->save();
+                $responseNonce = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES);
+                $response = sodium_crypto_aead_xchacha20poly1305_ietf_encrypt(
+                    json_encode(['state' => 'pending_confirmation', 'short_authentication_code' => $sas], JSON_THROW_ON_ERROR),
+                    $this->responseAad($intent->intent_id_bytes),
+                    $responseNonce,
+                    $keys[1],
+                );
+                $intent->forceFill([
+                    'completion_request_digest' => bin2hex($requestDigest),
+                    'completion_result' => json_encode([
+                        'state' => 'pending_confirmation',
+                        'nonce' => base64_encode($responseNonce),
+                        'ciphertext' => base64_encode($response),
+                    ], JSON_THROW_ON_ERROR),
+                ])->save();
+
+                return ['state' => 'pending_confirmation', 'nonce' => $responseNonce, 'ciphertext' => $response];
+            });
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function aad(string $intent, string $client): string
+    {
+        return pack('n', 32).'openpaycongo/pairing/complete/v2'.pack('n', 16).$intent.pack('n', 32).$client;
+    }
+
+    private function responseAad(string $intent): string
+    {
+        return pack('n', 41).'openpaycongo/pairing/complete-response/v2'.pack('n', 16).$intent;
+    }
+
+    private function intentAad(string $organizationId, string $intentId): string
+    {
+        return 'openpaycongo/pairing/intent-server-private-material/v1/'.$organizationId.'/'.$intentId;
+    }
+}
