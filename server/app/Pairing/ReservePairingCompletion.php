@@ -19,6 +19,8 @@ use Throwable;
  */
 final readonly class ReservePairingCompletion
 {
+    private const int MAX_IN_FLIGHT = 8;
+
     private const int RESERVATION_LEASE_SECONDS = 30;
 
     public function __construct(private int $invalidProofAttemptBudget = 3)
@@ -33,9 +35,10 @@ final readonly class ReservePairingCompletion
         if (strlen($intentIdBytes) !== 16 || strlen($requestDigest) !== 32) {
             return PairingCompletionReservationResult::unavailable();
         }
+        $requestDigestHex = bin2hex($requestDigest);
 
         try {
-            return DB::transaction(function () use ($intentIdBytes, $requestDigest): PairingCompletionReservationResult {
+            return DB::transaction(function () use ($intentIdBytes, $requestDigestHex): PairingCompletionReservationResult {
                 $now = CarbonImmutable::now('UTC');
                 $intent = PairingIntent::query()->lockForUpdate()
                     ->where('intent_id_bytes', $intentIdBytes)
@@ -44,7 +47,7 @@ final readonly class ReservePairingCompletion
                     return PairingCompletionReservationResult::unavailable();
                 }
                 if ($intent->completion_request_digest !== null
-                    && hash_equals($intent->completion_request_digest, $requestDigest)
+                    && hash_equals($intent->completion_request_digest, $requestDigestHex)
                     && is_string($intent->completion_result)) {
                     return PairingCompletionReservationResult::replayed($intent->completion_result);
                 }
@@ -62,17 +65,18 @@ final readonly class ReservePairingCompletion
                     return PairingCompletionReservationResult::unavailable();
                 }
                 $this->expireLeases($intent, $now);
-                if (PairingCompletionReservation::query()
+                $reservations = PairingCompletionReservation::query()
                     ->where('pairing_intent_id', $intent->id)
-                    ->where('state', 'reserved')
-                    ->exists()) {
+                    ->where('state', 'reserved');
+                if ((clone $reservations)->where('request_digest', $requestDigestHex)->exists()
+                    || $reservations->count() >= self::MAX_IN_FLIGHT) {
                     return PairingCompletionReservationResult::unavailable();
                 }
 
                 $reservation = PairingCompletionReservation::query()->create([
                     'id' => (string) Str::uuid(),
                     'pairing_intent_id' => $intent->id,
-                    'request_digest' => $requestDigest,
+                    'request_digest' => $requestDigestHex,
                     'state' => 'reserved',
                     'lease_expires_at' => $now->addSeconds(self::RESERVATION_LEASE_SECONDS),
                 ]);
@@ -139,7 +143,14 @@ final readonly class ReservePairingCompletion
                     || $intent->state !== 'pending' || $reservation->state !== 'reserved') {
                     return PairingCompletionSettlementOutcome::Stale;
                 }
-                if (CarbonImmutable::parse($reservation->lease_expires_at)->lessThanOrEqualTo(CarbonImmutable::now('UTC'))) {
+                $now = CarbonImmutable::now('UTC');
+                if (CarbonImmutable::parse($intent->expires_at)->lessThanOrEqualTo($now)) {
+                    $this->terminal($intent, 'expired');
+                    $reservation->forceFill(['state' => 'expired'])->save();
+
+                    return PairingCompletionSettlementOutcome::Stale;
+                }
+                if (CarbonImmutable::parse($reservation->lease_expires_at)->lessThanOrEqualTo($now)) {
                     $reservation->forceFill(['state' => 'expired'])->save();
 
                     return PairingCompletionSettlementOutcome::Stale;

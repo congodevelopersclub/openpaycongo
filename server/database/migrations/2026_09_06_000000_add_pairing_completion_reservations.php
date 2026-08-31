@@ -10,14 +10,14 @@ return new class extends Migration
     {
         Schema::table('pairing_intents', function (Blueprint $table): void {
             $table->unsignedTinyInteger('invalid_proof_attempts')->default(0);
-            $table->binary('completion_request_digest', length: 32, fixed: true)->nullable();
+            $table->string('completion_request_digest', 64)->nullable();
             $table->text('completion_result')->nullable();
         });
 
         Schema::create('pairing_completion_reservations', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->uuid('pairing_intent_id')->index();
-            $table->binary('request_digest', length: 32, fixed: true);
+            $table->string('request_digest', 64);
             $table->string('state', 24)->index();
             $table->timestamp('lease_expires_at')->index();
             $table->timestamps();
@@ -25,7 +25,7 @@ return new class extends Migration
             $table->foreign('pairing_intent_id')->references('id')->on('pairing_intents')->cascadeOnDelete();
             // Parent intent row lock makes active-digest admission atomic. Keep
             // released history repeatable: same client retry may fail more than once.
-            $table->index(['pairing_intent_id', 'request_digest', 'state']);
+            $table->index(['pairing_intent_id', 'request_digest', 'state'], 'pairing_reservation_active_digest_index');
         });
     }
 

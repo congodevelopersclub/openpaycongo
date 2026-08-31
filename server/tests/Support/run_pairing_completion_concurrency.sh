@@ -34,14 +34,11 @@ first_pid=$!
 docker run "${base_args[@]}" --volume "$barrier_volume:/barrier" --env PAIRING_TEST_BARRIER_DIRECTORY=/barrier --env PAIRING_TEST_WORKER=second "$image" php tests/Support/reserve_pairing_completion.php >"$barrier_root/second.out" 2>&1 &
 second_pid=$!
 
-for _ in $(seq 1 300); do
-  docker run --rm --volume "$barrier_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.ready') && file_exists('/barrier/second.ready') ? 0 : 1);" && break
-done
-docker run --rm --volume "$barrier_volume:/barrier" "$image" php -r "exit(file_exists('/barrier/first.ready') && file_exists('/barrier/second.ready') ? 0 : 1);"
+docker run --rm --volume "$barrier_volume:/barrier" "$image" php -r '$deadline = microtime(true) + 30; while (! (file_exists("/barrier/first.ready") && file_exists("/barrier/second.ready"))) { if (microtime(true) >= $deadline) { exit(1); } usleep(100000); }'
 docker run --rm --volume "$barrier_volume:/barrier" "$image" php -r "touch('/barrier/release');"
 wait "$first_pid"
 wait "$second_pid"
 
-grep -Fx reserved "$barrier_root/first.out" "$barrier_root/second.out"
-grep -Fx unavailable "$barrier_root/first.out" "$barrier_root/second.out"
+grep -hFx reserved "$barrier_root/first.out" "$barrier_root/second.out"
+grep -hFx unavailable "$barrier_root/first.out" "$barrier_root/second.out"
 docker run "${base_args[@]}" "$image" php tests/Support/assert_pairing_completion_reservation_state.php

@@ -29,6 +29,8 @@ final class ReservePairingCompletionTest extends TestCase
         $this->assertSame('encrypted-result-v1', $replayed->cachedResult());
         $this->assertStringNotContainsString('encrypted-result-v1', json_encode($replayed, JSON_THROW_ON_ERROR));
         $this->assertDatabaseCount('pairing_completion_reservations', 1);
+        $this->assertSame(bin2hex($digest), PairingCompletionReservation::query()->findOrFail($reserved->reservationId())->getRawOriginal('request_digest'));
+        $this->assertSame(bin2hex($digest), $intent->fresh()->getRawOriginal('completion_request_digest'));
         $this->assertSame('pending_confirmation', $intent->fresh()->state);
         $this->assertSame('', $intent->fresh()->getRawOriginal('protected_server_private_material'));
         $this->assertSame(PairingCompletionReservationOutcome::Unavailable, $action->reserve($intent->intent_id_bytes, $this->digest('changed-request'))->outcome());
@@ -52,15 +54,18 @@ final class ReservePairingCompletionTest extends TestCase
         $this->assertSame(PairingCompletionReservationOutcome::Unavailable, $action->reserve($intent->intent_id_bytes, $this->digest('later'))->outcome());
     }
 
-    public function test_reservation_admits_only_one_active_worker_and_denies_a_second_or_duplicate_request(): void
+    public function test_reservation_admits_the_eight_active_workers_allowed_by_the_protocol_but_rejects_a_ninth_or_duplicate_digest(): void
     {
         $intent = $this->intent();
         $action = new ReservePairingCompletion(3);
 
-        $this->assertSame(PairingCompletionReservationOutcome::Reserved, $action->reserve($intent->intent_id_bytes, $this->digest('request-0'))->outcome());
+        foreach (range(0, 7) as $index) {
+            $this->assertSame(PairingCompletionReservationOutcome::Reserved, $action->reserve($intent->intent_id_bytes, $this->digest('request-'.$index))->outcome());
+        }
+
         $this->assertSame(PairingCompletionReservationOutcome::Unavailable, $action->reserve($intent->intent_id_bytes, $this->digest('request-0'))->outcome());
-        $this->assertSame(PairingCompletionReservationOutcome::Unavailable, $action->reserve($intent->intent_id_bytes, $this->digest('second'))->outcome());
-        $this->assertSame(1, PairingCompletionReservation::query()->where('state', 'reserved')->count());
+        $this->assertSame(PairingCompletionReservationOutcome::Unavailable, $action->reserve($intent->intent_id_bytes, $this->digest('ninth'))->outcome());
+        $this->assertSame(8, PairingCompletionReservation::query()->where('state', 'reserved')->count());
     }
 
     public function test_retryable_fault_release_is_idempotent_and_does_not_consume_an_invalid_attempt(): void
@@ -98,6 +103,28 @@ final class ReservePairingCompletionTest extends TestCase
         $this->assertSame(PairingCompletionSettlementOutcome::Stale, $action->rejectInvalidProof((string) $abandoned->reservationId()));
         $this->assertSame('pending', $intent->fresh()->state);
         $this->assertSame(0, $intent->fresh()->invalid_proof_attempts);
+    }
+
+    public function test_settlement_at_absolute_intent_expiry_terminally_expires_the_intent_before_it_can_commit_or_consume_an_attempt(): void
+    {
+        $intent = $this->intent();
+        $action = new ReservePairingCompletion(2);
+        $commit = $action->reserve($intent->intent_id_bytes, $this->digest('commit-at-expiry'));
+        $intent->forceFill(['expires_at' => now()->subSecond()])->save();
+
+        $this->assertSame(PairingCompletionSettlementOutcome::Stale, $action->commit((string) $commit->reservationId(), 'encrypted-result-v1'));
+        $this->assertSame('expired', $intent->fresh()->state);
+        $this->assertSame('', $intent->fresh()->getRawOriginal('protected_server_private_material'));
+        $this->assertSame('expired', PairingCompletionReservation::query()->findOrFail($commit->reservationId())->state);
+
+        $other = $this->intent();
+        $invalid = $action->reserve($other->intent_id_bytes, $this->digest('invalid-at-expiry'));
+        $other->forceFill(['expires_at' => now()->subSecond()])->save();
+
+        $this->assertSame(PairingCompletionSettlementOutcome::Stale, $action->rejectInvalidProof((string) $invalid->reservationId()));
+        $this->assertSame('expired', $other->fresh()->state);
+        $this->assertSame(0, $other->fresh()->invalid_proof_attempts);
+        $this->assertSame('expired', PairingCompletionReservation::query()->findOrFail($invalid->reservationId())->state);
     }
 
     private function intent(): PairingIntent
