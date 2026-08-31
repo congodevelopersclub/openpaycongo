@@ -291,6 +291,9 @@ final class _Protocol implements PairingProtocolPort {
 
 final class _Command implements PairingProtocolCommand {
   const _Command();
+
+  @override
+  void dispose() {}
 }
 
 final class _Vault implements PairingDirectionalKeyVault {

@@ -9,7 +9,11 @@ abstract interface class PairingProtocolPort {
 }
 
 /// Opaque infrastructure handle. Its implementation owns QR secret lifetime.
-abstract interface class PairingProtocolCommand {}
+/// Opaque command owns any short-lived QR-derived secret bytes.
+abstract interface class PairingProtocolCommand {
+  /// Idempotent. Called after success, failure, or a rejected handoff.
+  void dispose();
+}
 
 /// Android implementation encrypts these directional keys with a
 /// non-exportable Android Keystore key. No BLoC state may retain them.
@@ -91,6 +95,7 @@ final class PairingProtocolBloc
       emit(const PairingProtocolRecoveryRequired());
     } finally {
       material?.dispose();
+      event.command.dispose();
     }
   }
 }
