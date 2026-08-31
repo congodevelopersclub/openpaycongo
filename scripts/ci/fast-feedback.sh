@@ -147,6 +147,7 @@ run_deposit_concurrency() {
   docker build --target quality --tag openpaycongo-server-concurrency -f server/Dockerfile .
   bash server/tests/Support/run_provider_deposit_concurrency_matrix.sh openpaycongo-server-concurrency "$connection" "$port"
   bash server/tests/Support/run_payment_request_concurrency_matrix.sh openpaycongo-server-concurrency "$connection" "$port"
+  bash server/tests/Support/run_pairing_completion_concurrency.sh openpaycongo-server-concurrency "$connection" "$port"
 }
 
 tier="${1:-}"; component="${2:-}"; shift $(( $# >= 2 ? 2 : $# ))
