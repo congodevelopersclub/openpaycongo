@@ -20,6 +20,8 @@ dependencies:
   path: ^1.9.1
   crypto: ^3.0.7
   cryptography: ^2.7.0
+  # Maintained libsodium binding; Docker pins Dart 3.13.2 for this release.
+  sodium: ^4.1.0
 
 dev_dependencies:
   flutter_test:
