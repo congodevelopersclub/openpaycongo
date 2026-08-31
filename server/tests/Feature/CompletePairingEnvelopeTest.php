@@ -116,6 +116,20 @@ final class CompletePairingEnvelopeTest extends TestCase
         self::assertNull($expired->completion_result);
     }
 
+    public function test_completion_rejects_extra_request_members_before_and_after_a_valid_consume(): void
+    {
+        [$intent, $payload] = $this->newPendingEnvelope(random_bytes(16), now()->addMinute());
+        $withExtraMember = [...$payload, 'unexpected' => 'ignored-by-no-one'];
+
+        $this->assertPairingUnavailable($this->postJson('/v1/pairing/complete', $withExtraMember));
+        self::assertSame('pending', $intent->fresh()->state);
+
+        $this->postJson('/v1/pairing/complete', $payload)->assertCreated();
+
+        $this->assertPairingUnavailable($this->postJson('/v1/pairing/complete', $withExtraMember));
+        self::assertSame('pending_confirmation', $intent->fresh()->state);
+    }
+
     public function test_case_mutated_intent_id_cannot_select_a_different_binary_intent(): void
     {
         [$upperIntent, $upperPayload] = $this->newPendingEnvelope(hex2bin('000102030405060708090a0b0c0d0e0f'), now()->addMinute());
