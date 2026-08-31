@@ -62,6 +62,50 @@ final class FilamentPairingIntentTest extends TestCase
         self::assertDatabaseCount('pairing_intents', 0);
     }
 
+    public function test_the_pairing_action_applies_the_same_five_per_minute_issuance_limit_as_the_operator_api(): void
+    {
+        $operator = $this->financialOperator();
+        $page = Livewire::actingAs($operator)->test(IssuePairingIntent::class);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $page->callAction('issuePairingIntent', data: ['lifetime_seconds' => 60])
+                ->assertHasNoFormErrors();
+        }
+
+        $page->callAction('issuePairingIntent', data: ['lifetime_seconds' => 60]);
+
+        self::assertDatabaseCount('pairing_intents', 5);
+    }
+
+    public function test_the_page_and_livewire_updates_that_can_carry_a_qr_are_never_cacheable(): void
+    {
+        $operator = $this->financialOperator();
+
+        $initial = $this->actingAs($operator)
+            ->withSession(['financial_operator_mfa.user_id' => $operator->getAuthIdentifier()])
+            ->get('/operations/issue-pairing-intent')
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private');
+
+        preg_match('/wire:snapshot="([^"]+)"/', $initial->getContent(), $snapshot);
+
+        self::assertArrayHasKey(1, $snapshot);
+
+        $updatePath = parse_url(route('default-livewire.update'), PHP_URL_PATH);
+
+        self::assertIsString($updatePath);
+
+        $this->withHeader('X-Livewire', 'true')->postJson($updatePath, [
+            'components' => [[
+                'snapshot' => html_entity_decode($snapshot[1], ENT_QUOTES | ENT_HTML5),
+                'updates' => [],
+                'calls' => [],
+            ]],
+        ])
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private');
+    }
+
     public function test_a_password_only_operator_cannot_mount_or_issue_a_pairing_intent(): void
     {
         $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession

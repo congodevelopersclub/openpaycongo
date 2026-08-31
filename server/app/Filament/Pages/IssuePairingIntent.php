@@ -6,6 +6,7 @@ namespace App\Filament\Pages;
 
 use App\Models\User;
 use App\Pairing\IssuePendingPairingIntent as IssuePendingPairingIntentAction;
+use App\Pairing\PairingIntentIssuanceLimiter;
 use App\Security\FinancialOperatorMfaSession;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
@@ -50,6 +51,7 @@ final class IssuePairingIntent extends Page
                 $actor = $this->verifiedActor();
 
                 try {
+                    app(PairingIntentIssuanceLimiter::class)->consume($actor);
                     $issued = app(IssuePendingPairingIntentAction::class)->execute(
                         organizationId: $actor->organization_id,
                         lifetimeSeconds: (int) $data['lifetime_seconds'],

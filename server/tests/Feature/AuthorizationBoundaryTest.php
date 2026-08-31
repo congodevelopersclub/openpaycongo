@@ -41,7 +41,7 @@ final class AuthorizationBoundaryTest extends TestCase
             'POST oauth/token' => 'passport.token',
         ];
         $authorizedRoutes = [
-            'POST v1/pairing/intents' => ['web', 'auth', 'pairing.issuer', 'throttle:pairing-intents'],
+            'POST v1/pairing/intents' => ['web', 'auth', 'pairing.issuer'],
         ];
         $runtimeRouteCount = 0;
 

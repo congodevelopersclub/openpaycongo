@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\PreventPairingIntentCaching;
 use App\Http\Middleware\RequireConfirmedTwoFactorForPasskeys;
 use App\Http\Middleware\RequireVerifiedPairingIntentIssuer;
 use App\Http\Responses\PairingProblem;
@@ -40,6 +41,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'pairing.issuer' => RequireVerifiedPairingIntentIssuer::class,
         ]);
         $middleware->appendToGroup('web', RequireConfirmedTwoFactorForPasskeys::class);
+        $middleware->append(PreventPairingIntentCaching::class);
 
         $middleware->trustProxies(
             at: $trustedProxyCidrs,
