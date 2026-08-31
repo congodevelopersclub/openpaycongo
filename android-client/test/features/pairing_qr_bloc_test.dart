@@ -13,7 +13,7 @@ void main() {
     () async {
       final PairingQrBloc bloc = PairingQrBloc(
         trustStore: _MatchingPinStore(),
-        now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+        now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
       );
       final Future<PairingQrState> result = bloc.stream.first;
 
@@ -28,7 +28,7 @@ void main() {
 
   test('rejects every signed QR field mutation', () async {
     for (final MapEntry<String, String> mutation in <MapEntry<String, String>>[
-      const MapEntry<String, String>('version', '2'),
+      const MapEntry<String, String>('version', '1'),
       const MapEntry<String, String>(
         'endpoint',
         'https://other.example.test/v1/pairing/complete',
@@ -38,7 +38,7 @@ void main() {
         'intent_nonce',
         'AQECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
       ),
-      const MapEntry<String, String>('expires_at', '2026-08-10T09:32:01Z'),
+      const MapEntry<String, String>('expires_at', '2026-09-01T12:00:01Z'),
       const MapEntry<String, String>(
         'algorithms',
         'X25519-HKDF-SHA256-AES-256-GCM',
@@ -55,6 +55,10 @@ void main() {
         'server_key_agreement_public_key',
         'AQECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
       ),
+      const MapEntry<String, String>(
+        'pairing_secret',
+        'AQECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+      ),
       const MapEntry<String, String>('trust_mode', 'first_use_requires_sas'),
     ]) {
       final Map<String, Object?> value =
@@ -63,7 +67,7 @@ void main() {
       final PairingQrState state = await _scan(
         jsonEncode(value),
         _MatchingPinStore(),
-        now: DateTime.utc(2026, 8, 10, 9, 31, 59),
+        now: DateTime.utc(2026, 9, 1, 11, 59, 59),
       );
       expect(state, isA<PairingQrRejected>(), reason: mutation.key);
     }
@@ -82,7 +86,7 @@ void main() {
       await _scan(
         jsonEncode(value),
         store,
-        now: DateTime.utc(2026, 8, 10, 9, 31, 59),
+        now: DateTime.utc(2026, 9, 1, 11, 59, 59),
       ),
       isA<PairingQrRejected>(),
     );
@@ -97,7 +101,7 @@ void main() {
     final PairingQrState state = await _scan(
       _signedQr,
       store,
-      now: DateTime.utc(2026, 8, 10, 9, 32),
+      now: DateTime.utc(2026, 9, 1, 12),
     );
 
     expect((state as PairingQrRejected).reason, PairingQrRejection.expired);
@@ -110,6 +114,58 @@ void main() {
     expect(await _scan(qr, const _NoPinStore()), isA<PairingQrRejected>());
   });
 
+  test('hands typed credential to pairing infrastructure, never BLoC state',
+      () async {
+    final _RecordingCredentialSink sink = _RecordingCredentialSink();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: _MatchingPinStore(),
+      credentialSink: sink,
+      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+    );
+    final Future<PairingQrState> result = bloc.stream.first;
+
+    bloc.add(const PairingQrScanned(_signedQr));
+
+    final PairingQrState state = await result;
+    expect(state, isA<PairingQrAccepted>());
+    expect(
+      state.toString(),
+      isNot(contains('QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8')),
+    );
+    expect(sink.credential, isA<PairingQrCompletionCredential>());
+    expect(
+      sink.credential!.materialize,
+      throwsA(isA<StateError>()),
+    );
+    expect(sink.receivedExpectedMaterial, isTrue);
+    final PairingQrCompletionMaterial material = sink.material!;
+    expect(material.intentId, everyElement(0));
+    expect(material.serverKeyAgreementPublicKey, everyElement(0));
+    expect(material.pairingSecret, everyElement(0));
+    await bloc.close();
+  });
+
+  test('wipes credential when pairing infrastructure rejects handoff',
+      () async {
+    final _FailingCredentialSink sink = _FailingCredentialSink();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: _MatchingPinStore(),
+      credentialSink: sink,
+      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+    );
+    final Future<PairingQrState> result = bloc.stream.first;
+
+    bloc.add(const PairingQrScanned(_signedQr));
+
+    expect(await result, isA<PairingQrRejected>());
+    expect(sink.credential, isA<PairingQrCompletionCredential>());
+    expect(
+      sink.credential!.materialize,
+      throwsA(isA<StateError>()),
+    );
+    await bloc.close();
+  });
+
   test(
     'rejects pin conflict and fails closed when trust lookup fails',
     () async {
@@ -117,14 +173,14 @@ void main() {
         await _scan(
           _signedQr,
           const _ConflictStore(),
-          now: DateTime.utc(2026, 8, 10, 9, 31, 59),
+          now: DateTime.utc(2026, 9, 1, 11, 59, 59),
         ),
         isA<PairingQrRejected>(),
       );
       final PairingQrState unavailable = await _scan(
         _signedQr,
         const _FailingStore(),
-        now: DateTime.utc(2026, 8, 10, 9, 31, 59),
+        now: DateTime.utc(2026, 9, 1, 11, 59, 59),
       );
       expect(
         (unavailable as PairingQrRejected).reason,
@@ -137,7 +193,7 @@ void main() {
     final _DelayedFirstLookupStore store = _DelayedFirstLookupStore();
     final PairingQrBloc bloc = PairingQrBloc(
       trustStore: store,
-      now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
     );
     final List<PairingQrState> states = <PairingQrState>[];
     final Completer<void> accepted = Completer<void>();
@@ -169,7 +225,7 @@ void main() {
     final PairingQrBloc bloc = PairingQrBloc(
       trustStore: _MatchingPinStore(),
       scanner: scanner,
-      now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
     );
     final Future<PairingQrState> result = bloc.stream.firstWhere(
       (PairingQrState state) => state is PairingQrAccepted,
@@ -206,13 +262,13 @@ void main() {
 
   test('rechecks exact expiry after delayed trust lookup before acceptance', () async {
     final _DelayedLookupStore store = _DelayedLookupStore();
-    DateTime now = DateTime.utc(2026, 8, 10, 9, 31, 59);
+    DateTime now = DateTime.utc(2026, 9, 1, 11, 59, 59);
     final PairingQrBloc bloc = PairingQrBloc(trustStore: store, now: () => now);
     final Future<PairingQrState> result = bloc.stream.first;
 
     bloc.add(const PairingQrScanned(_signedQr));
     await store.lookupStarted.future;
-    now = DateTime.utc(2026, 8, 10, 9, 32);
+    now = DateTime.utc(2026, 9, 1, 12);
     store.releaseLookup();
 
     final PairingQrState state = await result;
@@ -263,7 +319,7 @@ Future<PairingQrState> _scan(
 }) async {
   final PairingQrBloc bloc = PairingQrBloc(
     trustStore: store,
-    now: () => now ?? DateTime.utc(2026, 8, 10, 9, 31, 59),
+    now: () => now ?? DateTime.utc(2026, 9, 1, 11, 59, 59),
   );
   final Future<PairingQrState> result = bloc.stream.first;
   bloc.add(PairingQrScanned(value));
@@ -278,15 +334,18 @@ Future<String> _firstUseQr() async {
   final SimplePublicKey publicKey =
       await keyPair.extractPublicKey() as SimplePublicKey;
   final Map<String, String> value = <String, String>{
-    'version': '1',
+    'version': '2',
     'endpoint': 'https://pairing.example.test/v1/pairing/complete',
     'intent_id': _b64(List<int>.generate(16, (int index) => index)),
     'intent_nonce': _b64(List<int>.generate(32, (int index) => index + 16)),
     'expires_at': '2026-08-10T09:32:00Z',
-    'algorithms': 'X25519-HKDF-SHA256-AES-256-GCM+Ed25519',
+    'algorithms': 'X25519-crypto_kx-XChaCha20-Poly1305-IETF',
     'enrollment_signing_public_key': _b64(publicKey.bytes),
     'server_key_agreement_public_key': _b64(
       List<int>.generate(32, (int index) => index + 48),
+    ),
+    'pairing_secret': _b64(
+      List<int>.generate(32, (int index) => index + 80),
     ),
     'trust_mode': 'first_use_requires_sas',
   };
@@ -320,6 +379,7 @@ Uint8List _transcript(Map<String, String> value) {
     base64Url.decode(
       base64Url.normalize(value['server_key_agreement_public_key']!),
     ),
+    base64Url.decode(base64Url.normalize(value['pairing_secret']!)),
     utf8.encode(value['trust_mode']!),
   ]) {
     result.add(<int>[field.length >> 8, field.length & 0xff]);
@@ -331,8 +391,42 @@ Uint8List _transcript(Map<String, String> value) {
 String _b64(List<int> bytes) => base64UrlEncode(bytes).replaceAll('=', '');
 
 const String _signedQr = '''
-{"version":"1","endpoint":"https://pairing.example.test/v1/pairing/complete","intent_id":"AAECAwQFBgcICQoLDA0ODw","intent_nonce":"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8","expires_at":"2026-08-10T09:32:00Z","algorithms":"X25519-HKDF-SHA256-AES-256-GCM+Ed25519","enrollment_signing_fingerprint":"Fs81cR1vRgNPZbGmGrwneKW5Th0PkADWm8jyzB6fhI0","enrollment_signing_public_key":"Q3o0tdFSDnY9xtFPrWsm-F7fh-yGnYnPRrkJfZ99vRU","server_key_agreement_public_key":"QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8","signature":"3Gd5-vj0Lyh7dKP8j3Au8_dmWa8vwXtYmG9FL7yi1gQfAqBGEYHnzAmtTeyeHoolFXszu2STWxMKBLTLKhPqBg","trust_mode":"pinned_continuity"}
+{"version":"2","endpoint":"https://pairing.example.test/v1/pairing/complete","intent_id":"YGFiY2RlZmdoaWprbG1ubw","intent_nonce":"sLGys7S1tre4ubq7vL2-v8DBwsPExcbHyMnKy8zNzs8","expires_at":"2026-09-01T12:00:00Z","algorithms":"X25519-crypto_kx-XChaCha20-Poly1305-IETF","enrollment_signing_fingerprint":"gF0vfOTYfcKmnOVpHQRkUe_y1VPmSLhXDydcnkVEvjc","enrollment_signing_public_key":"bw8O6z-_-SXGbQPhnc5I1e3J_-5RzSaucd055W9_3aI","server_key_agreement_public_key":"DgIWIj8UcUPTJhWpEYnCiMFyjLo8xfn2IbECbgPYMSk","pairing_secret":"QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8","trust_mode":"pinned_continuity","signature":"v4RXXml4R8bpzzJVflH6W29SQ4OVcjM2TmSlBgy-1nzCqBQ-ivUOjhATZhAgxTpXpiQ09ySmlCmoDZDzadOiAA"}
 ''';
+
+final class _RecordingCredentialSink implements PairingQrCredentialSink {
+  PairingQrCompletionCredential? credential;
+  PairingQrCompletionMaterial? material;
+  var receivedExpectedMaterial = false;
+
+  @override
+  Future<void> accept(PairingQrCompletionCredential value) async {
+    credential = value;
+    final PairingQrCompletionMaterial copied = value.materialize();
+    material = copied;
+    try {
+      receivedExpectedMaterial =
+          copied.endpoint == 'https://pairing.example.test/v1/pairing/complete' &&
+          copied.pairingSecret.length == 32 &&
+          copied.pairingSecret
+              .asMap()
+              .entries
+              .every((MapEntry<int, int> entry) => entry.value == entry.key + 64);
+    } finally {
+      copied.dispose();
+    }
+  }
+}
+
+final class _FailingCredentialSink implements PairingQrCredentialSink {
+  PairingQrCompletionCredential? credential;
+
+  @override
+  Future<void> accept(PairingQrCompletionCredential value) async {
+    credential = value;
+    throw StateError('Pairing infrastructure unavailable');
+  }
+}
 
 final class _MatchingPinStore implements PairingQrTrustStore {
   @override
