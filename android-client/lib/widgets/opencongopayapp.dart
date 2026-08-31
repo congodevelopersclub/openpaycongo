@@ -84,13 +84,17 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
     ),
     home: AppLockGate(
       bloc: _appLock,
-      protectedBuilder: (_) => _UnlockedOpenCongoPayApp(
-        paymentLifecycle: widget.paymentLifecycle,
-        paymentRequestLifecycle: widget.paymentRequestLifecycle,
-        pairingEnrollment: widget.pairingEnrollment,
-        pairingSession: widget.pairingSession,
-        pairingQr: _pairingQr,
-        syncCursor: widget.syncCursor,
+      protectedBuilder: (_) => Navigator(
+        onGenerateRoute: (_) => MaterialPageRoute<void>(
+          builder: (_) => _UnlockedOpenCongoPayApp(
+            paymentLifecycle: widget.paymentLifecycle,
+            paymentRequestLifecycle: widget.paymentRequestLifecycle,
+            pairingEnrollment: widget.pairingEnrollment,
+            pairingSession: widget.pairingSession,
+            pairingQr: _pairingQr,
+            syncCursor: widget.syncCursor,
+          ),
+        ),
       ),
     ),
   );

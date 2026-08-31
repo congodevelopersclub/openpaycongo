@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:opencongopay/features/app_lock/presentation/app_lock_bloc.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
@@ -157,6 +160,72 @@ void main() {
 
     expect(find.text('Pair a device'), findsOneWidget);
   });
+
+  testWidgets(
+    'locking removes the protected QR route and retains only safe scan state',
+    (WidgetTester tester) async {
+      const String rawQr = '{"untrusted":"raw QR must not render"}';
+      final _TrackingAppLockPort lockPort = _TrackingAppLockPort();
+      final AppLockBloc lock = AppLockBloc(port: lockPort);
+      final _DeferredPairingQrScanner scanner = _DeferredPairingQrScanner();
+      final PairingQrBloc pairing = PairingQrBloc(
+        trustStore: const _PairingQrStore(),
+        scanner: scanner,
+      );
+      addTearDown(lock.close);
+      addTearDown(pairing.close);
+
+      await tester.pumpWidget(
+        OpenCongoPayApp(appLock: lock, pairingQr: pairing),
+      );
+      await _unlockApp(tester);
+      await tester.tap(find.text('Verify pairing QR'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pair a device'), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel('Scan pairing QR code'));
+      await tester.pump();
+      expect(scanner.started.isCompleted, isTrue);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await lockPort.secondBackgroundLock;
+      await tester.pumpAndSettle();
+      expect(lockPort.lockCalls, 2);
+      expect(find.text('Pair a device'), findsNothing);
+      expect(find.text('App locked'), findsOneWidget);
+
+      scanner.complete(rawQr);
+      await tester.pump();
+      await tester.pump();
+      expect(pairing.state, isA<PairingQrRejected>());
+      expect(pairing.state.toString(), isNot(contains(rawQr)));
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await lockPort.fourthBackgroundLock;
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('App locked'), findsOneWidget);
+
+      final Future<AppLockBlocState> unlocked = lock.stream.firstWhere(
+        (AppLockBlocState state) => state is AppLockUnlocked,
+      );
+      await tester.tap(find.text('Use biometrics'));
+      await unlocked;
+      await tester.pump();
+      await tester.pump();
+      expect(lock.state, isA<AppLockUnlocked>());
+      expect(find.text('Receive payment SMS'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Verify pairing QR'), findsOneWidget);
+      expect(find.text('App locked'), findsNothing);
+      await tester.tap(find.text('Verify pairing QR'));
+      await tester.pumpAndSettle();
+      expect(find.text('This QR code cannot be verified.'), findsOneWidget);
+      expect(find.textContaining(rawQr), findsNothing);
+    },
+  );
 
   testWidgets('app composition passes injected sync BLoC to its inbox', (
     WidgetTester tester,
@@ -834,4 +903,51 @@ final class _SyncContract implements SyncCursorContract {
 final class _SyncTelemetry implements SyncCursorTelemetry {
   @override
   void record(SyncCursorTelemetrySignal signal) {}
+}
+
+final class _TrackingAppLockPort implements AppLockPort {
+  int lockCalls = 0;
+  final Completer<void> _secondBackgroundLock = Completer<void>();
+  final Completer<void> _fourthBackgroundLock = Completer<void>();
+
+  Future<void> get secondBackgroundLock => _secondBackgroundLock.future;
+  Future<void> get fourthBackgroundLock => _fourthBackgroundLock.future;
+
+  @override
+  Future<AppLockStatus> status() async => const AppLockStatus.ready();
+
+  @override
+  Future<AppLockEnrollmentResult> enroll(String pin) async =>
+      const AppLockEnrollmentResult.provisioned();
+
+  @override
+  Future<AppLockPinResult> verifyPin(String pin) async =>
+      const AppLockPinResult.unlocked();
+
+  @override
+  Future<AppLockBiometricResult> verifyBiometric() async =>
+      const AppLockBiometricResult.unlocked();
+
+  @override
+  Future<void> lockNativeBridge() async {
+    lockCalls++;
+    if (lockCalls == 2) _secondBackgroundLock.complete();
+    if (lockCalls == 4) _fourthBackgroundLock.complete();
+  }
+
+  @override
+  Future<void> unlockNativeBridge() async {}
+}
+
+final class _DeferredPairingQrScanner implements PairingQrScanner {
+  final Completer<void> started = Completer<void>();
+  final Completer<String?> _result = Completer<String?>();
+
+  @override
+  Future<String?> scan() {
+    started.complete();
+    return _result.future;
+  }
+
+  void complete(String? value) => _result.complete(value);
 }
