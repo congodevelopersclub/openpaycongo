@@ -43,6 +43,7 @@ final class FilamentPairingIntentTest extends TestCase
             ->callAction('issuePairingIntent', data: ['lifetime_seconds' => 60])
             ->assertHasNoFormErrors()
             ->assertSee('Scan this QR code with the OpenPay Congo mobile app.')
+            ->assertSee('The mobile app verifies this signed QR. Issuing it does not complete pairing or issue credentials.')
             ->assertDontSee('protected_server_private_material');
 
         $intent = PairingIntent::query()->sole();

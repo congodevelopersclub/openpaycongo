@@ -120,11 +120,13 @@ available.
 After the required TOTP challenge, a verified financial-operator administrator
 can use **Operations → Pair mobile device** to create a signed QR code for the
 administrator's own organization. Select a lifetime from 30 to 300 seconds and
-scan it from the OpenPay Congo mobile app before it expires. The panel presents
-only the signed public QR payload for the current page interaction; it does not
-display protected server material or enrollment signing secrets. If issuance is
-unavailable, retry only from the panel after checking the service health; the
-panel intentionally provides no diagnostic detail.
+scan it from the OpenPay Congo mobile app before it expires. The mobile app
+verifies the signed QR, but creating or displaying it does not complete pairing
+or issue credentials. The panel presents only the signed public QR payload for
+the current page interaction; it does not display protected server material or
+enrollment signing secrets. If issuance is unavailable, retry only from the
+panel after checking the service health; the panel intentionally provides no
+diagnostic detail.
 
 Compose first runs the one-shot `migrate` service. The `php`, `nginx`, `queue`, and
 `scheduler` services wait for PostgreSQL health and successful migrations, use

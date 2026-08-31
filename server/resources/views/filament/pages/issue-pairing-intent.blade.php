@@ -14,6 +14,7 @@
             <section aria-labelledby="pairing-qr-heading" class="max-w-xl rounded-xl border p-4">
                 <h2 id="pairing-qr-heading" class="text-lg font-semibold">Pairing QR code</h2>
                 <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Scan this QR code with the OpenPay Congo mobile app.</p>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">The mobile app verifies this signed QR. Issuing it does not complete pairing or issue credentials.</p>
                 <div class="mt-4 w-fit bg-white p-3" role="img" aria-label="Signed OpenPay Congo mobile-pairing QR code">
                     {!! $qrSvg !!}
                 </div>
