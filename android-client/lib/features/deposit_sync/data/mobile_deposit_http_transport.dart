@@ -59,8 +59,17 @@ final class MobileDepositHttpResponse {
   final List<int> body;
 }
 
+/// One in-flight request/response exchange. The owner must call [abort] when
+/// it stops waiting so that an authenticated exchange cannot outlive its
+/// caller and accumulate across retries.
+abstract interface class MobileDepositHttpExchange {
+  Future<MobileDepositHttpResponse> get response;
+
+  void abort();
+}
+
 abstract interface class MobileDepositHttpPort {
-  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request);
+  MobileDepositHttpExchange post(MobileDepositHttpRequest request);
 }
 
 /// Direct HTTP boundary. Redirects are disabled; this port accepts only the
@@ -78,24 +87,15 @@ final class DartMobileDepositHttpPort implements MobileDepositHttpPort {
   final int _maximumResponseBytes;
 
   @override
-  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) async {
+  MobileDepositHttpExchange post(MobileDepositHttpRequest request) {
     if (!_isFixedPairedDepositUri(request.uri)) {
       throw ArgumentError('Invalid paired mobile deposit endpoint.');
     }
-    final HttpClientRequest outgoing = await _client.postUrl(request.uri);
-    outgoing.followRedirects = false;
-    outgoing.maxRedirects = 0;
-    request.headers.forEach(outgoing.headers.set);
-    outgoing.add(request.body);
-
-    final HttpClientResponse incoming = await outgoing.close();
-    final List<int> body = <int>[];
-    await for (final List<int> chunk in incoming) {
-      final int remaining = _maximumResponseBytes + 1 - body.length;
-      if (remaining > 0) body.addAll(chunk.take(remaining));
-      if (body.length > _maximumResponseBytes) break;
-    }
-    return MobileDepositHttpResponse(status: incoming.statusCode, body: body);
+    return _DartMobileDepositHttpExchange(
+      client: _client,
+      request: request,
+      maximumResponseBytes: _maximumResponseBytes,
+    );
   }
 
   void close() => _client.close(force: true);
@@ -107,6 +107,76 @@ final class DartMobileDepositHttpPort implements MobileDepositHttpPort {
       uri.path == '/mobile/deposits' &&
       uri.query.isEmpty &&
       uri.fragment.isEmpty;
+}
+
+final class _DartMobileDepositHttpExchange
+    implements MobileDepositHttpExchange {
+  _DartMobileDepositHttpExchange({
+    required this._client,
+    required this._request,
+    required this._maximumResponseBytes,
+  });
+
+  final HttpClient _client;
+  final MobileDepositHttpRequest _request;
+  final int _maximumResponseBytes;
+  HttpClientRequest? _outgoing;
+  bool _aborted = false;
+
+  late final Future<MobileDepositHttpResponse> _response = _post();
+
+  @override
+  Future<MobileDepositHttpResponse> get response => _response;
+
+  @override
+  void abort() {
+    if (_aborted) return;
+    _aborted = true;
+    _abortOutgoing();
+  }
+
+  Future<MobileDepositHttpResponse> _post() async {
+    try {
+      final HttpClientRequest outgoing = await _client.postUrl(_request.uri);
+      _outgoing = outgoing;
+      _throwIfAborted();
+      outgoing.followRedirects = false;
+      outgoing.maxRedirects = 0;
+      _request.headers.forEach(outgoing.headers.set);
+      outgoing.add(_request.body);
+
+      final HttpClientResponse incoming = await outgoing.close();
+      _throwIfAborted();
+      final List<int> body = <int>[];
+      await for (final List<int> chunk in incoming) {
+        _throwIfAborted();
+        final int remaining = _maximumResponseBytes + 1 - body.length;
+        if (remaining > 0) body.addAll(chunk.take(remaining));
+        if (body.length > _maximumResponseBytes) break;
+      }
+      _throwIfAborted();
+      return MobileDepositHttpResponse(status: incoming.statusCode, body: body);
+    } finally {
+      _outgoing = null;
+    }
+  }
+
+  void _throwIfAborted() {
+    if (_aborted) {
+      _abortOutgoing();
+      throw const _MobileDepositHttpExchangeAborted();
+    }
+  }
+
+  void _abortOutgoing() {
+    final HttpClientRequest? outgoing = _outgoing;
+    _outgoing = null;
+    outgoing?.abort();
+  }
+}
+
+final class _MobileDepositHttpExchangeAborted implements Exception {
+  const _MobileDepositHttpExchangeAborted();
 }
 
 /// Concrete `POST /mobile/deposits` adapter. It sends only a fixed paired
@@ -138,19 +208,24 @@ final class AuthenticatedMobileDepositHttpTransport
   @override
   Future<DepositSubmissionResult> submit(ProviderDeposit deposit) async {
     try {
-      final MobileDepositHttpResponse response = await _http
-          .post(
-            MobileDepositHttpRequest(
-              uri: _uri,
-              headers: <String, String>{
-                HttpHeaders.acceptHeader: ContentType.json.mimeType,
-                HttpHeaders.authorizationHeader: 'Bearer $_bearer',
-                HttpHeaders.contentTypeHeader: ContentType.json.mimeType,
-              },
-              body: utf8.encode(jsonEncode(_bodyFor(deposit))),
-            ),
-          )
-          .timeout(timeout);
+      final MobileDepositHttpExchange exchange = _http.post(
+        MobileDepositHttpRequest(
+          uri: _uri,
+          headers: <String, String>{
+            HttpHeaders.acceptHeader: ContentType.json.mimeType,
+            HttpHeaders.authorizationHeader: 'Bearer $_bearer',
+            HttpHeaders.contentTypeHeader: ContentType.json.mimeType,
+          },
+          body: utf8.encode(jsonEncode(_bodyFor(deposit))),
+        ),
+      );
+      final MobileDepositHttpResponse response = await exchange.response.timeout(
+        timeout,
+        onTimeout: () {
+          exchange.abort();
+          throw const DepositTransportUnavailable();
+        },
+      );
       return _resultFor(response);
     } on DepositTransportUnavailable {
       rethrow;

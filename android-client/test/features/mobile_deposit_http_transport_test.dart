@@ -14,20 +14,54 @@ final class _Http implements MobileDepositHttpPort {
   Object? failure;
 
   @override
-  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) async {
+  MobileDepositHttpExchange post(MobileDepositHttpRequest request) {
     requests.add(request);
-    if (failure case final Object error) throw error;
-    return response;
+    return _ImmediateHttpExchange(response, failure);
   }
 }
 
-final class _BlockingHttp implements MobileDepositHttpPort {
-  final Completer<MobileDepositHttpResponse> response =
-      Completer<MobileDepositHttpResponse>();
+final class _ImmediateHttpExchange implements MobileDepositHttpExchange {
+  _ImmediateHttpExchange(this._response, this._failure);
+
+  final MobileDepositHttpResponse _response;
+  final Object? _failure;
 
   @override
-  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) =>
-      response.future;
+  Future<MobileDepositHttpResponse> get response async {
+    if (_failure case final Object error) throw error;
+    return _response;
+  }
+
+  @override
+  void abort() {}
+}
+
+final class _BlockingHttp implements MobileDepositHttpPort {
+  final _BlockingHttpExchange exchange = _BlockingHttpExchange();
+  final List<MobileDepositHttpRequest> requests = <MobileDepositHttpRequest>[];
+
+  @override
+  MobileDepositHttpExchange post(MobileDepositHttpRequest request) {
+    requests.add(request);
+    return exchange;
+  }
+}
+
+final class _BlockingHttpExchange implements MobileDepositHttpExchange {
+  final Completer<MobileDepositHttpResponse> _response =
+      Completer<MobileDepositHttpResponse>();
+  int abortCount = 0;
+
+  @override
+  Future<MobileDepositHttpResponse> get response => _response.future;
+
+  @override
+  void abort() {
+    abortCount += 1;
+    if (!_response.isCompleted) {
+      _response.completeError(StateError('HTTP exchange aborted.'));
+    }
+  }
 }
 
 const ProviderDeposit deposit = ProviderDeposit(
@@ -152,12 +186,15 @@ void main() {
     );
   });
 
-  test('bounds the complete request and response operation with the project timeout', () async {
+  test('aborts the active HTTP exchange when the project deadline expires', () async {
     final _BlockingHttp http = _BlockingHttp();
 
     await expectLater(
       _transport(http, timeout: const Duration(milliseconds: 1)).submit(deposit),
       throwsA(isA<DepositTransportUnavailable>()),
     );
+
+    expect(http.requests, hasLength(1));
+    expect(http.exchange.abortCount, 1);
   });
 }
