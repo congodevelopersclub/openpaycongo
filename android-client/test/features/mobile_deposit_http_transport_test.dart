@@ -64,6 +64,28 @@ final class _BlockingHttpExchange implements MobileDepositHttpExchange {
   }
 }
 
+final class _SetupStallingSession implements MobileDepositHttpSession {
+  final Completer<MobileDepositHttpResponse> _response =
+      Completer<MobileDepositHttpResponse>();
+  int postCount = 0;
+  int forcedCloseCount = 0;
+
+  @override
+  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) {
+    postCount += 1;
+    return _response.future;
+  }
+
+  @override
+  void close({required bool force}) {
+    if (!force) return;
+    forcedCloseCount += 1;
+    if (!_response.isCompleted) {
+      _response.completeError(StateError('Connection setup aborted.'));
+    }
+  }
+}
+
 const ProviderDeposit deposit = ProviderDeposit(
   customerLookupIdentifier: 'customer-private-001',
   providerReference: 'provider-private-001',
@@ -196,5 +218,20 @@ void main() {
 
     expect(http.requests, hasLength(1));
     expect(http.exchange.abortCount, 1);
+  });
+
+  test('force-closes connection setup when the project deadline expires', () async {
+    final _SetupStallingSession session = _SetupStallingSession();
+    final DartMobileDepositHttpPort http = DartMobileDepositHttpPort(
+      openSession: () => session,
+    );
+
+    await expectLater(
+      _transport(http, timeout: const Duration(milliseconds: 1)).submit(deposit),
+      throwsA(isA<DepositTransportUnavailable>()),
+    );
+
+    expect(session.postCount, 1);
+    expect(session.forcedCloseCount, 1);
   });
 }

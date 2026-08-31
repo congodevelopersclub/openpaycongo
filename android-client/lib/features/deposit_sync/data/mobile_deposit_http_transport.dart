@@ -68,37 +68,62 @@ abstract interface class MobileDepositHttpExchange {
   void abort();
 }
 
+/// A single request's network resources. Closing a session with [force] must
+/// also cancel connection setup, before an HTTP request object exists.
+abstract interface class MobileDepositHttpSession {
+  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request);
+
+  void close({required bool force});
+}
+
 abstract interface class MobileDepositHttpPort {
   MobileDepositHttpExchange post(MobileDepositHttpRequest request);
 }
 
 /// Direct HTTP boundary. Redirects are disabled; this port accepts only the
-/// fixed endpoint derived from PairedMobileServerAuthority.
+/// fixed endpoint derived from PairedMobileServerAuthority. Each exchange gets
+/// its own session, so an aborted timeout can force-close stalled DNS, TCP, or
+/// TLS setup without affecting a later retry.
 final class DartMobileDepositHttpPort implements MobileDepositHttpPort {
-  DartMobileDepositHttpPort({HttpClient? client, int maximumResponseBytes = 1024})
-    : _client = client ?? HttpClient(),
-      _maximumResponseBytes = maximumResponseBytes {
+  DartMobileDepositHttpPort({
+    MobileDepositHttpSession Function()? openSession,
+    int maximumResponseBytes = 1024,
+  }) : _openSession =
+           openSession ??
+               (() => _DartMobileDepositHttpSession(
+                 client: HttpClient(),
+                 maximumResponseBytes: maximumResponseBytes,
+               )) {
     if (maximumResponseBytes < 1) {
       throw ArgumentError.value(maximumResponseBytes, 'maximumResponseBytes');
     }
   }
 
-  final HttpClient _client;
-  final int _maximumResponseBytes;
+  final MobileDepositHttpSession Function() _openSession;
+  final Set<MobileDepositHttpSession> _openSessions =
+      <MobileDepositHttpSession>{};
 
   @override
   MobileDepositHttpExchange post(MobileDepositHttpRequest request) {
     if (!_isFixedPairedDepositUri(request.uri)) {
       throw ArgumentError('Invalid paired mobile deposit endpoint.');
     }
+    final MobileDepositHttpSession session = _openSession();
+    _openSessions.add(session);
     return _DartMobileDepositHttpExchange(
-      client: _client,
+      session: session,
       request: request,
-      maximumResponseBytes: _maximumResponseBytes,
+      onFinished: () => _openSessions.remove(session),
     );
   }
 
-  void close() => _client.close(force: true);
+  void close() {
+    final List<MobileDepositHttpSession> sessions = _openSessions.toList();
+    _openSessions.clear();
+    for (final MobileDepositHttpSession session in sessions) {
+      session.close(force: true);
+    }
+  }
 
   bool _isFixedPairedDepositUri(Uri uri) =>
       uri.scheme == 'https' &&
@@ -109,19 +134,66 @@ final class DartMobileDepositHttpPort implements MobileDepositHttpPort {
       uri.fragment.isEmpty;
 }
 
-final class _DartMobileDepositHttpExchange
-    implements MobileDepositHttpExchange {
-  _DartMobileDepositHttpExchange({
+final class _DartMobileDepositHttpSession implements MobileDepositHttpSession {
+  _DartMobileDepositHttpSession({
     required this._client,
-    required this._request,
     required this._maximumResponseBytes,
   });
 
   final HttpClient _client;
-  final MobileDepositHttpRequest _request;
   final int _maximumResponseBytes;
-  HttpClientRequest? _outgoing;
+  bool _closed = false;
+
+  @override
+  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) async {
+    final HttpClientRequest outgoing = await _client.postUrl(request.uri);
+    _throwIfClosed(outgoing);
+    outgoing.followRedirects = false;
+    outgoing.maxRedirects = 0;
+    request.headers.forEach(outgoing.headers.set);
+    outgoing.add(request.body);
+
+    final HttpClientResponse incoming = await outgoing.close();
+    _throwIfClosed(outgoing);
+    final List<int> body = <int>[];
+    await for (final List<int> chunk in incoming) {
+      _throwIfClosed(outgoing);
+      final int remaining = _maximumResponseBytes + 1 - body.length;
+      if (remaining > 0) body.addAll(chunk.take(remaining));
+      if (body.length > _maximumResponseBytes) break;
+    }
+    _throwIfClosed(outgoing);
+    return MobileDepositHttpResponse(status: incoming.statusCode, body: body);
+  }
+
+  @override
+  void close({required bool force}) {
+    if (_closed) return;
+    _closed = true;
+    _client.close(force: force);
+  }
+
+  void _throwIfClosed(HttpClientRequest outgoing) {
+    if (_closed) {
+      outgoing.abort();
+      throw const _MobileDepositHttpExchangeAborted();
+    }
+  }
+}
+
+final class _DartMobileDepositHttpExchange implements MobileDepositHttpExchange {
+  _DartMobileDepositHttpExchange({
+    required this._session,
+    required this._request,
+    required this._onFinished,
+  });
+
+  final MobileDepositHttpSession _session;
+  final MobileDepositHttpRequest _request;
+  final void Function() _onFinished;
   bool _aborted = false;
+  bool _closed = false;
+  bool _finished = false;
 
   late final Future<MobileDepositHttpResponse> _response = _post();
 
@@ -132,46 +204,31 @@ final class _DartMobileDepositHttpExchange
   void abort() {
     if (_aborted) return;
     _aborted = true;
-    _abortOutgoing();
+    _closeSession(force: true);
+    _finish();
   }
 
   Future<MobileDepositHttpResponse> _post() async {
     try {
-      final HttpClientRequest outgoing = await _client.postUrl(_request.uri);
-      _outgoing = outgoing;
-      _throwIfAborted();
-      outgoing.followRedirects = false;
-      outgoing.maxRedirects = 0;
-      _request.headers.forEach(outgoing.headers.set);
-      outgoing.add(_request.body);
-
-      final HttpClientResponse incoming = await outgoing.close();
-      _throwIfAborted();
-      final List<int> body = <int>[];
-      await for (final List<int> chunk in incoming) {
-        _throwIfAborted();
-        final int remaining = _maximumResponseBytes + 1 - body.length;
-        if (remaining > 0) body.addAll(chunk.take(remaining));
-        if (body.length > _maximumResponseBytes) break;
-      }
-      _throwIfAborted();
-      return MobileDepositHttpResponse(status: incoming.statusCode, body: body);
+      final MobileDepositHttpResponse response = await _session.post(_request);
+      if (_aborted) throw const _MobileDepositHttpExchangeAborted();
+      return response;
     } finally {
-      _outgoing = null;
+      _closeSession(force: _aborted);
+      _finish();
     }
   }
 
-  void _throwIfAborted() {
-    if (_aborted) {
-      _abortOutgoing();
-      throw const _MobileDepositHttpExchangeAborted();
-    }
+  void _closeSession({required bool force}) {
+    if (_closed) return;
+    _closed = true;
+    _session.close(force: force);
   }
 
-  void _abortOutgoing() {
-    final HttpClientRequest? outgoing = _outgoing;
-    _outgoing = null;
-    outgoing?.abort();
+  void _finish() {
+    if (_finished) return;
+    _finished = true;
+    _onFinished();
   }
 }
 
