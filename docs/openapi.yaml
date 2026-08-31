@@ -31,7 +31,15 @@ paths:
                 $ref: ./pairing-qr.schema.json
         '401': { $ref: '#/components/responses/PairingProblem' }
         '403': { $ref: '#/components/responses/PairingProblem' }
-        '429': { $ref: '#/components/responses/PairingProblem' }
+        '429':
+          description: More than five issuance requests per minute from one verified financial operator for one organization
+          headers:
+            Retry-After:
+              required: true
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         default:
           $ref: '#/components/responses/PairingProblem'
   /v1/pairing/complete:

@@ -6,6 +6,9 @@ use App\Models\Organization;
 use App\Models\PairingIntent;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Session\TokenMismatchException;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 final class IssuePairingIntentHttpTest extends TestCase
@@ -47,7 +50,7 @@ final class IssuePairingIntentHttpTest extends TestCase
                 'server_key_agreement_public_key', 'trust_mode', 'signature',
             ])
             ->assertJsonMissing(['protected_server_private_material']);
-        self::assertStringContainsString('no-store', (string) $response->headers->get('cache-control'));
+        $this->assertPairingNoStore($response);
         self::assertCount(11, $response->json());
         self::assertSame($organization->getKey(), PairingIntent::query()->sole()->organization_id);
         self::assertNotSame(
@@ -58,8 +61,9 @@ final class IssuePairingIntentHttpTest extends TestCase
 
     public function test_an_unauthenticated_request_is_rejected_before_an_intent_is_issued(): void
     {
-        $this->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60])
-            ->assertUnauthorized();
+        $response = $this->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60]);
+
+        $this->assertPairingProblem($response, 401);
 
         self::assertDatabaseCount('pairing_intents', 0);
     }
@@ -71,8 +75,9 @@ final class IssuePairingIntentHttpTest extends TestCase
             'is_financial_operator' => false,
         ]);
 
-        $this->actingAs($user)->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60])
-            ->assertForbidden();
+        $response = $this->actingAs($user)->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60]);
+
+        $this->assertPairingProblem($response, 403);
 
         self::assertDatabaseCount('pairing_intents', 0);
     }
@@ -81,8 +86,9 @@ final class IssuePairingIntentHttpTest extends TestCase
     {
         $operator = $this->financialOperator();
 
-        $this->actingAs($operator)->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60])
-            ->assertForbidden();
+        $response = $this->actingAs($operator)->postJson('/v1/pairing/intents', ['lifetime_seconds' => 60]);
+
+        $this->assertPairingProblem($response, 403);
 
         self::assertDatabaseCount('pairing_intents', 0);
     }
@@ -92,9 +98,9 @@ final class IssuePairingIntentHttpTest extends TestCase
         $user = $this->financialOperator();
 
         foreach ([29, 301, '60', 60.5] as $lifetime) {
-            $this->actingAs($user)->postJson('/v1/pairing/intents', ['lifetime_seconds' => $lifetime])
-                ->assertUnprocessable()
-                ->assertJsonValidationErrors('lifetime_seconds');
+            $response = $this->verifiedPost($user, ['lifetime_seconds' => $lifetime]);
+
+            $this->assertPairingProblem($response, 422);
         }
 
         self::assertDatabaseCount('pairing_intents', 0);
@@ -104,18 +110,109 @@ final class IssuePairingIntentHttpTest extends TestCase
     {
         $user = $this->financialOperator();
 
-        $this->actingAs($user)->postJson('/v1/pairing/intents', [
+        $response = $this->verifiedPost($user, [
             'lifetime_seconds' => 60,
             'organization_id' => Organization::query()->create()->getKey(),
-        ])->assertUnprocessable()->assertJsonValidationErrors('organization_id');
+        ]);
+
+        $this->assertPairingProblem($response, 422);
 
         self::assertDatabaseCount('pairing_intents', 0);
     }
 
-    private function financialOperator(): User
+    public function test_csrf_failures_use_the_public_pairing_problem_contract(): void
+    {
+        Route::post('/testing/pairing-intents-csrf', static function (): never {
+            throw new TokenMismatchException;
+        })->name('pairing.intents.csrf');
+
+        $response = $this->postJson('/testing/pairing-intents-csrf');
+
+        $this->assertPairingProblem($response, 419);
+
+        self::assertDatabaseCount('pairing_intents', 0);
+    }
+
+    public function test_unhandled_pairing_errors_do_not_expose_the_exception_or_configuration(): void
+    {
+        config(['openpay.pairing.enrollment_signing_secret' => 'invalid-secret']);
+        $operator = $this->financialOperator();
+
+        $response = $this->verifiedPost($operator, ['lifetime_seconds' => 60]);
+
+        $this->assertPairingProblem($response, 500);
+        $response->assertDontSee('Invalid pairing configuration.')
+            ->assertDontSee('invalid-secret');
+
+        self::assertDatabaseCount('pairing_intents', 0);
+    }
+
+    public function test_throttle_isolated_by_verified_operator_and_organization(): void
+    {
+        $organization = Organization::query()->create();
+        $firstOperator = $this->financialOperator($organization);
+        $secondOperator = $this->financialOperator($organization);
+        $otherOrganizationOperator = $this->financialOperator();
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->verifiedPost($firstOperator, ['lifetime_seconds' => 60])->assertCreated();
+        }
+
+        $this->assertPairingProblem(
+            $this->verifiedPost($firstOperator, ['lifetime_seconds' => 60]),
+            429,
+            'pairing_rate_limited',
+        );
+        $this->verifiedPost($secondOperator, ['lifetime_seconds' => 60])->assertCreated();
+        $this->verifiedPost($otherOrganizationOperator, ['lifetime_seconds' => 60])->assertCreated();
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function verifiedPost(User $operator, array $payload): TestResponse
+    {
+        return $this->actingAs($operator)->withSession([
+            'financial_operator_mfa.user_id' => $operator->getAuthIdentifier(),
+        ])->postJson('/v1/pairing/intents', $payload);
+    }
+
+    private function assertPairingProblem(TestResponse $response, int $status, string $code = 'pairing_request_failed'): void
+    {
+        $response->assertStatus($status)
+            ->assertHeader('Content-Type', 'application/problem+json')
+            ->assertJsonPath('type', $code === 'pairing_rate_limited'
+                ? 'https://openpaycongo.example/problems/pairing-rate-limited'
+                : 'https://openpaycongo.example/problems/pairing-request-failed')
+            ->assertJsonPath('title', $code === 'pairing_rate_limited'
+                ? 'Pairing request rate limited'
+                : 'Pairing request failed')
+            ->assertJsonPath('status', $status)
+            ->assertJsonPath('code', $code)
+            ->assertJsonStructure(['type', 'title', 'status', 'code', 'request_id']);
+
+        self::assertSame(['type', 'title', 'status', 'code', 'request_id'], array_keys($response->json()));
+        self::assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', (string) $response->json('request_id'));
+        $this->assertPairingNoStore($response);
+
+        if ($status === 429) {
+            self::assertMatchesRegularExpression('/^[1-9][0-9]*$/', (string) $response->headers->get('Retry-After'));
+        }
+    }
+
+    private function assertPairingNoStore(TestResponse $response): void
+    {
+        self::assertSame(
+            ['no-store', 'private'],
+            array_values(array_intersect(
+                ['no-store', 'private'],
+                array_map('trim', explode(',', (string) $response->headers->get('Cache-Control'))),
+            )),
+        );
+    }
+
+    private function financialOperator(?Organization $organization = null): User
     {
         return User::factory()->create([
-            'organization_id' => Organization::query()->create()->getKey(),
+            'organization_id' => ($organization ?? Organization::query()->create())->getKey(),
             'is_financial_operator' => true,
             'two_factor_confirmed_at' => now(),
             'recovery_codes_confirmed_at' => now(),

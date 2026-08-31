@@ -45,7 +45,7 @@ Route::post('/mobile/deposits', StoreMobileDepositController::class)
     ->name('mobile.deposits.store');
 
 Route::post('/v1/pairing/intents', IssuePairingIntentController::class)
-    ->middleware(['web', 'auth'])
+    ->middleware(['web', 'auth', 'pairing.issuer', 'throttle:pairing-intents'])
     ->name('pairing.intents.store');
 
 Route::get('/services/identity', static function () {
