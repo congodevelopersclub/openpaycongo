@@ -11,7 +11,8 @@ return new class extends Migration
         Schema::create('pairing_intents', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->uuid('organization_id')->index();
-            $table->string('intent_id', 22)->unique();
+            $table->string('intent_id', 22)->index();
+            $table->binary('intent_id_bytes', 16)->unique();
             $table->string('state', 32)->index();
             $table->timestamp('expires_at')->index();
             $table->text('protected_server_private_material');

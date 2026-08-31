@@ -39,6 +39,61 @@ final class CreatePendingPairingIntentTest extends TestCase
             'openpaycongo/pairing/intent-server-private-material/v1/'.$organization->getKey().'/'.$intentId,
             $protector->aad,
         );
+        $this->assertSame(base64_decode(strtr($intentId, '-_', '+/'), true), $intent->intent_id_bytes);
+    }
+
+    public function test_uppercase_organization_uuid_is_rejected_before_aad_derivation_or_persistence(): void
+    {
+        $organization = Organization::query()->create();
+        $protector = new RecordingKeyProtector;
+
+        $this->expectException(InvalidArgumentException::class);
+
+        try {
+            (new CreatePendingPairingIntent($protector))->execute(
+                strtoupper($organization->getKey()),
+                rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '='),
+                now()->addMinute(),
+                random_bytes(32),
+            );
+        } finally {
+            $this->assertSame('', $protector->aad);
+            $this->assertDatabaseCount('pairing_intents', 0);
+        }
+    }
+
+    public function test_canonical_organization_uuid_survives_a_fresh_database_reload_for_key_unprotection(): void
+    {
+        $organization = Organization::query()->create();
+        $intentId = rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '=');
+        $material = random_bytes(32);
+        $protector = app(KeyProtector::class);
+        $intent = (new CreatePendingPairingIntent($protector))->execute(
+            $organization->getKey(), $intentId, now()->addMinute(), $material,
+        );
+        $reloaded = $intent->fresh();
+
+        $this->assertSame(strtolower($organization->getKey()), $reloaded->organization_id);
+        $this->assertSame(
+            $material,
+            $protector->unprotect(
+                $reloaded->protected_server_private_material,
+                'openpaycongo/pairing/intent-server-private-material/v1/'.$reloaded->organization_id.'/'.$reloaded->intent_id,
+            ),
+        );
+    }
+
+    public function test_case_distinct_canonical_intent_ids_persist_through_binary_unique_identity(): void
+    {
+        $organization = Organization::query()->create();
+        $creator = new CreatePendingPairingIntent(new RecordingKeyProtector);
+        $upper = 'AAECAwQFBgcICQoLDA0ODw';
+        $lower = 'aAECAwQFBgcICQoLDA0ODw';
+
+        $creator->execute($organization->getKey(), $upper, now()->addMinute(), random_bytes(32));
+        $creator->execute($organization->getKey(), $lower, now()->addMinute(), random_bytes(32));
+
+        $this->assertDatabaseCount('pairing_intents', 2);
     }
 
     public function test_protection_failure_leaves_no_pairing_intent(): void

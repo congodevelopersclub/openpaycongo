@@ -17,7 +17,7 @@ final readonly class CreatePendingPairingIntent
 
     public function execute(string $organizationId, string $intentId, DateTimeInterface $expiresAt, string $serverPrivateMaterial): PairingIntent
     {
-        $this->assertInput($organizationId, $intentId, $expiresAt, $serverPrivateMaterial);
+        $intentIdBytes = $this->assertInput($organizationId, $intentId, $expiresAt, $serverPrivateMaterial);
 
         $protectedMaterial = $this->protector->protect(
             $serverPrivateMaterial,
@@ -32,6 +32,7 @@ final readonly class CreatePendingPairingIntent
             return DB::transaction(static fn (): PairingIntent => PairingIntent::query()->create([
                 'organization_id' => $organizationId,
                 'intent_id' => $intentId,
+                'intent_id_bytes' => $intentIdBytes,
                 'state' => 'pending',
                 'expires_at' => $expiresAt,
                 'protected_server_private_material' => $protectedMaterial,
@@ -41,7 +42,7 @@ final readonly class CreatePendingPairingIntent
         }
     }
 
-    private function assertInput(string $organizationId, string $intentId, DateTimeInterface $expiresAt, string $serverPrivateMaterial): void
+    private function assertInput(string $organizationId, string $intentId, DateTimeInterface $expiresAt, string $serverPrivateMaterial): string
     {
         $decodedIntent = preg_match('/^[A-Za-z0-9_-]{22}$/D', $intentId) === 1
             ? base64_decode(strtr($intentId, '-_', '+/'), true)
@@ -49,6 +50,7 @@ final readonly class CreatePendingPairingIntent
         $secondsUntilExpiry = now()->diffInSeconds($expiresAt, false);
 
         if (Str::isUuid($organizationId) === false
+            || strtolower($organizationId) !== $organizationId
             || $decodedIntent === false
             || strlen($decodedIntent) !== 16
             || rtrim(strtr(base64_encode($decodedIntent), '+/', '-_'), '=') !== $intentId
@@ -57,6 +59,8 @@ final readonly class CreatePendingPairingIntent
             || $secondsUntilExpiry > 300) {
             throw new InvalidArgumentException('Invalid pairing intent input.');
         }
+
+        return $decodedIntent;
     }
 
     private function aad(string $organizationId, string $intentId): string

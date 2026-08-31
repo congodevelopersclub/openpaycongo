@@ -16,6 +16,7 @@ final class PairingIntent extends Model
     protected $fillable = [
         'organization_id',
         'intent_id',
+        'intent_id_bytes',
         'state',
         'expires_at',
         'protected_server_private_material',
