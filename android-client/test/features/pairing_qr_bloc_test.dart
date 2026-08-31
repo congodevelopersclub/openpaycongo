@@ -163,6 +163,47 @@ void main() {
     await bloc.close();
   });
 
+  test('drops an overlapping scan request without invalidating the first scan',
+      () async {
+    final _ControlledScanner scanner = _ControlledScanner();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: _MatchingPinStore(),
+      scanner: scanner,
+      now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+    );
+    final Future<PairingQrState> result = bloc.stream.firstWhere(
+      (PairingQrState state) => state is PairingQrAccepted,
+    );
+
+    bloc
+      ..add(const PairingQrScanRequested())
+      ..add(const PairingQrScanRequested());
+    await scanner.started.future;
+    scanner.complete(_signedQr);
+
+    expect(await result, isA<PairingQrAccepted>());
+    expect(scanner.calls, 1);
+    await bloc.close();
+  });
+
+  test('scanner cancellation returns the original BLoC to idle', () async {
+    final _ControlledScanner scanner = _ControlledScanner();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: _MatchingPinStore(),
+      scanner: scanner,
+    );
+    final Future<PairingQrState> result = bloc.stream.firstWhere(
+      (PairingQrState state) => state is PairingQrIdle,
+    );
+
+    bloc.add(const PairingQrScanRequested());
+    await scanner.started.future;
+    scanner.complete(null);
+
+    expect(await result, isA<PairingQrIdle>());
+    await bloc.close();
+  });
+
   test('rechecks exact expiry after delayed trust lookup before acceptance', () async {
     final _DelayedLookupStore store = _DelayedLookupStore();
     DateTime now = DateTime.utc(2026, 8, 10, 9, 31, 59);
@@ -388,4 +429,19 @@ final class _DelayedLookupStore implements PairingQrTrustStore {
   @override
   Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
       const PairingQrPinWrite.alreadyStored();
+}
+
+final class _ControlledScanner implements PairingQrScanner {
+  final Completer<void> started = Completer<void>();
+  final Completer<String?> _result = Completer<String?>();
+  int calls = 0;
+
+  @override
+  Future<String?> scan() {
+    calls++;
+    started.complete();
+    return _result.future;
+  }
+
+  void complete(String? value) => _result.complete(value);
 }

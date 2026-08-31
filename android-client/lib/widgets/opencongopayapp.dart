@@ -23,8 +23,10 @@ import '../screens/regex_builder_screen.dart';
 import '../services/Config/config_service.dart';
 import '../services/Parsers/parser_store.dart';
 
-/// Only the app-lock BLoC exists before unlock. Payment content and native
-/// gateways are created by the protected branch below it.
+/// The root owns app-lock and QR-verification BLoCs so an active scanner can
+/// resolve to sanitized state while locked. The verifier's narrow scanner and
+/// trust dependencies are the exception; payment content and other native
+/// gateways remain created only by the protected branch below it.
 class OpenCongoPayApp extends StatefulWidget {
   const OpenCongoPayApp({
     super.key,
@@ -53,10 +55,18 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
   late final AppLockBloc _appLock =
       widget.appLock ?? AppLockBloc(port: const PlatformAppLockPort());
   late final bool _ownsAppLock = widget.appLock == null;
+  late final PairingQrBloc _pairingQr =
+      widget.pairingQr ??
+      PairingQrBloc(
+        trustStore: const PlatformPairingQrTrustStore(),
+        scanner: const PlatformPairingQrScanner(),
+      );
+  late final bool _ownsPairingQr = widget.pairingQr == null;
 
   @override
   void dispose() {
     if (_ownsAppLock) _appLock.close();
+    if (_ownsPairingQr) _pairingQr.close();
     super.dispose();
   }
 
@@ -79,7 +89,7 @@ class _OpenCongoPayAppState extends State<OpenCongoPayApp> {
         paymentRequestLifecycle: widget.paymentRequestLifecycle,
         pairingEnrollment: widget.pairingEnrollment,
         pairingSession: widget.pairingSession,
-        pairingQr: widget.pairingQr,
+        pairingQr: _pairingQr,
         syncCursor: widget.syncCursor,
       ),
     ),
@@ -92,7 +102,7 @@ final class _UnlockedOpenCongoPayApp extends StatefulWidget {
     this.paymentRequestLifecycle,
     this.pairingEnrollment,
     this.pairingSession,
-    this.pairingQr,
+    required this.pairingQr,
     this.syncCursor,
   });
 
@@ -100,7 +110,7 @@ final class _UnlockedOpenCongoPayApp extends StatefulWidget {
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
-  final PairingQrBloc? pairingQr;
+  final PairingQrBloc pairingQr;
   final SyncCursorBloc? syncCursor;
 
   @override
@@ -113,13 +123,6 @@ final class _UnlockedOpenCongoPayAppState
   int _index = 0;
   final PlatformSmsGateway _smsGateway = const PlatformSmsGateway();
   PaymentLifecycleBloc? _paymentLifecycleBloc;
-  late final PairingQrBloc _pairingQr =
-      widget.pairingQr ??
-      PairingQrBloc(
-        trustStore: const PlatformPairingQrTrustStore(),
-        scanner: const PlatformPairingQrScanner(),
-      );
-  late final bool _ownsPairingQr = widget.pairingQr == null;
 
   @override
   void initState() {
@@ -134,7 +137,6 @@ final class _UnlockedOpenCongoPayAppState
   @override
   void dispose() {
     _paymentLifecycleBloc?.close();
-    if (_ownsPairingQr) _pairingQr.close();
     super.dispose();
   }
 
@@ -145,7 +147,7 @@ final class _UnlockedOpenCongoPayAppState
       paymentRequestLifecycle: widget.paymentRequestLifecycle,
       pairingEnrollment: widget.pairingEnrollment,
       pairingSession: widget.pairingSession,
-      pairingQr: _pairingQr,
+      pairingQr: widget.pairingQr,
       syncCursor: widget.syncCursor,
     ),
     const ParsersScreen(),

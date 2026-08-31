@@ -132,33 +132,40 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
   final PairingQrScanner? scanner;
   final DateTime Function() _now;
   int _scanGeneration = 0;
+  bool _scanRequestActive = false;
 
   Future<void> _requestScan(
     PairingQrScanRequested event,
     Emitter<PairingQrState> emit,
   ) async {
+    if (_scanRequestActive) return;
     final PairingQrScanner? activeScanner = scanner;
     if (activeScanner == null) {
       emit(const PairingQrScannerUnavailable());
       return;
     }
-    final int generation = ++_scanGeneration;
-    emit(const PairingQrScanning());
-    final String? value;
+    _scanRequestActive = true;
     try {
-      value = await activeScanner.scan();
-    } on Object {
-      if (generation == _scanGeneration) {
-        emit(const PairingQrScannerUnavailable());
+      final int generation = ++_scanGeneration;
+      emit(const PairingQrScanning());
+      final String? value;
+      try {
+        value = await activeScanner.scan();
+      } on Object {
+        if (generation == _scanGeneration) {
+          emit(const PairingQrScannerUnavailable());
+        }
+        return;
       }
-      return;
+      if (generation != _scanGeneration) return;
+      if (value == null) {
+        emit(const PairingQrIdle());
+        return;
+      }
+      await _scan(PairingQrScanned(value), emit);
+    } finally {
+      _scanRequestActive = false;
     }
-    if (generation != _scanGeneration) return;
-    if (value == null) {
-      emit(const PairingQrIdle());
-      return;
-    }
-    await _scan(PairingQrScanned(value), emit);
   }
 
   Future<void> _scan(
