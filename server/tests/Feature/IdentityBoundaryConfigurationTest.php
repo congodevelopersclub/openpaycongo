@@ -1,0 +1,307 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\DeveloperApplication;
+use App\Models\SourceInstallation;
+use App\Models\User;
+use App\Providers\AppServiceProvider;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\RateLimiter;
+use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Passport;
+use Laravel\Sanctum\Sanctum;
+use LogicException;
+use Tests\TestCase;
+
+final class IdentityBoundaryConfigurationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Artisan::call('passport:keys', ['--force' => true]);
+    }
+
+    public function test_identity_types_use_distinct_laravel_guards(): void
+    {
+        self::assertSame('session', config('auth.guards.web.driver'));
+        self::assertSame('sanctum', config('auth.guards.mobile.driver'));
+        self::assertSame('web', config('fortify.guard'));
+    }
+
+    public function test_passport_uses_the_explicitly_configured_key_directory(): void
+    {
+        $keyDirectory = storage_path('passport-contract-keys');
+        config(['openpay.passport_keys_path' => $keyDirectory]);
+
+        (new AppServiceProvider($this->app))->boot();
+
+        self::assertSame($keyDirectory.'/oauth-private.key', Passport::keyPath('oauth-private.key'));
+        self::assertSame($keyDirectory.'/oauth-public.key', Passport::keyPath('oauth-public.key'));
+    }
+
+    public function test_production_refuses_an_implicit_passport_key_directory(): void
+    {
+        config(['openpay.passport_keys_path' => null]);
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('Passport signing-key directory must be configured.');
+
+        (new AppServiceProvider($this->app))->boot();
+    }
+
+    public function test_only_client_credentials_token_exchange_is_exposed_under_oauth(): void
+    {
+        $oauthRoutes = collect(app('router')->getRoutes()->getRoutes())
+            ->filter(static fn ($route): bool => str_starts_with($route->uri(), 'oauth/'));
+
+        self::assertCount(1, $oauthRoutes);
+        self::assertSame('oauth/token', $oauthRoutes->sole()->uri());
+        self::assertSame(['POST'], $oauthRoutes->sole()->methods());
+        self::assertSame('passport.token', $oauthRoutes->sole()->getName());
+
+        $sanctumRoutes = collect(app('router')->getRoutes()->getRoutes())
+            ->filter(static fn ($route): bool => str_starts_with($route->uri(), 'sanctum/'));
+
+        self::assertCount(0, $sanctumRoutes);
+    }
+
+    public function test_token_exchange_rejects_every_non_service_grant_before_issuing_a_token(): void
+    {
+        foreach (['authorization_code', 'password', 'refresh_token'] as $grantType) {
+            $this->postJson('/oauth/token', ['grant_type' => $grantType])
+                ->assertStatus(400)
+                ->assertExactJson([
+                    'error' => 'unsupported_grant_type',
+                    'error_description' => 'Only the client_credentials grant is supported.',
+                ]);
+        }
+
+        $this->postJson('/oauth/token')
+            ->assertStatus(400)
+            ->assertExactJson([
+                'error' => 'unsupported_grant_type',
+                'error_description' => 'Only the client_credentials grant is supported.',
+            ]);
+    }
+
+    public function test_mobile_ownership_is_resolved_from_the_authenticated_installation_not_request_input(): void
+    {
+        $installation = SourceInstallation::query()->create([
+            'organization_id' => '00000000-0000-4000-8000-000000000009',
+            'installation_digest' => str_repeat('a', 64),
+        ]);
+
+        Sanctum::actingAs($installation, ['mobile:sync:read'], 'mobile');
+
+        $this->getJson('/mobile/identity?organization_id=00000000-0000-4000-8000-000000000010')
+            ->assertOk()
+            ->assertExactJson(['organization_id' => '00000000-0000-4000-8000-000000000009']);
+    }
+
+    public function test_web_session_and_wrong_mobile_ability_receive_same_non_enumerating_failure(): void
+    {
+        $web = User::factory()->create();
+        $installation = SourceInstallation::query()->create([
+            'organization_id' => '00000000-0000-4000-8000-000000000009',
+            'installation_digest' => str_repeat('b', 64),
+        ]);
+
+        $this->actingAs($web)->getJson('/mobile/identity')->assertUnauthorized()->assertJson(['message' => 'Unauthenticated.']);
+        Sanctum::actingAs($installation, ['mobile:sync:write'], 'mobile');
+        $this->getJson('/mobile/identity')->assertForbidden()->assertJson(['message' => 'Forbidden']);
+    }
+
+    public function test_prefixless_api_auth_failures_are_json_without_an_accept_header(): void
+    {
+        $this->get('/mobile/identity')
+            ->assertUnauthorized()
+            ->assertExactJson(['message' => 'Unauthenticated.']);
+
+        [, $client] = $this->developerApplication('00000000-0000-4000-8000-000000000015');
+        $wrongScopeToken = $this->serviceAccessToken($client, ['wallets:read']);
+
+        $this->withToken($wrongScopeToken)
+            ->get('/services/identity')
+            ->assertForbidden()
+            ->assertExactJson(['message' => 'Forbidden']);
+    }
+
+    public function test_revoked_and_expired_mobile_tokens_fail_closed_without_secret_output(): void
+    {
+        app('auth')->forgetGuards();
+        $installation = $this->installation();
+        $revoked = $installation->createToken('mobile-installation', ['mobile:sync:read']);
+
+        $this->withToken($revoked->plainTextToken)
+            ->getJson('/mobile/identity')
+            ->assertOk()
+            ->assertDontSee($revoked->plainTextToken);
+
+        $revoked->accessToken->delete();
+        app('auth')->forgetGuards();
+
+        $this->withToken($revoked->plainTextToken)
+            ->getJson('/mobile/identity')
+            ->assertUnauthorized()
+            ->assertJson(['message' => 'Unauthenticated.'])
+            ->assertDontSee($revoked->plainTextToken);
+
+        config(['sanctum.expiration' => 1]);
+        $expired = $installation->createToken('mobile-installation', ['mobile:sync:read']);
+        $expired->accessToken->forceFill(['created_at' => now()->subMinutes(2)])->save();
+        app('auth')->forgetGuards();
+
+        $this->withToken($expired->plainTextToken)
+            ->getJson('/mobile/identity')
+            ->assertUnauthorized()
+            ->assertJson(['message' => 'Unauthenticated.'])
+            ->assertDontSee($expired->plainTextToken);
+    }
+
+    public function test_mobile_rate_limit_fails_closed_without_token_output(): void
+    {
+        app('auth')->forgetGuards();
+        $installation = $this->installation();
+        $token = $installation->createToken('mobile-installation', ['mobile:sync:read']);
+        RateLimiter::clear((string) $installation->getAuthIdentifier());
+
+        foreach (range(1, 60) as $attempt) {
+            $this->withToken($token->plainTextToken)->getJson('/mobile/identity')->assertOk();
+        }
+
+        $this->withToken($token->plainTextToken)
+            ->getJson('/mobile/identity')
+            ->assertStatus(429)
+            ->assertDontSee($token->plainTextToken);
+    }
+
+    public function test_service_identity_uses_only_validated_client_persisted_ownership(): void
+    {
+        [$application, $client] = $this->developerApplication('00000000-0000-4000-8000-000000000011');
+        $accessToken = $this->serviceAccessToken($client, ['payment-requests:read']);
+
+        $this->withToken($accessToken)
+            ->getJson('/services/identity?organization_id=00000000-0000-4000-8000-000000000012&application_id=00000000-0000-4000-8000-000000000013')
+            ->assertOk()
+            ->assertExactJson([
+                'application_id' => $application->getKey(),
+                'organization_id' => $application->organization_id,
+            ])
+            ->assertDontSee($client->plainSecret);
+    }
+
+    public function test_client_credentials_issuance_is_limited_to_persisted_client_scope_grants(): void
+    {
+        [, $client] = $this->developerApplicationWithScopes(
+            '00000000-0000-4000-8000-000000000014',
+            ['payment-requests:read'],
+        );
+
+        $allowedToken = $this->postJson('/oauth/token', [
+            'grant_type' => 'client_credentials',
+            'client_id' => $client->getKey(),
+            'client_secret' => $client->plainSecret,
+            'scope' => 'payment-requests:read',
+        ])->assertOk()
+            ->assertJsonMissing(['client_secret'])
+            ->assertDontSee($client->plainSecret)
+            ->json('access_token');
+
+        $this->withToken($allowedToken)->getJson('/services/identity')->assertOk();
+
+        foreach (['deposits:read', 'customers:pii:read'] as $scope) {
+            $this->postJson('/oauth/token', [
+                'grant_type' => 'client_credentials',
+                'client_id' => $client->getKey(),
+                'client_secret' => $client->plainSecret,
+                'scope' => $scope,
+            ])->assertStatus(400)
+                ->assertJsonPath('error', 'invalid_scope')
+                ->assertJsonMissing(['client_secret'])
+                ->assertDontSee($client->plainSecret);
+        }
+    }
+
+    public function test_mobile_wrong_scope_and_revoked_service_client_fail_closed_without_secret_output(): void
+    {
+        [$application, $client] = $this->developerApplication('00000000-0000-4000-8000-000000000011');
+        $mobile = $this->installation();
+        $mobileToken = $mobile->createToken('mobile-installation', ['mobile:sync:read']);
+        app('auth')->forgetGuards();
+
+        $this->withToken($mobileToken->plainTextToken)
+            ->getJson('/services/identity')
+            ->assertUnauthorized()
+            ->assertJson(['message' => 'Unauthenticated.'])
+            ->assertDontSee($mobileToken->plainTextToken);
+
+        $wrongScopeToken = $this->serviceAccessToken($client, ['wallets:read']);
+        $this->withToken($wrongScopeToken)
+            ->getJson('/services/identity')
+            ->assertForbidden()
+            ->assertJson(['message' => 'Forbidden'])
+            ->assertDontSee($client->plainSecret);
+
+        $validToken = $this->serviceAccessToken($client, ['payment-requests:read']);
+        $client->forceFill(['revoked' => true])->save();
+        app('auth')->forgetGuards();
+
+        $this->withToken($validToken)
+            ->getJson('/services/identity')
+            ->assertUnauthorized()
+            ->assertJson(['message' => 'Unauthenticated.'])
+            ->assertDontSee($client->plainSecret);
+    }
+
+    private function installation(): SourceInstallation
+    {
+        return SourceInstallation::query()->create([
+            'organization_id' => '00000000-0000-4000-8000-000000000009',
+            'installation_digest' => str_repeat('c', 64),
+        ]);
+    }
+
+    /**
+     * @param  string[]  $scopes
+     * @return array{DeveloperApplication, Client}
+     */
+    private function developerApplication(string $organizationId, array $scopes = ['payment-requests:read', 'wallets:read']): array
+    {
+        $client = app(ClientRepository::class)->createClientCredentialsGrantClient('synthetic-service');
+        $client->forceFill(['scopes' => $scopes])->save();
+        $application = DeveloperApplication::query()->create([
+            'organization_id' => $organizationId,
+            'oauth_client_id' => $client->getKey(),
+        ]);
+
+        return [$application, $client];
+    }
+
+    /**
+     * @param  string[]  $scopes
+     * @return array{DeveloperApplication, Client}
+     */
+    private function developerApplicationWithScopes(string $organizationId, array $scopes): array
+    {
+        return $this->developerApplication($organizationId, $scopes);
+    }
+
+    /** @param string[] $scopes */
+    private function serviceAccessToken(Client $client, array $scopes): string
+    {
+        $response = $this->postJson('/oauth/token', [
+            'grant_type' => 'client_credentials',
+            'client_id' => $client->getKey(),
+            'client_secret' => $client->plainSecret,
+            'scope' => implode(' ', $scopes),
+        ])->assertOk()->assertJsonMissing(['client_secret']);
+
+        return (string) $response->json('access_token');
+    }
+}

@@ -2,11 +2,20 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\RequireClientCredentialsGrant;
+use App\Http\Middleware\ResolveDeveloperApplication;
+use App\Models\DeveloperApplication;
 use App\Operations\AssessReadiness;
 use App\Operations\MigrationReadiness;
 use Illuminate\Support\Facades\Route;
+use Laravel\Passport\Http\Controllers\AccessTokenController;
+use Laravel\Passport\Http\Middleware\CheckToken;
 
 Route::get('/healthz', static fn () => response()->json(['status' => 'ok']));
+
+Route::post('/oauth/token', [AccessTokenController::class, 'issueToken'])
+    ->middleware([RequireClientCredentialsGrant::class, 'throttle'])
+    ->name('passport.token');
 
 Route::get('/readyz', static function (AssessReadiness $readiness) {
     $status = $readiness->assess();
@@ -21,3 +30,21 @@ Route::get('/version', static fn (MigrationReadiness $migrations) => response()-
     'adapter' => config('database.default'),
     'migration_revision' => $migrations->revision(),
 ], 200, ['cache-control' => 'no-store']));
+
+Route::get('/mobile/identity', static function () {
+    $installation = request()->user('mobile');
+
+    return response()->json(['organization_id' => $installation->organization_id], 200, ['cache-control' => 'no-store']);
+})->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'throttle:mobile-api'])
+    ->name('mobile.identity');
+
+Route::get('/services/identity', static function () {
+    /** @var DeveloperApplication $application */
+    $application = request()->attributes->get(DeveloperApplication::class);
+
+    return response()->json([
+        'application_id' => $application->getKey(),
+        'organization_id' => $application->organization_id,
+    ], 200, ['cache-control' => 'no-store']);
+})->middleware([CheckToken::using('payment-requests:read'), ResolveDeveloperApplication::class])
+    ->name('services.identity');

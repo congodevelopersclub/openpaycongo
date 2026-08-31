@@ -39,8 +39,6 @@ export OPENPAY_PASSKEY_USER_HANDLE_SECRET='replace-with-a-distinct-32-byte-secre
 export OPENPAY_HTTP_BIND_ADDRESS='127.0.0.1'
 export OPENPAY_HTTP_PORT='8080'
 export OPENPAY_TRUSTED_PROXY_CIDRS='127.0.0.1/32'
-docker compose up --build -d
-curl --fail http://127.0.0.1:8080/healthz
 ```
 
 `OPENPAY_APP_URL` is the one canonical public HTTPS origin. Its hostname must
@@ -50,6 +48,53 @@ same origin. `OPENPAY_PASSKEY_USER_HANDLE_SECRET` is distinct from `APP_KEY`,
 must be at least 32 bytes, and must come from the secret manager. These four
 values are required by this production Compose path; do not substitute a
 wildcard, a forwarded host header, or a local HTTP address.
+
+## Passport signing keys
+
+Passport signs and validates service tokens with a stable RSA key pair. The
+production image contains neither key and Compose does not put PEM data in
+environment variables. Generate the pair once, outside the repository and
+outside the image, in a protected host directory. This command uses Passport's
+native key generator, refuses to overwrite either existing key, and does not
+print key material:
+
+```bash
+export OPENPAY_PASSPORT_KEYS_DIR='/protected/openpay/passport'
+install -d -m 0700 "$OPENPAY_PASSPORT_KEYS_DIR"
+test ! -e "$OPENPAY_PASSPORT_KEYS_DIR/oauth-private.key"
+test ! -e "$OPENPAY_PASSPORT_KEYS_DIR/oauth-public.key"
+docker build --target production --tag congo-openpay-fpm:local -f server/Dockerfile .
+docker run --rm \
+  --user root \
+  --env APP_ENV=production \
+  --env OPENPAY_PASSPORT_KEYS_PATH=/run/openpay-passport-keys \
+  --mount type=bind,src="$OPENPAY_PASSPORT_KEYS_DIR",dst=/run/openpay-passport-keys \
+  congo-openpay-fpm:local \
+  sh -ceu 'umask 077; php artisan passport:keys; chown "$(id -u www-data):$(id -g www-data)" /run/openpay-passport-keys/oauth-private.key /run/openpay-passport-keys/oauth-public.key; chmod 0400 /run/openpay-passport-keys/oauth-private.key; chmod 0444 /run/openpay-passport-keys/oauth-public.key'
+export OPENPAY_PASSPORT_PRIVATE_KEY_FILE="$OPENPAY_PASSPORT_KEYS_DIR/oauth-private.key"
+export OPENPAY_PASSPORT_PUBLIC_KEY_FILE="$OPENPAY_PASSPORT_KEYS_DIR/oauth-public.key"
+docker compose up --build -d
+curl --fail http://127.0.0.1:8080/healthz
+```
+
+The `php` service mounts those two files as Docker secrets, read-only, at
+`/run/secrets/oauth-private.key` and `/run/secrets/oauth-public.key`. It is the
+only current process that issues or validates Passport service tokens. Do not
+mount the private key into nginx, PostgreSQL, migrations, queue workers, or the
+scheduler. Any future process that uses Passport must receive the same
+read-only secret pair and be deployed with this configuration. The one-time
+generator runs as container root only to write the bind-mounted files with the
+numeric ownership of the production `www-data` process. The private key is
+owner-readable only; the public key is world-readable. Compose preserves those
+source-file permissions for file-backed secrets, so do not change them to a
+host-user-owned `0600` pair.
+
+Keep the host directory and its encrypted, access-controlled backup outside
+the repository, image, Compose project, logs, shell history, and telemetry.
+Runtime recreation does not change these files; loss or replacement changes
+the signing identity and can invalidate service tokens. Key rotation, old-key
+validation overlap, and revocation policy require an explicit operational
+decision; this baseline intentionally does not automate them.
 
 ## Legacy administrator provisioning
 

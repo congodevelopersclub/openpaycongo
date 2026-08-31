@@ -35,7 +35,7 @@ RUN composer install --no-interaction --prefer-dist --no-scripts
 FROM dependencies AS quality
 
 COPY server/ ./
-COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml
@@ -153,6 +153,8 @@ RUN php -m | grep -qx pdo_pgsql \
     && test ! -e pint.json \
     && test ! -e .env \
     && test ! -e .env.example \
+    && test ! -e storage/oauth-private.key \
+    && test ! -e storage/oauth-public.key \
     && test ! -e node_modules \
     && test ! -e vendor/.openpay-host-dependency-marker \
     && test -f composer.json \

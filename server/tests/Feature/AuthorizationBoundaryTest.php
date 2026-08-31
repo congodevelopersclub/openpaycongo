@@ -6,6 +6,7 @@ use App\Http\Middleware\RequireFinancialOperatorMfa;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\Authorize;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
+use Laravel\Passport\Http\Middleware\CheckToken;
 use Tests\TestCase;
 
 final class AuthorizationBoundaryTest extends TestCase
@@ -34,11 +35,17 @@ final class AuthorizationBoundaryTest extends TestCase
             'GET|HEAD filament/exports/{export}/download' => 'filament.exports.download',
             'GET|HEAD filament/imports/{import}/failed-rows/download' => 'filament.imports.failed-rows.download',
         ];
+        // Passport validates the confidential client credentials in the token exchange itself.
+        // It is intentionally reviewed separately from generic anonymous routes.
+        $confidentialClientTokenExchangeRoutes = [
+            'POST oauth/token' => 'passport.token',
+        ];
         $authorizedRoutes = [];
         $runtimeRouteCount = 0;
 
         self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
+        self::assertCount(1, $confidentialClientTokenExchangeRoutes);
         self::assertCount(0, $authorizedRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
@@ -64,6 +71,16 @@ final class AuthorizationBoundaryTest extends TestCase
                 continue;
             }
 
+            if (array_key_exists($signature, $confidentialClientTokenExchangeRoutes)) {
+                self::assertSame(
+                    $confidentialClientTokenExchangeRoutes[$signature],
+                    $route->getName(),
+                    "Token exchange [{$signature}] must retain its explicit confidential-client inventory entry.",
+                );
+
+                continue;
+            }
+
             if (array_key_exists($signature, $authorizedRoutes)) {
                 self::assertSame($authorizedRoutes[$signature], array_values(array_intersect($authorizedRoutes[$signature], $route->middleware())));
 
@@ -76,7 +93,7 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(38, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(41, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void
@@ -94,6 +111,16 @@ final class AuthorizationBoundaryTest extends TestCase
         }
     }
 
+    public function test_passport_token_exchange_is_reviewed_as_a_confidential_client_boundary(): void
+    {
+        $route = collect(app('router')->getRoutes()->getRoutes())
+            ->first(static fn ($route): bool => implode('|', $route->methods()).' '.$route->uri() === 'POST oauth/token');
+
+        self::assertNotNull($route);
+        self::assertSame('passport.token', $route->getName());
+        self::assertStringContainsString('AccessTokenController', (string) $route->getAction('controller'));
+    }
+
     public function test_lookalike_middleware_aliases_do_not_count_as_authorization(): void
     {
         $router = app('router');
@@ -105,6 +132,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertTrue($this->isExpectedBoundaryMiddleware(Authenticate::class));
         self::assertTrue($this->isExpectedBoundaryMiddleware('can:view,deposit'));
         self::assertTrue($this->isExpectedBoundaryMiddleware(Authorize::class));
+        self::assertTrue($this->isExpectedBoundaryMiddleware(CheckToken::class.':payment-requests:read'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('auth.optional'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('authorize-anything'));
 
@@ -150,13 +178,15 @@ final class AuthorizationBoundaryTest extends TestCase
         $isAuthorizationForm = str_starts_with($middleware, 'can:')
             || $middleware === Authorize::class
             || str_starts_with($middleware, Authorize::class.':');
+        $isServiceTokenForm = $middleware === CheckToken::class
+            || str_starts_with($middleware, CheckToken::class.':');
 
-        if (! $isAuthenticationForm && ! $isAuthorizationForm) {
+        if (! $isAuthenticationForm && ! $isAuthorizationForm && ! $isServiceTokenForm) {
             return false;
         }
 
         return collect(app('router')->resolveMiddleware([$middleware]))
             ->map(static fn (string $resolved): string => explode(':', $resolved, 2)[0])
-            ->contains(static fn (string $resolved): bool => $resolved === Authenticate::class || $resolved === Authorize::class);
+            ->contains(static fn (string $resolved): bool => in_array($resolved, [Authenticate::class, Authorize::class, CheckToken::class], true));
     }
 }

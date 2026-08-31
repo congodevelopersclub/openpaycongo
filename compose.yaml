@@ -15,6 +15,7 @@ x-application-environment: &application-environment
   OPENPAY_PASSKEY_RP_ID: ${OPENPAY_PASSKEY_RP_ID:?Set OPENPAY_PASSKEY_RP_ID outside the repository}
   OPENPAY_PASSKEY_ALLOWED_ORIGINS: ${OPENPAY_PASSKEY_ALLOWED_ORIGINS:?Set OPENPAY_PASSKEY_ALLOWED_ORIGINS outside the repository}
   OPENPAY_PASSKEY_USER_HANDLE_SECRET: ${OPENPAY_PASSKEY_USER_HANDLE_SECRET:?Set OPENPAY_PASSKEY_USER_HANDLE_SECRET outside the repository}
+  OPENPAY_PASSPORT_KEYS_PATH: /run/secrets
   OPENPAY_TRUSTED_PROXY_CIDRS: ${OPENPAY_TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
   LOG_CHANNEL: stderr
   LOG_LEVEL: warning
@@ -37,6 +38,12 @@ x-application: &application
   depends_on:
     postgres:
       condition: service_healthy
+
+x-passport-key-secrets: &passport-key-secrets
+  - source: passport-private-key
+    target: oauth-private.key
+  - source: passport-public-key
+    target: oauth-public.key
 
 services:
   postgres:
@@ -70,6 +77,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    secrets: *passport-key-secrets
     restart: unless-stopped
 
   nginx:
@@ -113,3 +121,9 @@ services:
 volumes:
   app-storage:
   postgres-data:
+
+secrets:
+  passport-private-key:
+    file: ${OPENPAY_PASSPORT_PRIVATE_KEY_FILE:?Set OPENPAY_PASSPORT_PRIVATE_KEY_FILE outside the repository}
+  passport-public-key:
+    file: ${OPENPAY_PASSPORT_PUBLIC_KEY_FILE:?Set OPENPAY_PASSPORT_PUBLIC_KEY_FILE outside the repository}

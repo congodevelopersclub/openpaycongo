@@ -49,6 +49,8 @@ run_laravel_pr() (
   export OPENPAY_PASSKEY_RP_ID='openpay.test'
   export OPENPAY_PASSKEY_ALLOWED_ORIGINS='["https://openpay.test"]'
   export OPENPAY_PASSKEY_USER_HANDLE_SECRET='ci-passkey-user-handle-secret-at-least-32-characters'
+  export OPENPAY_PASSPORT_PRIVATE_KEY_FILE='/tmp/openpay-passport-private-key'
+  export OPENPAY_PASSPORT_PUBLIC_KEY_FILE='/tmp/openpay-passport-public-key'
   export OPENPAY_DB_PASSWORD='ci-compose-validation-only'
   export DEPOSIT_LOOKUP_TOKEN_KEY='ci-compose-deposit-lookup-token-only'
   created_markers=()
@@ -60,11 +62,11 @@ run_laravel_pr() (
   }
   trap cleanup_laravel_markers EXIT
   docker compose config --quiet
-  for secret in OPENPAY_APP_KEY OPENPAY_DB_PASSWORD DEPOSIT_LOOKUP_TOKEN_KEY; do
+  for secret in OPENPAY_APP_KEY OPENPAY_DB_PASSWORD DEPOSIT_LOOKUP_TOKEN_KEY OPENPAY_PASSPORT_PRIVATE_KEY_FILE OPENPAY_PASSPORT_PUBLIC_KEY_FILE; do
     if env -u "$secret" docker compose config --quiet >/dev/null 2>&1; then die 'Compose accepted a missing required secret.'; fi
   done
   run_laravel_quality_and_tests
-  local marker directory
+  local marker directory passport_key_directory passport_private_key passport_public_key
   for marker in server/vendor/.openpay-host-dependency-marker server/node_modules/.openpay-host-dependency-marker; do
     if [[ ! -e "$marker" ]]; then
       directory="$(dirname "$marker")"
@@ -80,14 +82,41 @@ run_laravel_pr() (
   docker build --target production-contract -f server/docker/nginx.Dockerfile .
   docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .
   docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .
-  docker run --rm \
+  passport_key_directory="$(mktemp -d)"
+  chmod 0755 "$passport_key_directory"
+  passport_private_key="$passport_key_directory/oauth-private.key"
+  passport_public_key="$passport_key_directory/oauth-public.key"
+  created_markers+=("$passport_private_key" "$passport_public_key")
+  created_directories+=("$passport_key_directory")
+  # CI-only disposable files; deployed keys remain operator-provisioned.
+  # This mirrors the documented root-only provisioning step, then proves the
+  # unprivileged production user can read the resulting read-only mount.
+  docker run --rm --user root \
+    --env APP_ENV=production \
     --env APP_KEY="$OPENPAY_APP_KEY" \
+    --env OPENPAY_PASSPORT_KEYS_PATH=/run/openpay-ci-keys \
+    --mount "type=bind,src=$passport_key_directory,dst=/run/openpay-ci-keys" \
+    congo-openpay-fpm:ci sh -ceu '
+      umask 077
+      php artisan passport:keys
+      chown "$(id -u www-data):$(id -g www-data)" /run/openpay-ci-keys/oauth-private.key /run/openpay-ci-keys/oauth-public.key
+      chmod 0400 /run/openpay-ci-keys/oauth-private.key
+      chmod 0444 /run/openpay-ci-keys/oauth-public.key
+    '
+  docker run --rm \
+    --mount "type=bind,src=$passport_key_directory,dst=/run/secrets,readonly" \
+    --env APP_KEY="$OPENPAY_APP_KEY" \
+    --env OPENPAY_PASSPORT_KEYS_PATH=/run/secrets \
     --env OPENPAY_APP_URL="$OPENPAY_APP_URL" \
     --env OPENPAY_PASSKEY_RP_ID="$OPENPAY_PASSKEY_RP_ID" \
     --env OPENPAY_PASSKEY_ALLOWED_ORIGINS="$OPENPAY_PASSKEY_ALLOWED_ORIGINS" \
     --env OPENPAY_PASSKEY_USER_HANDLE_SECRET="$OPENPAY_PASSKEY_USER_HANDLE_SECRET" \
     congo-openpay-fpm:ci sh -ceu '
+      openssl pkey -in /run/secrets/oauth-private.key -check -noout
+      openssl pkey -pubin -in /run/secrets/oauth-public.key -noout
       php artisan config:cache
+      php artisan config:show openpay > /tmp/openpay-openpay
+      grep -Eq "passport_keys_path.*\\/run\\/secrets" /tmp/openpay-openpay
       php artisan config:show passkeys > /tmp/openpay-passkeys
       grep -Eq "relying_party_id.*openpay\.test" /tmp/openpay-passkeys
       grep -Eq "allowed_origins.*https:\/\/openpay\.test" /tmp/openpay-passkeys

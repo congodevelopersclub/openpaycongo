@@ -1,10 +1,15 @@
 <?php
 
 use App\Http\Middleware\RequireConfirmedTwoFactorForPasskeys;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
+use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 $trustedProxyCidrs = preg_split(
     '/\\s+/',
@@ -25,6 +30,10 @@ return Application::configure(basePath: dirname(__DIR__))
         __DIR__.'/../app/Console/Commands',
     ])
     ->withMiddleware(function (Middleware $middleware) use ($trustedProxyCidrs): void {
+        $middleware->alias([
+            'abilities' => CheckAbilities::class,
+            'ability' => CheckForAnyAbility::class,
+        ]);
         $middleware->appendToGroup('web', RequireConfirmedTwoFactorForPasskeys::class);
 
         $middleware->trustProxies(
@@ -34,7 +43,24 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $shouldRenderJson = static fn (Request $request): bool => $request->routeIs(
+            'passport.token',
+            'mobile.*',
+            'services.*',
+        ) || $request->expectsJson();
+
+        $exceptions->render(static function (AuthenticationException $exception, Request $request) use ($shouldRenderJson) {
+            return $shouldRenderJson($request) ? response()->json(['message' => 'Unauthenticated.'], 401) : null;
+        });
+        $exceptions->render(static function (AuthorizationException $exception, Request $request) use ($shouldRenderJson) {
+            return $shouldRenderJson($request) ? response()->json(['message' => 'Forbidden'], 403) : null;
+        });
+        $exceptions->render(static function (HttpExceptionInterface $exception, Request $request) use ($shouldRenderJson) {
+            return $exception->getStatusCode() === 403 && $shouldRenderJson($request)
+                ? response()->json(['message' => 'Forbidden'], 403)
+                : null;
+        });
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+            $shouldRenderJson,
         );
     })->create();
