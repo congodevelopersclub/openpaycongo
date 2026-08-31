@@ -23,7 +23,7 @@ final class PairedMobileServerAuthority {
         value.path.isNotEmpty && value.path != '/' ||
         value.query.isNotEmpty ||
         value.fragment.isNotEmpty) {
-      throw ArgumentError.value(value, 'canonicalHttpsBaseUri');
+      throw ArgumentError('Invalid paired mobile server authority.');
     }
     return value.replace(path: '', query: null, fragment: null);
   }
@@ -32,7 +32,7 @@ final class PairedMobileServerAuthority {
     if (value.isEmpty ||
         value.length > 8192 ||
         RegExp(r'[\x00-\x20\x7f]').hasMatch(value)) {
-      throw ArgumentError.value(value, 'mobileBearer');
+      throw ArgumentError('Invalid paired mobile bearer.');
     }
     return value;
   }
@@ -80,7 +80,7 @@ final class DartMobileDepositHttpPort implements MobileDepositHttpPort {
   @override
   Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) async {
     if (!_isFixedPairedDepositUri(request.uri)) {
-      throw ArgumentError.value(request.uri, 'request.uri');
+      throw ArgumentError('Invalid paired mobile deposit endpoint.');
     }
     final HttpClientRequest outgoing = await _client.postUrl(request.uri);
     outgoing.followRedirects = false;
@@ -118,10 +118,14 @@ final class AuthenticatedMobileDepositHttpTransport
     required PairedMobileServerAuthority authority,
     required this._http,
     this.maximumResponseBytes = 1024,
+    this.timeout = const Duration(seconds: 3),
   }) : _uri = authority.baseUri.replace(path: '/mobile/deposits'),
        _bearer = authority.bearer {
     if (maximumResponseBytes < 1 || maximumResponseBytes > 8192) {
       throw ArgumentError.value(maximumResponseBytes, 'maximumResponseBytes');
+    }
+    if (timeout <= Duration.zero || timeout > const Duration(seconds: 3)) {
+      throw ArgumentError.value(timeout, 'timeout');
     }
   }
 
@@ -129,21 +133,24 @@ final class AuthenticatedMobileDepositHttpTransport
   final String _bearer;
   final MobileDepositHttpPort _http;
   final int maximumResponseBytes;
+  final Duration timeout;
 
   @override
   Future<DepositSubmissionResult> submit(ProviderDeposit deposit) async {
     try {
-      final MobileDepositHttpResponse response = await _http.post(
-        MobileDepositHttpRequest(
-          uri: _uri,
-          headers: <String, String>{
-            HttpHeaders.acceptHeader: ContentType.json.mimeType,
-            HttpHeaders.authorizationHeader: 'Bearer $_bearer',
-            HttpHeaders.contentTypeHeader: ContentType.json.mimeType,
-          },
-          body: utf8.encode(jsonEncode(_bodyFor(deposit))),
-        ),
-      );
+      final MobileDepositHttpResponse response = await _http
+          .post(
+            MobileDepositHttpRequest(
+              uri: _uri,
+              headers: <String, String>{
+                HttpHeaders.acceptHeader: ContentType.json.mimeType,
+                HttpHeaders.authorizationHeader: 'Bearer $_bearer',
+                HttpHeaders.contentTypeHeader: ContentType.json.mimeType,
+              },
+              body: utf8.encode(jsonEncode(_bodyFor(deposit))),
+            ),
+          )
+          .timeout(timeout);
       return _resultFor(response);
     } on DepositTransportUnavailable {
       rethrow;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,6 +19,15 @@ final class _Http implements MobileDepositHttpPort {
     if (failure case final Object error) throw error;
     return response;
   }
+}
+
+final class _BlockingHttp implements MobileDepositHttpPort {
+  final Completer<MobileDepositHttpResponse> response =
+      Completer<MobileDepositHttpResponse>();
+
+  @override
+  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) =>
+      response.future;
 }
 
 const ProviderDeposit deposit = ProviderDeposit(
@@ -42,8 +52,15 @@ PairedMobileServerAuthority authority() =>
       mobileBearer: 'opaque-bearer-token',
     );
 
-AuthenticatedMobileDepositHttpTransport _transport(_Http http) =>
-    AuthenticatedMobileDepositHttpTransport(authority: authority(), http: http);
+AuthenticatedMobileDepositHttpTransport _transport(
+  MobileDepositHttpPort http, {
+  Duration timeout = const Duration(seconds: 3),
+}) =>
+    AuthenticatedMobileDepositHttpTransport(
+      authority: authority(),
+      http: http,
+      timeout: timeout,
+    );
 
 void main() {
   test('posts exact trusted authenticated ingress contract without tenant or installation fields', () async {
@@ -99,13 +116,16 @@ void main() {
         throwsArgumentError,
       );
     }
-    expect(
-      () => PairedMobileServerAuthority.fromVerifiedPairing(
+    const String malformedBearer = 'bearer with whitespace';
+    try {
+      PairedMobileServerAuthority.fromVerifiedPairing(
         canonicalHttpsBaseUri: Uri.parse('https://server.example.test'),
-        mobileBearer: 'bearer with whitespace',
-      ),
-      throwsArgumentError,
-    );
+        mobileBearer: malformedBearer,
+      );
+      fail('Expected invalid bearer to be rejected.');
+    } on ArgumentError catch (error) {
+      expect(error.toString(), isNot(contains(malformedBearer)));
+    }
   });
 
   test('network, auth, redirect, malformed, oversized, and unrecognised replies fail closed', () async {
@@ -128,6 +148,15 @@ void main() {
       ..failure = const SocketException('unavailable');
     await expectLater(
       _transport(network).submit(deposit),
+      throwsA(isA<DepositTransportUnavailable>()),
+    );
+  });
+
+  test('bounds the complete request and response operation with the project timeout', () async {
+    final _BlockingHttp http = _BlockingHttp();
+
+    await expectLater(
+      _transport(http, timeout: const Duration(milliseconds: 1)).submit(deposit),
       throwsA(isA<DepositTransportUnavailable>()),
     );
   });
