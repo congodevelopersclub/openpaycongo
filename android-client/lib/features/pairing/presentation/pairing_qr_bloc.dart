@@ -84,12 +84,15 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
 
   final PairingQrTrustStore trustStore;
   final DateTime Function() _now;
+  int _scanGeneration = 0;
 
   Future<void> _scan(
     PairingQrScanned event,
     Emitter<PairingQrState> emit,
   ) async {
+    final int generation = ++_scanGeneration;
     final _PairingQr? qr = await _PairingQr.parseAndVerify(event.value);
+    if (generation != _scanGeneration) return;
     if (qr == null) {
       emit(const PairingQrRejected(PairingQrRejection.malformed));
       return;
@@ -102,7 +105,13 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
     try {
       pin = await trustStore.lookup(qr.fingerprint);
     } on Object {
+      if (generation != _scanGeneration) return;
       emit(const PairingQrRejected(PairingQrRejection.trustUnavailable));
+      return;
+    }
+    if (generation != _scanGeneration) return;
+    if (!qr.expiresAt.isAfter(_now().toUtc())) {
+      emit(const PairingQrRejected(PairingQrRejection.expired));
       return;
     }
     final bool accepted = switch ((qr.trustMode, pin)) {

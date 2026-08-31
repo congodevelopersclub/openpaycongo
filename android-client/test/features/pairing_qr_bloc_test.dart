@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -131,6 +132,53 @@ void main() {
       );
     },
   );
+
+  test('newest scan wins when an older trust lookup completes later', () async {
+    final _DelayedFirstLookupStore store = _DelayedFirstLookupStore();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: store,
+      now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+    );
+    final List<PairingQrState> states = <PairingQrState>[];
+    final Completer<void> accepted = Completer<void>();
+    final StreamSubscription<PairingQrState> subscription = bloc.stream.listen(
+      (PairingQrState state) {
+        states.add(state);
+        if (state is PairingQrAccepted && !accepted.isCompleted) {
+          accepted.complete();
+        }
+      },
+    );
+
+    bloc.add(const PairingQrScanned(_signedQr));
+    await store.firstLookupStarted.future;
+    bloc.add(const PairingQrScanned(_signedQr));
+    await accepted.future;
+    store.releaseFirstLookup();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(states.whereType<PairingQrAccepted>(), hasLength(1));
+    expect(states, hasLength(1));
+    await subscription.cancel();
+    await bloc.close();
+  });
+
+  test('rechecks exact expiry after delayed trust lookup before acceptance', () async {
+    final _DelayedLookupStore store = _DelayedLookupStore();
+    DateTime now = DateTime.utc(2026, 8, 10, 9, 31, 59);
+    final PairingQrBloc bloc = PairingQrBloc(trustStore: store, now: () => now);
+    final Future<PairingQrState> result = bloc.stream.first;
+
+    bloc.add(const PairingQrScanned(_signedQr));
+    await store.lookupStarted.future;
+    now = DateTime.utc(2026, 8, 10, 9, 32);
+    store.releaseLookup();
+
+    final PairingQrState state = await result;
+    expect((state as PairingQrRejected).reason, PairingQrRejection.expired);
+    expect(state.toString(), isNot(contains(_signedQr)));
+    await bloc.close();
+  });
 
   test('rejects endpoint grammar and non-canonical base64url', () async {
     final Map<String, Object?> endpoint =
@@ -281,4 +329,35 @@ final class _FailingStore implements PairingQrTrustStore {
   @override
   Future<PairingQrPinState> lookup(String fingerprint) async =>
       throw StateError('secure store unavailable');
+}
+
+final class _DelayedFirstLookupStore implements PairingQrTrustStore {
+  final Completer<void> firstLookupStarted = Completer<void>();
+  final Completer<void> _firstLookupRelease = Completer<void>();
+  var _lookups = 0;
+
+  @override
+  Future<PairingQrPinState> lookup(String fingerprint) async {
+    if (_lookups++ == 0) {
+      firstLookupStarted.complete();
+      await _firstLookupRelease.future;
+    }
+    return const PairingQrPinState.matching();
+  }
+
+  void releaseFirstLookup() => _firstLookupRelease.complete();
+}
+
+final class _DelayedLookupStore implements PairingQrTrustStore {
+  final Completer<void> lookupStarted = Completer<void>();
+  final Completer<void> _lookupRelease = Completer<void>();
+
+  @override
+  Future<PairingQrPinState> lookup(String fingerprint) async {
+    lookupStarted.complete();
+    await _lookupRelease.future;
+    return const PairingQrPinState.matching();
+  }
+
+  void releaseLookup() => _lookupRelease.complete();
 }
