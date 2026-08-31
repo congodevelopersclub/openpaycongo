@@ -40,13 +40,15 @@ final class AuthorizationBoundaryTest extends TestCase
         $confidentialClientTokenExchangeRoutes = [
             'POST oauth/token' => 'passport.token',
         ];
-        $authorizedRoutes = [];
+        $authorizedRoutes = [
+            'POST v1/pairing/intents' => ['auth'],
+        ];
         $runtimeRouteCount = 0;
 
         self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
         self::assertCount(1, $confidentialClientTokenExchangeRoutes);
-        self::assertCount(0, $authorizedRoutes);
+        self::assertCount(1, $authorizedRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
             $signature = implode('|', $route->methods()).' '.$route->uri();
@@ -93,7 +95,7 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(42, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(43, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void

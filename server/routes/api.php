@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\IssuePairingIntentController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Middleware\RequireClientCredentialsGrant;
 use App\Http\Middleware\ResolveDeveloperApplication;
@@ -42,6 +43,10 @@ Route::get('/mobile/identity', static function () {
 Route::post('/mobile/deposits', StoreMobileDepositController::class)
     ->middleware(['auth:mobile', 'abilities:mobile:deposits:write', 'throttle:mobile-api'])
     ->name('mobile.deposits.store');
+
+Route::post('/v1/pairing/intents', IssuePairingIntentController::class)
+    ->middleware('auth')
+    ->name('pairing.intents.store');
 
 Route::get('/services/identity', static function () {
     /** @var DeveloperApplication $application */

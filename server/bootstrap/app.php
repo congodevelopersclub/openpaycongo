@@ -46,6 +46,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $shouldRenderJson = static fn (Request $request): bool => $request->routeIs(
             'passport.token',
             'mobile.*',
+            'pairing.*',
             'services.*',
         ) || $request->expectsJson();
 
