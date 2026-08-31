@@ -122,33 +122,29 @@ The minimal receiver, runtime-permission bridge, exact trusted-sender vault, gen
 
 ## Normative device pairing contract
 
-This section is normative for the future Android pairing implementation; the current Flutter prototype does
-not implement it. The wire protocol is defined by `adr-004-secure-device-enrollment.md` and the checked-in
-Runtime-neutral contract vectors.
+This section is normative for Android/Flutter pairing work. The wire protocol is [ADR 004](adr-004-secure-device-enrollment.md), `pairing-v2.fixture.json`, and `pairing-v2-test-plan.md`. Do not represent mobile pairing as end-to-end available until QR validation, secure pending storage, completion/replay, SAS confirmation, activation, and active-envelope tests are proven.
 
 - Accept only the exact canonical completion endpoint grammar: lowercase ASCII DNS with at least two labels,
   optional canonical decimal port 1-65535, and exact path `/v1/pairing/complete`. Reject IP literals,
   userinfo, queries, fragments, percent-encoding, alternate paths, trailing slash, and non-UTC-second expiry.
-- Verify every bounded signed QR field, including `trust_mode`, the exact enrollment Ed25519 public key, and
+- Verify every bounded signed QR field, including `pairing_secret`, `trust_mode`, exact enrollment Ed25519 public key, and
   `SHA-256(public_key) == fingerprint`, before key agreement. `pinned_continuity` additionally requires an
   existing matching trusted pin. `first_use_requires_sas` is provisional: physical QR plus the independently
   compared mandatory SAS is the bootstrap only when local pin state is absent and the user grants explicit
   authenticated local recovery authorization. Both modes must inspect local pin state; an existing pin can
   never silently downgrade to first use. The device cannot activate before the administrator confirms SAS.
-- Generate fresh X25519 and long-term non-exportable Ed25519 device-signing keys and unique 96-bit AEAD nonces.
-  Derive fixed 32-byte `c2s`, `s2c-aead`, `s2c-confirm`, and install-root values plus the unbiased six-digit
-  SAS. Verify Ed25519 proof, response AEAD, and key confirmation against the full shared protocol vector.
-- Keep the install root pending and unusable for sync or application request MACs until active. Persist exact
-  completion retry bytes before sending; after a crash without that durable state, delete pending material and
-  require a new QR. Never re-encrypt different plaintext under a saved key/nonce.
-- Read the 256-bit pairing-status bearer only from the authenticated encrypted completion response, store it in
-  Keystore-backed secure storage, and use it only over HTTPS to learn `pending_confirmation`, `active`,
-  `revoked`, or `expired` without administrator OAuth. Acknowledge only the exact terminal status; terminal ack
-  replay is idempotent. Wrong bearer and all unavailable cases have one response shape.
-- On mismatch, expiry, revocation, invalid confirmation, or unrecoverable local state, delete pending root,
-  ephemeral key, status bearer, SAS, QR, and retry ciphertext. Rotation or loss of a trusted enrollment pin is
-  not silent recovery: require an authenticated administrator to start a new first-use/SAS ceremony. Automated
-  enrollment-key rotation and multi-device recovery remain out of scope.
-- Never put QR, SAS, status bearer, ciphertext, roots, private keys, completion bodies, or raw SMS in logs,
-  analytics, crash reports, notifications, screenshots, or backups. Every pairing HTTP response is
-  `Cache-Control: private, no-store`.
+- Generate fresh X25519 client keypair. Use maintained Sodium binding `crypto_kx_client_session_keys`; never
+  raw scalar multiplication or custom KDF. Generate unique random 24-byte XChaCha20-Poly1305 nonce. Client-send
+  encrypts exactly QR 32-byte secret with completion AAD. Client-receive decrypts result with response AAD.
+- Keep pending directional keys, QR, exact retry bytes, nonce, ciphertext, and SAS in Keystore-backed secure
+  storage. They cannot sign, sync, or authorize application calls before activation. Exact retry returns same
+  encrypted `201`; never re-encrypt changed plaintext under saved key/nonce. Crash without durable retry state
+  deletes pending material and requires new QR.
+- Confirmation, status bearer, activation, revocation, rotation, recovery, and active mobile envelopes are
+  planned. After activation, active bodies use directional XChaCha20-Poly1305 envelopes with locked monotonic
+  counter and canonical AAD; TLS terminator sees no cleartext business/PII body.
+- On mismatch, expiry, invalid completion, cancellation, or unrecoverable local state, delete pending secret,
+  ephemeral key, directional keys, SAS, QR, nonce, ciphertext. Pin rotation/loss is not silent recovery.
+- Never put QR, SAS, ciphertext, directional keys, private keys, completion bodies, active envelope plaintext,
+  or raw SMS in logs, analytics, crash reports, notifications, screenshots, or backups. Every pairing HTTP
+  response is `Cache-Control: private, no-store`.

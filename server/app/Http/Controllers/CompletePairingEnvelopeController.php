@@ -16,20 +16,24 @@ final class CompletePairingEnvelopeController
     {
         $limitKey = 'pairing.complete:'.hash('sha256', (string) $request->ip());
         if (RateLimiter::tooManyAttempts($limitKey, 10)) {
-            return PairingProblem::requestFailed(429);
+            return PairingProblem::rateLimited((string) RateLimiter::availableIn($limitKey));
         }
         RateLimiter::hit($limitKey, 60);
         $decode = static fn (mixed $value): string|false => is_string($value) && preg_match('/^[A-Za-z0-9_-]+$/D', $value) === 1
             ? base64_decode(strtr($value, '-_', '+/').str_repeat('=', (4 - strlen($value) % 4) % 4), true)
             : false;
+        $intentIdBytes = $decode($request->input('intent_id'));
+        $isCanonicalIntentId = is_string($intentIdBytes)
+            && strlen($intentIdBytes) === 16
+            && rtrim(strtr(base64_encode($intentIdBytes), '+/', '-_'), '=') === $request->input('intent_id');
         $client = $decode($request->input('client_public_key'));
         $nonce = $decode($request->input('nonce'));
         $ciphertext = $decode($request->input('ciphertext'));
-        $result = is_string($client) && is_string($nonce) && is_string($ciphertext) && is_string($request->input('intent_id'))
-            ? $complete->execute($request->input('intent_id'), $client, $nonce, $ciphertext, hash('sha256', implode('', [$request->input('intent_id'), $client, $nonce, $ciphertext]), true))
+        $result = $isCanonicalIntentId && is_string($client) && is_string($nonce) && is_string($ciphertext)
+            ? $complete->execute($intentIdBytes, $client, $nonce, $ciphertext, hash('sha256', implode('', [$intentIdBytes, $client, $nonce, $ciphertext]), true))
             : null;
         if ($result === null) {
-            return PairingProblem::requestFailed(404);
+            return PairingProblem::unavailable();
         }
 
         return response()->json([

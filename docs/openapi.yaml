@@ -3,7 +3,9 @@ info:
   title: OpenPay Congo Canonical Sync API
   version: 1.0.0-draft
   description: |
-    Planned Laravel contract only. It does not claim every endpoint is implemented.
+    Laravel contract. It does not claim every endpoint is implemented.
+    Pairing QR issuance and one v2 completion to pending_confirmation are current initial slices.
+    Pairing confirmation, activation, status, and active mobile envelopes remain planned.
     V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
     wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
 servers:
@@ -15,6 +17,7 @@ paths:
   /v1/pairing/intents:
     post:
       summary: Issue one short-lived signed enrollment QR from the verified administrator session
+      x-openpay-status: implemented-initial-slice
       description: Internal same-origin administrator-session endpoint. The server derives the organization from the session and does not accept OAuth or bearer credentials for this operation.
       operationId: issuePairingIntent
       security:
@@ -57,8 +60,9 @@ paths:
           $ref: '#/components/responses/PairingProblem'
   /v1/pairing/complete:
     post:
-      summary: Atomically consume a PairingIntent and return encrypted key confirmation
+      summary: Consume one v2 PairingIntent, or exact-replay its encrypted pending-confirmation SAS
       operationId: completePairing
+      x-openpay-status: implemented-initial-slice
       security: []
       requestBody:
         required: true
@@ -75,23 +79,17 @@ paths:
             application/json:
               schema:
                 $ref: ./pairing-completion-result.schema.json
-        '200':
-          description: Exact encrypted request replay; original encrypted response returned
-          headers:
-            Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
-          content:
-            application/json:
-              schema:
-                $ref: ./pairing-completion-result.schema.json
         '404':
           $ref: '#/components/responses/PairingUnavailable'
-        '429': { $ref: '#/components/responses/PairingUnavailable' }
+        '429':
+          $ref: '#/components/responses/PairingRateLimited'
         default:
           $ref: '#/components/responses/PairingUnavailable'
   /v1/pairing/intents/{intent_id}/confirmation:
     get:
-      summary: Read the authenticated administrator pairing display state
+      summary: 'Planned: read authenticated administrator pairing display state'
       operationId: getPairingConfirmation
+      x-openpay-status: planned
       security:
         - AdministratorOAuth: [pairing:confirm]
       parameters:
@@ -116,8 +114,9 @@ paths:
         default:
           $ref: '#/components/responses/PairingProblem'
     post:
-      summary: Activate on matching displays or revoke on mismatch
+      summary: 'Planned: activate on matching displays or revoke on mismatch'
       operationId: confirmPairing
+      x-openpay-status: planned
       security:
         - AdministratorOAuth: [pairing:confirm]
       parameters:
@@ -175,8 +174,9 @@ paths:
           $ref: '#/components/responses/PairingProblem'
   /v1/pairing/device-status:
     get:
-      summary: Read pairing state using the bearer delivered only inside the encrypted completion response
+      summary: 'Planned: read pairing state using encrypted-completion bearer'
       operationId: getPhonePairingStatus
+      x-openpay-status: planned
       security:
         - PairingStatusBearer: []
       responses:
@@ -195,8 +195,9 @@ paths:
         '404': { $ref: '#/components/responses/PairingUnavailable' }
         default: { $ref: '#/components/responses/PairingUnavailable' }
     post:
-      summary: Acknowledge that the phone learned an exact terminal pairing state
+      summary: 'Planned: acknowledge exact terminal pairing state'
       operationId: acknowledgePhonePairingStatus
+      x-openpay-status: planned
       security:
         - PairingStatusBearer: []
       requestBody:
@@ -535,6 +536,16 @@ components:
       required: true
       schema: { type: string, const: 'private, no-store' }
   responses:
+    PairingRateLimited:
+      description: Pairing request rate limited
+      headers:
+        Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
+        Retry-After:
+          required: true
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     PairingProblem:
       description: Pairing request failed
       headers:

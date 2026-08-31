@@ -1,47 +1,119 @@
 # ADR 004: Non-ratcheting encrypted mobile enrollment
 
-Status: accepted. Supersedes every earlier pairing contract, vector, schema, and implementation note.
+Status: accepted.
 
-## Scope and trust
+This ADR is pairing contract v2. Deleted v1 `X25519-HKDF-SHA256-AES-256-GCM+Ed25519` schemas, vectors, proof, response, key-schedule files are not alternatives.
 
-Authenticated administrator starts enrollment, physically presents out-of-band QR. QR contains version `2`, canonical HTTPS completion endpoint, 128-bit `intent_id`, UTC expiry, server X25519 public key, fresh 256-bit `pairing_secret`, existing enrollment signature, and trust mode. Signature transcript binds every QR field including `pairing_secret`. No tenant claim, user data, SAS, or application credential. Server binds tenant from issued intent. QR never logged/persisted outside encrypted/hashed fields.
+## Decision
 
-Not ratchet. No forward-secrecy, edge-compromise, device-provenance, or recovery claim. Establishes two directional symmetric keys. Pairing private material/QR secret are one-time: destroy after handoff, failure, expiry, cancellation.
+Pair by physical QR plus six-digit Short Authentication String (SAS). QR is out-of-band bootstrap material. Completion uses one libsodium key-exchange API plus XChaCha20-Poly1305-IETF. Later active mobile traffic uses directional encrypted envelopes. No ratchet.
 
-## Version 2 completion envelope
+Server: PHP ext-sodium. Mobile: maintained Sodium binding. Both use `crypto_kx` session-key APIs. Do not implement raw X25519 scalar multiplication, custom HKDF, custom nonce derivation, OpenSSL wire crypto, Laravel `Crypt`, or Composer crypto package for protocol encryption.
 
-Phone creates X25519 keypair then HTTPS `POST /v1/pairing/complete`:
+QR issue and completion still use HTTPS. HTTPS protects endpoint routing and ordinary transport exposure; pairing and later mobile envelopes protect inner content from TLS terminator. Outer envelopes expose timing, size, route, installation-routing metadata.
+
+## Bootstrap trust and limits
+
+Authenticated administrator starts intent then physically presents QR. QR contains no organization id, customer data, API credential, SAS, or private key. Server derives organization from administrator session. QR must never enter logs, analytics, telemetry, crash reports, browser history, retained screenshots, notifications, or backups.
+
+QR signature detects modification and continuity-pin mismatch. It is not independent authentication when signing key arrives inside QR. `first_use_requires_sas` stays provisional until administrator and phone compare same SAS. `pinned_continuity` additionally requires existing matching pin. Existing pin cannot silently downgrade. Compromised hosting edge, administrator UI, administrator session, or physical QR display can subvert bootstrap. No forward secrecy, post-compromise recovery, device-provenance, multi-device recovery, or edge-compromise-resistance claim.
+
+One-time private material and QR secret must be destroyed after completion, expiry, cancellation, failure cleanup, or revocation. Re-pair/revoke/reset rotates pairwise keys. No per-message ratchet.
+
+## QR v2
+
+QR JSON has exactly fields defined by `pairing-qr.schema.json`:
 
 ```json
-{"intent_id":"base64url-16-bytes","client_public_key":"base64url-32-bytes","nonce":"base64url-24-bytes","ciphertext":"base64url"}
+{
+  "version":"2",
+  "endpoint":"https://host/v1/pairing/complete",
+  "intent_id":"base64url-16-bytes",
+  "intent_nonce":"base64url-32-bytes",
+  "expires_at":"UTC-second",
+  "algorithms":"X25519-crypto_kx-XChaCha20-Poly1305-IETF",
+  "enrollment_signing_fingerprint":"base64url-32-bytes",
+  "enrollment_signing_public_key":"base64url-32-bytes",
+  "server_key_agreement_public_key":"base64url-32-bytes",
+  "pairing_secret":"base64url-32-bytes",
+  "trust_mode":"first_use_requires_sas|pinned_continuity",
+  "signature":"base64url-64-bytes"
+}
 ```
 
-Server calls PHP ext-sodium `sodium_crypto_kx_server_session_keys`; phone calls platform/libsodium `crypto_kx_client_session_keys`. No scalar multiplication, HKDF, OpenSSL, Laravel Crypt, Composer crypto package, or custom key derivation for wire crypto. Client-to-server key protects completion; server-to-client key protects response. `ciphertext` is XChaCha20-Poly1305-IETF encryption of exactly 32-byte QR secret.
+All binary fields are unpadded canonical base64url. Endpoint is lowercase ASCII DNS, optional canonical decimal port, exact `/v1/pairing/complete`; reject IP literals, userinfo, query, fragment, percent encoding, alternate path, trailing slash, upper-case host, non-UTC-second expiry.
 
-Completion AAD exact unsigned-16-bit-length fields: `openpaycongo/pairing/complete/v2`, raw intent id, raw client public key. Strict length bounds. Invalid/expired/replayed/malformed/unknown enrollment -> identical fixed unavailable problem, no details.
+Signature is Ed25519 over concatenated unsigned-16-bit-big-endian length plus bytes, in this order:
 
-Server returns `201` `{state,nonce,ciphertext}`. Nonce = 24 random bytes; ciphertext XChaCha20-Poly1305-IETF under server-to-client key. Response AAD fields: `openpaycongo/pairing/complete-response/v2`, raw intent id. Decrypted JSON exactly `{ "state":"pending_confirmation", "short_authentication_code":"000000" }`. No plaintext secret/private key/directional key/SAS/tenant returned.
+1. `openpaycongo/pairing/qr`
+2. `version`
+3. `endpoint`
+4. raw `intent_id`
+5. raw `intent_nonce`
+6. `expires_at`
+7. `algorithms`
+8. raw `enrollment_signing_public_key`
+9. raw `enrollment_signing_fingerprint`
+10. raw `server_key_agreement_public_key`
+11. raw `pairing_secret`
+12. `trust_mode`
 
-## SAS and activation
+Phone checks JSON shape, endpoint, expiry, suite, `SHA-256(signing_public_key) == fingerprint`, signature, trust mode, pin policy before key exchange. `intent_nonce` is signed intent metadata; v2 does not include it in completion or response AEAD AAD.
 
-Server samples SAS with CSPRNG `random_int(0, 999999)`, zero-pads six digits. Phone reads only authenticated response; administrator sees only authenticated confirmation UI. SAS display comparison only: never request input/authentication/log/event/metric/trace/problem detail.
+## Completion v2
 
-Current slice stops at `pending_confirmation`, never `SourceInstallation`. Confirmation/activation, terminal cleanup, replay/idempotency, and administrator SAS display are pending follow-up slices; no activation claim is made.
+Phone creates fresh X25519 keypair then derives directional keys with `crypto_kx_client_session_keys(client_keypair, server_public_key)`. Server rebuilds ephemeral server keypair from protected seed then derives with `sodium_crypto_kx_server_session_keys(server_keypair, client_public_key)`.
 
-## Directional keys and mobile envelopes
+`client_send_key == server_receive_key`. `client_receive_key == server_send_key`. Every directional key is 32 bytes and secret.
 
-Current slice persists directional 32-byte session keys with Laravel encrypted casts on pending pairing material. Transfer to `SourceInstallation`, locked replay counter, and active mobile envelopes are pending follow-up slices. No pairing keypair, QR secret, plaintext envelope, or business/PII payload persists.
+Phone sends HTTPS `POST /v1/pairing/complete`:
 
-Pending future bodies (not implemented):
+```json
+{
+  "intent_id":"base64url-16-bytes",
+  "client_public_key":"base64url-32-bytes",
+  "nonce":"base64url-24-bytes",
+  "ciphertext":"base64url-of-48-decoded-bytes"
+}
+```
+
+`ciphertext` encrypts exactly raw 32-byte QR `pairing_secret` with XChaCha20-Poly1305-IETF, client-send key, 24-byte random nonce. Completion AAD is unsigned-16-bit-big-endian length plus bytes:
+
+1. `openpaycongo/pairing/complete/v2`
+2. raw `intent_id`
+3. raw `client_public_key`
+
+Server row-locks pending unexpired intent, validates/decrypts envelope, constant-time compares SHA-256 secret digest, creates CSPRNG zero-padded six-digit SAS, persists encrypted directional keys and SAS, clears protected server seed and secret digest, then returns `201`:
+
+```json
+{
+  "state":"pending_confirmation",
+  "nonce":"base64url-24-bytes",
+  "ciphertext":"base64url-of-85-decoded-bytes"
+}
+```
+
+Result ciphertext encrypts exactly UTF-8 JSON `{"state":"pending_confirmation","short_authentication_code":"000000"}` with server-send key. Response AAD fields:
+
+1. `openpaycongo/pairing/complete-response/v2`
+2. raw `intent_id`
+
+Exact retry of saved request bytes returns same stored encrypted `201` response; it does not derive fresh keys, generate new SAS, or create a second pending pairing. Malformed, unknown, expired, altered, or otherwise invalid completion returns indistinguishable fixed `404` pairing-unavailable problem. Never return secret, directional key, SAS, organization id, failure category, or plaintext envelope. Every pairing response is `Cache-Control: private, no-store`.
+
+## Current implementation boundary
+
+Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. It does not implement administrator SAS display/decision, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or recovery. Follow-up slices must not describe these as available.
+
+## Active mobile envelope contract
+
+Accepted design, not current endpoint implementation. Active installation messages use 24-byte random nonce plus XChaCha20-Poly1305-IETF under directional pair key. No per-message signature: AEAD authenticates sender holding directional key. No cleartext business or PII payload reaches Laravel before envelope authentication/decryption.
 
 ```json
 {"version":2,"installation_id":"uuid","counter":1,"nonce":"base64url-24-bytes","ciphertext":"base64url"}
 ```
 
-Canonical envelope AAD length-prefixed: `openpaycongo/mobile-envelope/v2`, installation routing id, uppercase HTTP method, canonical path, decimal counter/request id. XChaCha20-Poly1305 authenticates data/AAD before Laravel sees plaintext. No per-message signature. Outer API routing/envelope only; business/PII ciphertext until authenticated decryption.
+AAD uses length-prefixed `openpaycongo/mobile-envelope/v2`, installation routing id, uppercase HTTP method, canonical path, decimal counter. Counter is locked monotonic replay protection. Reject changed version, installation id, method, path, counter, nonce, ciphertext, or AAD. PHP and Flutter must prove this before release.
 
-## Persistence and interoperability
+## Interoperability evidence
 
-Intent lifetime 30 seconds to five minutes. Transaction locks intent, validates QR-secret envelope, derives keys, stores encrypted directional keys/SAS, emits encrypted response, clears private material/QR-secret digest. Failed attempts never reveal cause. Every pairing response: `Cache-Control: private, no-store`.
-
-Cross-platform fixtures must have deterministic test-only server/client KX keypairs, QR secret, intent id, nonce/ciphertext, response nonce/ciphertext, exact AAD bytes, expected directional plaintexts. Android/PHP contract tests prove decrypt plus reject changed version, installation id, method, path, counter, nonce, ciphertext, AAD.
+`pairing-v2.fixture.json` contains deterministic test-only QR/signing/KX/AEAD inputs and outputs. `pairing-v2-test-plan.md` is mandatory PHP/Flutter proof plan. Fixture values are never live material. Compatible client verifies QR signature and directional keys, encrypts/decrypts fixture envelopes, rejects one-field tampering.

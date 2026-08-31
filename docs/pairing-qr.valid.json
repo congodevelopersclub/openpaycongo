@@ -1,13 +1,14 @@
 {
-  "version": "1",
+  "version": "2",
   "endpoint": "https://pairing.example.test/v1/pairing/complete",
-  "intent_id": "AAECAwQFBgcICQoLDA0ODw",
-  "intent_nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
-  "expires_at": "2026-08-10T09:32:00Z",
-  "algorithms": "X25519-HKDF-SHA256-AES-256-GCM+Ed25519",
-  "enrollment_signing_fingerprint": "Fs81cR1vRgNPZbGmGrwneKW5Th0PkADWm8jyzB6fhI0",
-  "enrollment_signing_public_key": "Q3o0tdFSDnY9xtFPrWsm-F7fh-yGnYnPRrkJfZ99vRU",
-  "server_key_agreement_public_key": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
-  "signature": "3Gd5-vj0Lyh7dKP8j3Au8_dmWa8vwXtYmG9FL7yi1gQfAqBGEYHnzAmtTeyeHoolFXszu2STWxMKBLTLKhPqBg",
-  "trust_mode": "pinned_continuity"
+  "intent_id": "YGFiY2RlZmdoaWprbG1ubw",
+  "intent_nonce": "sLGys7S1tre4ubq7vL2-v8DBwsPExcbHyMnKy8zNzs8",
+  "expires_at": "2026-09-01T12:00:00Z",
+  "algorithms": "X25519-crypto_kx-XChaCha20-Poly1305-IETF",
+  "enrollment_signing_fingerprint": "gF0vfOTYfcKmnOVpHQRkUe_y1VPmSLhXDydcnkVEvjc",
+  "enrollment_signing_public_key": "bw8O6z-_-SXGbQPhnc5I1e3J_-5RzSaucd055W9_3aI",
+  "server_key_agreement_public_key": "DgIWIj8UcUPTJhWpEYnCiMFyjLo8xfn2IbECbgPYMSk",
+  "pairing_secret": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "trust_mode": "pinned_continuity",
+  "signature": "v4RXXml4R8bpzzJVflH6W29SQ4OVcjM2TmSlBgy-1nzCqBQ-ivUOjhATZhAgxTpXpiQ09ySmlCmoDZDzadOiAA"
 }

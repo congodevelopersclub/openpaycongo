@@ -1,24 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openpaycongo.example/schemas/pairing-completion-result.schema.json",
-  "title": "Encrypted device enrollment result",
+  "title": "Pairing completion result envelope v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "status", "device_id", "nonce", "ciphertext"],
+  "required": ["state", "nonce", "ciphertext"],
   "properties": {
-    "version": { "const": "1" },
-    "status": { "enum": ["pending_confirmation", "replayed"] },
-    "device_id": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{22}$"
-    },
-    "nonce": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{16}$"
-    },
+    "state": { "const": "pending_confirmation" },
+    "nonce": { "$ref": "#/$defs/bytes24" },
     "ciphertext": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{22,2731}$"
+      "description": "Unpadded base64url encoding of 85 bytes: exact pending-confirmation JSON plus AEAD tag.",
+      "$ref": "#/$defs/bytes85"
     }
+  },
+  "$defs": {
+    "bytes24": { "type": "string", "pattern": "^[A-Za-z0-9_-]{32}$" },
+    "bytes85": { "type": "string", "pattern": "^[A-Za-z0-9_-]{114}$" }
   }
 }

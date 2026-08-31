@@ -13,17 +13,36 @@ final class CompletePairingEnvelope
 {
     public function __construct(private readonly KeyProtector $protector) {}
 
-    public function execute(string $intentId, string $clientPublicKey, string $nonce, string $ciphertext, string $requestDigest): ?array
+    public function execute(string $intentIdBytes, string $clientPublicKey, string $nonce, string $ciphertext, string $requestDigest): ?array
     {
-        if (strlen($clientPublicKey) !== SODIUM_CRYPTO_KX_PUBLICKEYBYTES
+        if (strlen($intentIdBytes) !== 16
+            || strlen($clientPublicKey) !== SODIUM_CRYPTO_KX_PUBLICKEYBYTES
             || strlen($nonce) !== SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES
             || $ciphertext === '' || strlen($ciphertext) > 256 || strlen($requestDigest) !== 32) {
             return null;
         }
+        $intentId = $this->base64Url($intentIdBytes);
 
         try {
-            return DB::transaction(function () use ($intentId, $clientPublicKey, $nonce, $ciphertext, $requestDigest): ?array {
-                $intent = PairingIntent::query()->lockForUpdate()->where('intent_id', $intentId)->first();
+            return DB::transaction(function () use ($intentId, $intentIdBytes, $clientPublicKey, $nonce, $ciphertext, $requestDigest): ?array {
+                $intent = PairingIntent::query()->lockForUpdate()->where('intent_id_bytes', $intentIdBytes)->first();
+                if ($intent instanceof PairingIntent && ! hash_equals($intentId, (string) $intent->intent_id)) {
+                    return null;
+                }
+                if ($intent instanceof PairingIntent && CarbonImmutable::parse($intent->expires_at)->lessThanOrEqualTo(CarbonImmutable::now('UTC'))) {
+                    $intent->forceFill([
+                        'state' => 'expired',
+                        'protected_server_private_material' => '',
+                        'pairing_secret_digest' => null,
+                        'server_receive_key' => null,
+                        'server_send_key' => null,
+                        'short_authentication_code' => null,
+                        'completion_request_digest' => null,
+                        'completion_result' => null,
+                    ])->save();
+
+                    return null;
+                }
                 if ($intent instanceof PairingIntent
                     && $intent->state === 'pending_confirmation'
                     && hash_equals((string) $intent->completion_request_digest, bin2hex($requestDigest))
@@ -37,12 +56,12 @@ final class CompletePairingEnvelope
                         'ciphertext' => base64_decode($result['ciphertext'], true),
                     ];
                 }
-                if (! ($intent instanceof PairingIntent) || $intent->state !== 'pending' || CarbonImmutable::parse($intent->expires_at)->isPast()) {
+                if (! ($intent instanceof PairingIntent) || $intent->state !== 'pending') {
                     return null;
                 }
                 $seed = $this->protector->unprotect(
                     (string) $intent->protected_server_private_material,
-                    $this->intentAad($intent->organization_id, $intent->intent_id),
+                    $this->intentAad($intent->organization_id, $intentId),
                 );
                 if (strlen($seed) !== SODIUM_CRYPTO_KX_SEEDBYTES) {
                     return null;
@@ -98,5 +117,10 @@ final class CompletePairingEnvelope
     private function intentAad(string $organizationId, string $intentId): string
     {
         return 'openpaycongo/pairing/intent-server-private-material/v1/'.$organizationId.'/'.$intentId;
+    }
+
+    private function base64Url(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 }

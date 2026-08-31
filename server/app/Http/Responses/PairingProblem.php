@@ -9,6 +9,11 @@ use Illuminate\Support\Str;
 
 final class PairingProblem
 {
+    public static function unavailable(): JsonResponse
+    {
+        return self::response(404, 'https://openpaycongo.example/problems/pairing-unavailable', 'Pairing unavailable', 'pairing_unavailable');
+    }
+
     public static function requestFailed(int $status): JsonResponse
     {
         return self::response(
