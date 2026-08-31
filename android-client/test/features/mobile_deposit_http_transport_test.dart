@@ -1,0 +1,237 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:opencongopay/features/deposit_sync/data/mobile_deposit_http_transport.dart';
+import 'package:opencongopay/features/deposit_sync/presentation/deposit_submission_bloc.dart';
+
+final class _Http implements MobileDepositHttpPort {
+  _Http(this.response);
+
+  MobileDepositHttpResponse response;
+  final List<MobileDepositHttpRequest> requests = <MobileDepositHttpRequest>[];
+  Object? failure;
+
+  @override
+  MobileDepositHttpExchange post(MobileDepositHttpRequest request) {
+    requests.add(request);
+    return _ImmediateHttpExchange(response, failure);
+  }
+}
+
+final class _ImmediateHttpExchange implements MobileDepositHttpExchange {
+  _ImmediateHttpExchange(this._response, this._failure);
+
+  final MobileDepositHttpResponse _response;
+  final Object? _failure;
+
+  @override
+  Future<MobileDepositHttpResponse> get response async {
+    if (_failure case final Object error) throw error;
+    return _response;
+  }
+
+  @override
+  void abort() {}
+}
+
+final class _BlockingHttp implements MobileDepositHttpPort {
+  final _BlockingHttpExchange exchange = _BlockingHttpExchange();
+  final List<MobileDepositHttpRequest> requests = <MobileDepositHttpRequest>[];
+
+  @override
+  MobileDepositHttpExchange post(MobileDepositHttpRequest request) {
+    requests.add(request);
+    return exchange;
+  }
+}
+
+final class _BlockingHttpExchange implements MobileDepositHttpExchange {
+  final Completer<MobileDepositHttpResponse> _response =
+      Completer<MobileDepositHttpResponse>();
+  int abortCount = 0;
+
+  @override
+  Future<MobileDepositHttpResponse> get response => _response.future;
+
+  @override
+  void abort() {
+    abortCount += 1;
+    if (!_response.isCompleted) {
+      _response.completeError(StateError('HTTP exchange aborted.'));
+    }
+  }
+}
+
+final class _SetupStallingSession implements MobileDepositHttpSession {
+  final Completer<MobileDepositHttpResponse> _response =
+      Completer<MobileDepositHttpResponse>();
+  int postCount = 0;
+  int forcedCloseCount = 0;
+
+  @override
+  Future<MobileDepositHttpResponse> post(MobileDepositHttpRequest request) {
+    postCount += 1;
+    return _response.future;
+  }
+
+  @override
+  void close({required bool force}) {
+    if (!force) return;
+    forcedCloseCount += 1;
+    if (!_response.isCompleted) {
+      _response.completeError(StateError('Connection setup aborted.'));
+    }
+  }
+}
+
+const ProviderDeposit deposit = ProviderDeposit(
+  customerLookupIdentifier: 'customer-private-001',
+  providerReference: 'provider-private-001',
+  amountMinor: 12500,
+  currency: 'CDF',
+  providerOccurredAt: '2026-08-31T01:00:00Z',
+  senderIdentifier: 'sender-private-001',
+  customerEmail: 'customer@example.test',
+);
+
+MobileDepositHttpResponse reply(int status, String outcome) =>
+    MobileDepositHttpResponse(
+      status: status,
+      body: utf8.encode(jsonEncode(<String, String>{'outcome': outcome})),
+    );
+
+PairedMobileServerAuthority authority() =>
+    PairedMobileServerAuthority.fromVerifiedPairing(
+      canonicalHttpsBaseUri: Uri.parse('https://server.example.test'),
+      mobileBearer: 'opaque-bearer-token',
+    );
+
+AuthenticatedMobileDepositHttpTransport _transport(
+  MobileDepositHttpPort http, {
+  Duration timeout = const Duration(seconds: 3),
+}) =>
+    AuthenticatedMobileDepositHttpTransport(
+      authority: authority(),
+      http: http,
+      timeout: timeout,
+    );
+
+void main() {
+  test('posts exact trusted authenticated ingress contract without tenant or installation fields', () async {
+    final _Http http = _Http(reply(201, 'recorded'));
+
+    final DepositSubmissionResult result = await _transport(http).submit(deposit);
+
+    expect(result.outcome, DepositSubmissionOutcome.recorded);
+    final MobileDepositHttpRequest request = http.requests.single;
+    expect(request.uri.toString(), 'https://server.example.test/mobile/deposits');
+    expect(request.headers, <String, String>{
+      HttpHeaders.acceptHeader: 'application/json',
+      HttpHeaders.authorizationHeader: 'Bearer opaque-bearer-token',
+      HttpHeaders.contentTypeHeader: 'application/json',
+    });
+    expect(jsonDecode(utf8.decode(request.body)), <String, Object>{
+      'customer_lookup_identifier': 'customer-private-001',
+      'provider_reference': 'provider-private-001',
+      'amount_minor': 12500,
+      'currency': 'CDF',
+      'provider_occurred_at': '2026-08-31T01:00:00Z',
+      'sender_identifier': 'sender-private-001',
+      'customer_email': 'customer@example.test',
+    });
+  });
+
+  test('maps only exact server acknowledgements', () async {
+    for (final (int status, String outcome, DepositSubmissionOutcome expected) value
+        in <(int, String, DepositSubmissionOutcome)>[
+          (201, 'recorded', DepositSubmissionOutcome.recorded),
+          (200, 'replayed', DepositSubmissionOutcome.replayed),
+          (409, 'conflict', DepositSubmissionOutcome.conflict),
+        ]) {
+      final DepositSubmissionResult result = await _transport(
+        _Http(reply(value.$1, value.$2)),
+      ).submit(deposit);
+      expect(result.outcome, value.$3);
+    }
+  });
+
+  test('non-canonical, non-HTTPS, or malformed pairing authority is rejected', () {
+    for (final Uri uri in <Uri>[
+      Uri.parse('http://server.example.test'),
+      Uri.parse('https://server.example.test/prefix'),
+      Uri.parse('https://server.example.test?query=value'),
+      Uri.parse('https://user@server.example.test'),
+    ]) {
+      expect(
+        () => PairedMobileServerAuthority.fromVerifiedPairing(
+          canonicalHttpsBaseUri: uri,
+          mobileBearer: 'opaque-bearer-token',
+        ),
+        throwsArgumentError,
+      );
+    }
+    const String malformedBearer = 'bearer with whitespace';
+    try {
+      PairedMobileServerAuthority.fromVerifiedPairing(
+        canonicalHttpsBaseUri: Uri.parse('https://server.example.test'),
+        mobileBearer: malformedBearer,
+      );
+      fail('Expected invalid bearer to be rejected.');
+    } on ArgumentError catch (error) {
+      expect(error.toString(), isNot(contains(malformedBearer)));
+    }
+  });
+
+  test('network, auth, redirect, malformed, oversized, and unrecognised replies fail closed', () async {
+    final List<MobileDepositHttpResponse> invalid = <MobileDepositHttpResponse>[
+      reply(401, 'recorded'),
+      reply(403, 'recorded'),
+      reply(302, 'recorded'),
+      reply(201, 'replayed'),
+      MobileDepositHttpResponse(status: 201, body: <int>[]),
+      MobileDepositHttpResponse(status: 201, body: List<int>.filled(1025, 65)),
+    ];
+    for (final MobileDepositHttpResponse response in invalid) {
+      await expectLater(
+        _transport(_Http(response)).submit(deposit),
+        throwsA(isA<DepositTransportUnavailable>()),
+      );
+    }
+
+    final _Http network = _Http(reply(201, 'recorded'))
+      ..failure = const SocketException('unavailable');
+    await expectLater(
+      _transport(network).submit(deposit),
+      throwsA(isA<DepositTransportUnavailable>()),
+    );
+  });
+
+  test('aborts the active HTTP exchange when the project deadline expires', () async {
+    final _BlockingHttp http = _BlockingHttp();
+
+    await expectLater(
+      _transport(http, timeout: const Duration(milliseconds: 1)).submit(deposit),
+      throwsA(isA<DepositTransportUnavailable>()),
+    );
+
+    expect(http.requests, hasLength(1));
+    expect(http.exchange.abortCount, 1);
+  });
+
+  test('force-closes connection setup when the project deadline expires', () async {
+    final _SetupStallingSession session = _SetupStallingSession();
+    final DartMobileDepositHttpPort http = DartMobileDepositHttpPort(
+      openSession: () => session,
+    );
+
+    await expectLater(
+      _transport(http, timeout: const Duration(milliseconds: 1)).submit(deposit),
+      throwsA(isA<DepositTransportUnavailable>()),
+    );
+
+    expect(session.postCount, 1);
+    expect(session.forcedCloseCount, 1);
+  });
+}
