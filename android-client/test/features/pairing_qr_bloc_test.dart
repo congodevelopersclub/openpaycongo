@@ -297,6 +297,10 @@ final class _MatchingPinStore implements PairingQrTrustStore {
   @override
   Future<PairingQrPinState> lookup(String fingerprint) async =>
       const PairingQrPinState.matching();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
+      const PairingQrPinWrite.alreadyStored();
 }
 
 final class _CountingStore implements PairingQrTrustStore {
@@ -308,6 +312,10 @@ final class _CountingStore implements PairingQrTrustStore {
     lookups++;
     return result;
   }
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
+      const PairingQrPinWrite.alreadyStored();
 }
 
 final class _NoPinStore implements PairingQrTrustStore {
@@ -315,6 +323,10 @@ final class _NoPinStore implements PairingQrTrustStore {
   @override
   Future<PairingQrPinState> lookup(String fingerprint) async =>
       const PairingQrPinState.none();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
+      const PairingQrPinWrite.stored();
 }
 
 final class _ConflictStore implements PairingQrTrustStore {
@@ -322,12 +334,20 @@ final class _ConflictStore implements PairingQrTrustStore {
   @override
   Future<PairingQrPinState> lookup(String fingerprint) async =>
       const PairingQrPinState.conflict();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
+      const PairingQrPinWrite.conflict();
 }
 
 final class _FailingStore implements PairingQrTrustStore {
   const _FailingStore();
   @override
   Future<PairingQrPinState> lookup(String fingerprint) async =>
+      throw StateError('secure store unavailable');
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
       throw StateError('secure store unavailable');
 }
 
@@ -346,6 +366,10 @@ final class _DelayedFirstLookupStore implements PairingQrTrustStore {
   }
 
   void releaseFirstLookup() => _firstLookupRelease.complete();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
+      const PairingQrPinWrite.alreadyStored();
 }
 
 final class _DelayedLookupStore implements PairingQrTrustStore {
@@ -360,4 +384,8 @@ final class _DelayedLookupStore implements PairingQrTrustStore {
   }
 
   void releaseLookup() => _lookupRelease.complete();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
+      const PairingQrPinWrite.alreadyStored();
 }

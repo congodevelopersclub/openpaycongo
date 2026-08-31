@@ -30,6 +30,30 @@ final class PairingQrConflictingPin extends PairingQrPinState {
 /// as no existing pin.
 abstract interface class PairingQrTrustStore {
   Future<PairingQrPinState> lookup(String fingerprint);
+
+  /// Called only by a later authenticated confirmation flow after its
+  /// independently compared SAS and terminal server decision. This QR
+  /// validator never calls it.
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint);
+}
+
+sealed class PairingQrPinWrite {
+  const PairingQrPinWrite();
+  const factory PairingQrPinWrite.stored() = PairingQrPinStored;
+  const factory PairingQrPinWrite.alreadyStored() = PairingQrPinAlreadyStored;
+  const factory PairingQrPinWrite.conflict() = PairingQrPinWriteConflict;
+}
+
+final class PairingQrPinStored extends PairingQrPinWrite {
+  const PairingQrPinStored();
+}
+
+final class PairingQrPinAlreadyStored extends PairingQrPinWrite {
+  const PairingQrPinAlreadyStored();
+}
+
+final class PairingQrPinWriteConflict extends PairingQrPinWrite {
+  const PairingQrPinWriteConflict();
 }
 
 sealed class PairingQrEvent {
