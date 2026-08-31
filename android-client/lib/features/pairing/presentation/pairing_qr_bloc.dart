@@ -37,6 +37,12 @@ abstract interface class PairingQrTrustStore {
   Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint);
 }
 
+/// Scanner boundary. Its raw result is passed straight to the validator and is
+/// never retained in BLoC state.
+abstract interface class PairingQrScanner {
+  Future<String?> scan();
+}
+
 sealed class PairingQrPinWrite {
   const PairingQrPinWrite();
   const factory PairingQrPinWrite.stored() = PairingQrPinStored;
@@ -60,6 +66,10 @@ sealed class PairingQrEvent {
   const PairingQrEvent();
 }
 
+final class PairingQrScanRequested extends PairingQrEvent {
+  const PairingQrScanRequested();
+}
+
 /// Raw QR stays inside the BLoC handling path and never appears in state.
 final class PairingQrScanned extends PairingQrEvent {
   const PairingQrScanned(this.value);
@@ -73,6 +83,14 @@ sealed class PairingQrState {
 
 final class PairingQrIdle extends PairingQrState {
   const PairingQrIdle();
+}
+
+final class PairingQrScanning extends PairingQrState {
+  const PairingQrScanning();
+}
+
+final class PairingQrScannerUnavailable extends PairingQrState {
+  const PairingQrScannerUnavailable();
 }
 
 final class PairingQrAccepted extends PairingQrState {
@@ -100,15 +118,48 @@ final class PairingQrRejected extends PairingQrState {
 /// Validates ADR-004's public QR boundary only. It performs no key agreement,
 /// persistence, completion HTTP, or enrollment activation.
 final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
-  PairingQrBloc({required this.trustStore, DateTime Function()? now})
-    : _now = now ?? DateTime.now,
-      super(const PairingQrIdle()) {
+  PairingQrBloc({
+    required this.trustStore,
+    this.scanner,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now,
+       super(const PairingQrIdle()) {
+    on<PairingQrScanRequested>(_requestScan);
     on<PairingQrScanned>(_scan);
   }
 
   final PairingQrTrustStore trustStore;
+  final PairingQrScanner? scanner;
   final DateTime Function() _now;
   int _scanGeneration = 0;
+
+  Future<void> _requestScan(
+    PairingQrScanRequested event,
+    Emitter<PairingQrState> emit,
+  ) async {
+    final PairingQrScanner? activeScanner = scanner;
+    if (activeScanner == null) {
+      emit(const PairingQrScannerUnavailable());
+      return;
+    }
+    final int generation = ++_scanGeneration;
+    emit(const PairingQrScanning());
+    final String? value;
+    try {
+      value = await activeScanner.scan();
+    } on Object {
+      if (generation == _scanGeneration) {
+        emit(const PairingQrScannerUnavailable());
+      }
+      return;
+    }
+    if (generation != _scanGeneration) return;
+    if (value == null) {
+      emit(const PairingQrIdle());
+      return;
+    }
+    await _scan(PairingQrScanned(value), emit);
+  }
 
   Future<void> _scan(
     PairingQrScanned event,

@@ -4,6 +4,8 @@ import '../../pairing/presentation/pairing_session_bloc.dart';
 import '../../pairing/presentation/pairing_session_status_card.dart';
 import '../../pairing/presentation/pairing_enrollment_bloc.dart';
 import '../../pairing/presentation/pairing_enrollment_status_card.dart';
+import '../../pairing/presentation/pairing_qr_bloc.dart';
+import '../../pairing/presentation/pairing_qr_verification_card.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_bloc.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_card.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -23,6 +25,7 @@ final class PaymentInboxScreen extends StatefulWidget {
     this.gemmaCapability = const GemmaRuntimePending(),
     this.pairingEnrollment,
     this.pairingSession,
+    this.pairingQr,
     this.paymentLifecycle,
     this.paymentRequestLifecycle,
     this.syncCursor,
@@ -33,6 +36,7 @@ final class PaymentInboxScreen extends StatefulWidget {
   final GemmaCapabilityEvidence gemmaCapability;
   final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
+  final PairingQrBloc? pairingQr;
   final PaymentLifecycleBloc? paymentLifecycle;
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final SyncCursorBloc? syncCursor;
@@ -119,6 +123,11 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                       value: pairing,
                       child: const PairingSessionStatusCard(),
                     ),
+                  ],
+                  if (widget.pairingQr
+                      case final PairingQrBloc pairing) ...<Widget>[
+                    const SizedBox(height: 12),
+                    PairingQrVerificationCard(bloc: pairing),
                   ],
                   if (widget.syncCursor
                       case final SyncCursorBloc sync) ...<Widget>[

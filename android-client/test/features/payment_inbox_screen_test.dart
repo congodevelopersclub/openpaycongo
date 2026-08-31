@@ -5,6 +5,7 @@ import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dar
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_enrollment_bloc.dart';
+import 'package:opencongopay/features/pairing/presentation/pairing_qr_bloc.dart';
 import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
 import 'package:opencongopay/features/payment_outbox/presentation/payment_lifecycle_bloc.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
@@ -136,6 +137,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Pairing enrollment awaits confirmation'), findsOneWidget);
+  });
+
+  testWidgets('app composition routes protected users to QR verification', (
+    WidgetTester tester,
+  ) async {
+    final PairingQrBloc pairing = PairingQrBloc(
+      trustStore: const _PairingQrStore(),
+    );
+    addTearDown(pairing.close);
+
+    await tester.pumpWidget(OpenCongoPayApp(pairingQr: pairing));
+    await _unlockApp(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Verify pairing QR'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pair a device'), findsOneWidget);
   });
 
   testWidgets('app composition passes injected sync BLoC to its inbox', (
@@ -723,6 +743,19 @@ final class _PairingGateway implements PairingSessionGateway {
 final class _PairingTelemetry implements PairingTelemetry {
   @override
   void record(PairingTelemetrySignal signal) {}
+}
+
+final class _PairingQrStore implements PairingQrTrustStore {
+  const _PairingQrStore();
+
+  @override
+  Future<PairingQrPinState> lookup(String fingerprint) async =>
+      const PairingQrPinState.matching();
+
+  @override
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.alreadyStored();
 }
 
 final class _EnrollmentStore implements PairingEnrollmentStore {
