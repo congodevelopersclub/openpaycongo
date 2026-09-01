@@ -3,13 +3,19 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Android directional-key vault uses narrow Keystore atomic-write contract',
+  test('Android directional keys use a native-only Keystore atomic-write contract',
       () {
     final String vault = File(
       'android/app/src/main/kotlin/com/example/opencongopay/pairing/PairingDirectionalKeyVault.kt',
     ).readAsStringSync();
     final String activity = File(
       'android/app/src/main/kotlin/com/example/opencongopay/MainActivity.kt',
+    ).readAsStringSync();
+    final String completion = File(
+      'android/app/src/main/kotlin/com/example/opencongopay/pairing/PairingV2NativeCompletion.kt',
+    ).readAsStringSync();
+    final String bridge = File(
+      'lib/features/pairing/infrastructure/platform_pairing_v2_crypto.dart',
     ).readAsStringSync();
 
     expect(vault, contains('context.noBackupFilesDir'));
@@ -21,10 +27,14 @@ void main() {
     expect(vault, contains('ENVELOPE_VERSION'));
     expect(vault, contains('KEY_BYTES = 32'));
     expect(vault, isNot(contains('fun read(')));
-    expect(activity, contains('openpaycongo/pairing_directional_keys'));
-    expect(activity, contains('arguments.keys != setOf("send_key", "receive_key")'));
-    expect(activity, contains('sendKey.size != 32 || receiveKey.size != 32'));
-    expect(activity, contains('sendKey.fill(0)'));
-    expect(activity, contains('receiveKey.fill(0)'));
+    expect(activity, contains('openpaycongo/pairing_completion'));
+    expect(activity, isNot(contains('openpaycongo/pairing_directional_keys')));
+    expect(activity, contains('"pairing_secret"'));
+    expect(activity, contains('pairingSecret.fill(0)'));
+    expect(completion, contains('PairingDirectionalKeyVault(context).save(current.sendKey, current.receiveKey)'));
+    expect(completion, isNot(contains('"send_key"')));
+    expect(completion, isNot(contains('"receive_key"')));
+    expect(bridge, isNot(contains('send_key')));
+    expect(bridge, isNot(contains('receive_key')));
   });
 }

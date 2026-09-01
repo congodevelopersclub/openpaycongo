@@ -10,7 +10,7 @@ void main() async {
   PairingRuntime? pairingRuntime;
   var pairingRuntimeUnavailable = false;
   try {
-    pairingRuntime = await PairingRuntime.create();
+    pairingRuntime = PairingRuntime.create();
   } on Object {
     pairingRuntimeUnavailable = true;
   }

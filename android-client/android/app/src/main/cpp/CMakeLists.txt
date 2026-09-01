@@ -52,7 +52,7 @@ ExternalProject_Add(libsodium_project
 add_library(libsodium STATIC IMPORTED GLOBAL)
 set_target_properties(libsodium PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_INSTALL}/lib/libsodium.a")
 add_dependencies(libsodium libsodium_project)
-add_library(openpay_activation SHARED activation_jni.c)
+add_library(openpay_activation SHARED activation_jni.c pairing_v2_native.c)
 # Imported-library dependencies are not emitted as Ninja link prerequisites.
 # Make every ABI's shared-library link wait for its own ExternalProject install.
 add_dependencies(openpay_activation libsodium_project)

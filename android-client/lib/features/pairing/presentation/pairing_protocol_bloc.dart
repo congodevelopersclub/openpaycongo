@@ -1,9 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'pairing_v2_crypto.dart';
-
-/// Implemented with libsodium `crypto_kx` and XChaCha20-Poly1305. Wire shape
-/// remains transport-owned until revised server contract fixtures land.
+/// Pairing crypto owns directional keys behind a platform boundary. BLoC owns
+/// only redacted flow state and never receives key material.
 abstract interface class PairingProtocolPort {
   Future<PairingPendingMaterial> establish(PairingProtocolCommand command);
 }
@@ -13,14 +11,6 @@ abstract interface class PairingProtocolPort {
 abstract interface class PairingProtocolCommand {
   /// Idempotent. Called after success, failure, or a rejected handoff.
   void dispose();
-}
-
-/// Android implementation encrypts these directional keys with a
-/// non-exportable Android Keystore key. No BLoC state may retain them.
-abstract interface class PairingDirectionalKeyVault {
-  /// Copy both keys to Android Keystore-backed storage before completing.
-  /// Caller wipes [keys] immediately after this future completes or fails.
-  Future<void> save(PairingDirectionalKeys keys);
 }
 
 /// Opaque activation request. Its routing bytes never enter BLoC state.
@@ -37,13 +27,11 @@ abstract interface class PairingActivationRequest {
 final class PairingPendingMaterial {
   PairingPendingMaterial({
     required this.serverSas,
-    required this.keys,
     this.activationRequest,
     required this._onDispose,
   });
 
   final String serverSas;
-  final PairingDirectionalKeys keys;
   PairingActivationRequest? activationRequest;
   final void Function() _onDispose;
   bool _disposed = false;
@@ -51,7 +39,6 @@ final class PairingPendingMaterial {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-    keys.dispose();
     activationRequest?.dispose();
     activationRequest = null;
     _onDispose();
@@ -108,7 +95,7 @@ final class PairingProtocolRecoveryRequired extends PairingProtocolState {
 
 final class PairingProtocolBloc
     extends Bloc<PairingProtocolEvent, PairingProtocolState> {
-  PairingProtocolBloc({required this.protocol, required this.vault, PairingActivationPort? activation})
+  PairingProtocolBloc({required this.protocol, PairingActivationPort? activation})
     : activation = activation ?? const _UnavailableActivationPort(),
       super(const PairingProtocolIdle()) {
     on<PairingProtocolStarted>(_start);
@@ -116,7 +103,6 @@ final class PairingProtocolBloc
   }
 
   final PairingProtocolPort protocol;
-  final PairingDirectionalKeyVault vault;
   final PairingActivationPort activation;
   var _startActive = false;
   var _activationActive = false;
@@ -135,7 +121,6 @@ final class PairingProtocolBloc
     PairingPendingMaterial? material;
     try {
       material = await protocol.establish(event.command);
-      await vault.save(material.keys);
       _activationRequest?.dispose();
       _activationRequest = material.activationRequest;
       material.activationRequest = null;

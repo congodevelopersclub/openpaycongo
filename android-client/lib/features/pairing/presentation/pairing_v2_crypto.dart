@@ -64,37 +64,14 @@ final class PairingV2Response {
   final String ciphertext;
 }
 
-/// Pending directional keys. Vault must copy both before its save future ends.
-///
-/// `sendKey` encrypts phone-to-server envelopes. `receiveKey` decrypts
-/// server-to-phone envelopes. This object is transient: caller must dispose it
-/// after Android Keystore vault copies its bytes.
-final class PairingDirectionalKeys {
-  PairingDirectionalKeys({
-    required Uint8List sendKey,
-    required Uint8List receiveKey,
-  }) : sendKey = Uint8List.fromList(sendKey),
-       receiveKey = Uint8List.fromList(receiveKey) {
-    if (this.sendKey.length != 32 || this.receiveKey.length != 32) {
-      dispose();
-      throw ArgumentError.value(
-        <int>[sendKey.length, receiveKey.length],
-        'directional keys',
-        'must both contain 32 bytes',
-      );
-    }
-  }
+/// Deep pairing-crypto boundary. It returns only request routing bytes and the
+/// authenticated SAS. Production Android owns every directional key natively.
+abstract interface class PairingV2CryptoPort {
+  Future<PairingV2Request> begin(PairingV2QrCredential credential);
 
-  final Uint8List sendKey;
-  final Uint8List receiveKey;
-  bool _disposed = false;
+  Future<String> accept(PairingV2Response response);
 
-  void dispose() {
-    if (_disposed) return;
-    _disposed = true;
-    sendKey.fillRange(0, sendKey.length, 0);
-    receiveKey.fillRange(0, receiveKey.length, 0);
-  }
+  Future<void> dispose();
 }
 
 /// Creates an ephemeral X25519 client key pair for one pairing exchange.
@@ -206,15 +183,13 @@ final class PairingV2Exchange {
     }
   }
 
-  /// Authenticates response with client receive key, then transfers copied
-  /// directional keys to caller. This exchange becomes unusable afterward.
-  PairingDirectionalKeys accept(PairingV2Response response) {
+  /// Authenticates response with the client receive key. This exchange becomes
+  /// unusable afterward and never extracts directional key bytes into Dart.
+  String accept(PairingV2Response response) {
     final SessionKeys keys = _takeKeys();
     Uint8List? nonce;
     Uint8List? cipherText;
     Uint8List? plaintext;
-    Uint8List? sendKey;
-    Uint8List? receiveKey;
     try {
       nonce = _decodeExact(
         response.nonce,
@@ -227,16 +202,13 @@ final class PairingV2Exchange {
         key: keys.rx,
         additionalData: _responseAad,
       );
-      _sas = _readSas(plaintext);
-      sendKey = keys.tx.extractBytes();
-      receiveKey = keys.rx.extractBytes();
-      return PairingDirectionalKeys(sendKey: sendKey, receiveKey: receiveKey);
+      final String sas = _readSas(plaintext);
+      _sas = sas;
+      return sas;
     } finally {
       nonce?.fillRange(0, nonce.length, 0);
       cipherText?.fillRange(0, cipherText.length, 0);
       plaintext?.fillRange(0, plaintext.length, 0);
-      sendKey?.fillRange(0, sendKey.length, 0);
-      receiveKey?.fillRange(0, receiveKey.length, 0);
       _responseAad.fillRange(0, _responseAad.length, 0);
       _responseAad = Uint8List(0);
       keys.dispose();
@@ -257,6 +229,44 @@ final class PairingV2Exchange {
     if (keys == null) throw StateError('Pairing exchange is no longer usable');
     _keys = null;
     return keys;
+  }
+}
+
+/// Reference implementation for headless protocol tests. Android production
+/// uses [PlatformPairingV2Crypto] and never instantiates this Dart adapter.
+final class SodiumPairingV2Crypto implements PairingV2CryptoPort {
+  SodiumPairingV2Crypto(this._sodium);
+
+  final SodiumSumo _sodium;
+  PairingV2Exchange? _exchange;
+
+  @override
+  Future<PairingV2Request> begin(PairingV2QrCredential credential) async {
+    final PairingV2Exchange? previous = _exchange;
+    _exchange = null;
+    previous?.dispose();
+    final PairingV2Exchange exchange = PairingV2Exchange.begin(_sodium, credential);
+    _exchange = exchange;
+    return exchange.request;
+  }
+
+  @override
+  Future<String> accept(PairingV2Response response) async {
+    final PairingV2Exchange? exchange = _exchange;
+    if (exchange == null) throw StateError('Pairing exchange is no longer usable');
+    _exchange = null;
+    try {
+      return exchange.accept(response);
+    } finally {
+      exchange.dispose();
+    }
+  }
+
+  @override
+  Future<void> dispose() async {
+    final PairingV2Exchange? exchange = _exchange;
+    _exchange = null;
+    exchange?.dispose();
   }
 }
 

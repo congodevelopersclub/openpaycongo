@@ -21,6 +21,9 @@ import javax.crypto.spec.GCMParameterSpec
 
 internal class MobileEnvelopeException : Exception()
 
+private const val MOBILE_ENVELOPE_NONCE_BYTES = 24
+private const val MOBILE_ENVELOPE_TAG_BYTES = 16
+
 internal object MobileEnvelopeFormat {
     const val MAX_PAYLOAD_BYTES = 8192
     private const val DOMAIN = "openpaycongo/mobile/request-envelope/v1"
@@ -67,6 +70,30 @@ internal object MobileEnvelopeCounter {
     }
 }
 
+/**
+ * Narrow persistence boundary for counter reservation. The allocator is pure
+ * logic: a returned counter always has its successor durably written first.
+ */
+internal interface MobileEnvelopeCounterStore {
+    /** `null` means this installation has never reserved an envelope counter. */
+    fun readNext(): Long?
+
+    /** Throw on any uncertain or incomplete persistence outcome. */
+    fun persistNext(next: Long)
+}
+
+internal class MobileEnvelopeCounterAllocator(
+    private val store: MobileEnvelopeCounterStore,
+) {
+    @Synchronized
+    fun reserve(): Long {
+        val next = store.readNext() ?: 1L
+        if (next <= 0L) throw MobileEnvelopeException()
+        store.persistNext(MobileEnvelopeCounter.nextAfter(next))
+        return next
+    }
+}
+
 internal object MobileEnvelopeNative {
     init { System.loadLibrary("openpay_activation") }
 
@@ -83,7 +110,8 @@ internal class MobileEnvelopeVault(
         override fun <T> use(action: () -> T): T = action()
     },
 ) {
-    private val counterFile = AtomicFile(File(context.noBackupFilesDir, COUNTER_FILE))
+    private val counterStore = AndroidMobileEnvelopeCounterStore(context)
+    private val counterAllocator = MobileEnvelopeCounterAllocator(counterStore)
 
     @Synchronized
     fun seal(operation: String, payload: ByteArray): Map<String, Any> {
@@ -97,13 +125,13 @@ internal class MobileEnvelopeVault(
                 plaintext = MobileEnvelopeFormat.plaintext(operation, payload)
                 val installation = PairingActivationCredentialVault(context).installationId()
                 val installationId = try { UUID.fromString(installation) } catch (_: Exception) { throw MobileEnvelopeException() }
-                val counter = reserveCounter()
+                val counter = counterAllocator.reserve()
                 sendKey = PairingDirectionalKeyVault(context).readSendKey()
-                nonce = ByteArray(NONCE_BYTES).also(SecureRandom()::nextBytes)
+                nonce = ByteArray(MOBILE_ENVELOPE_NONCE_BYTES).also(SecureRandom()::nextBytes)
                 aad = MobileEnvelopeFormat.requestAad(installationId, counter)
                 ciphertext = MobileEnvelopeNative.seal(sendKey, nonce, plaintext, aad)
                     ?: throw MobileEnvelopeException()
-                if (ciphertext.size !in TAG_BYTES..(MobileEnvelopeFormat.MAX_PAYLOAD_BYTES + TAG_BYTES + 128)) throw MobileEnvelopeException()
+                if (ciphertext.size !in MOBILE_ENVELOPE_TAG_BYTES..(MobileEnvelopeFormat.MAX_PAYLOAD_BYTES + MOBILE_ENVELOPE_TAG_BYTES + 128)) throw MobileEnvelopeException()
                 mapOf(
                     "version" to 1,
                     "installation_id" to installation,
@@ -126,17 +154,13 @@ internal class MobileEnvelopeVault(
         }
     }
 
-    private fun reserveCounter(): Long {
-        val next = readNextCounter()
-        if (next <= 0L) throw MobileEnvelopeException()
-        // Laravel persists signed PHP integers. Persist zero as terminal exhausted
-        // state before returning the final valid signed counter.
-        writeNextCounter(MobileEnvelopeCounter.nextAfter(next))
-        return next
-    }
+}
 
-    private fun readNextCounter(): Long {
-        if (!counterFile.baseFile.exists() && !File(counterFile.baseFile.path + ".bak").exists()) return 1L
+private class AndroidMobileEnvelopeCounterStore(context: Context) : MobileEnvelopeCounterStore {
+    private val counterFile = AtomicFile(File(context.noBackupFilesDir, COUNTER_FILE))
+
+    override fun readNext(): Long? {
+        if (!counterFile.baseFile.exists() && !File(counterFile.baseFile.path + ".bak").exists()) return null
         val payload = try { counterFile.openRead().use { it.readBytes() } } catch (_: Exception) { throw MobileEnvelopeException() }
         var nonce = ByteArray(0)
         var ciphertext = ByteArray(0)
@@ -164,7 +188,7 @@ internal class MobileEnvelopeVault(
         }
     }
 
-    private fun writeNextCounter(next: Long) {
+    override fun persistNext(next: Long) {
         val plaintext = ByteBuffer.allocate(8).putLong(next).array()
         val nonce = ByteArray(GCM_NONCE_BYTES).also(SecureRandom()::nextBytes)
         var ciphertext = ByteArray(0)
@@ -212,10 +236,8 @@ internal class MobileEnvelopeVault(
     private companion object {
         const val COUNTER_FILE = "mobile_envelope_counter_v1"
         const val KEY_ALIAS = "openpaycongo.mobile-envelope.counter.v1"
-        const val NONCE_BYTES = 24
         const val GCM_NONCE_BYTES = 12
         const val GCM_TAG_BYTES = 16
-        const val TAG_BYTES = 16
         val COUNTER_AAD = "openpaycongo/mobile-envelope/counter/v1".toByteArray(StandardCharsets.US_ASCII)
     }
 }

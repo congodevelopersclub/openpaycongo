@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 /// Routing-safe ciphertext returned by Android. No key, bearer, or plaintext

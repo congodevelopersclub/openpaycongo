@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:sodium/sodium_sumo.dart';
-
 import 'pairing_protocol_bloc.dart';
 import 'pairing_qr_bloc.dart';
 import 'pairing_v2_crypto.dart';
@@ -218,16 +216,16 @@ final class DartIoPairingV2CompletionTransport
       statusCode >= HttpStatus.internalServerError;
 }
 
-/// Concrete protocol port. It transfers keys only after encrypted response
-/// authentication; BLoC saves them then exposes server SAS for confirmation.
+/// Concrete protocol port. Its crypto adapter owns directional keys and returns
+/// only the public request plus authenticated SAS to the BLoC layer.
 final class PairingV2CompletionProtocol implements PairingProtocolPort {
   PairingV2CompletionProtocol({
-    required this.sodium,
+    required this.crypto,
     required this.transport,
     this.completionDeadline = const Duration(seconds: 15),
   });
 
-  final SodiumSumo sodium;
+  final PairingV2CryptoPort crypto;
   final PairingV2CompletionTransport transport;
   final Duration completionDeadline;
 
@@ -238,25 +236,27 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
     if (command is! PairingV2CompletionCommand) {
       throw ArgumentError.value(command, 'command', 'Unsupported pairing command');
     }
-    PairingV2Exchange? exchange;
     try {
-      exchange = PairingV2Exchange.begin(sodium, command.takeCredential());
+      final PairingV2Request request = await crypto.begin(command.takeCredential());
       final PairingV2Response response = await _completeWithRetry(
         command.endpoint,
-        exchange.request,
+        request,
       );
-      final PairingDirectionalKeys keys = exchange.accept(response);
-      final String sas = exchange.sas;
+      final String sas = await crypto.accept(response);
       return PairingPendingMaterial(
         serverSas: sas,
-        keys: keys,
         activationRequest: command.takeActivationRequest(),
-        onDispose: exchange.dispose,
+        onDispose: () {},
       );
     } catch (_) {
-      exchange?.dispose();
       rethrow;
     } finally {
+      try {
+        await crypto.dispose();
+      } on Object {
+        // A failed best-effort cancellation must not disclose or replace the
+        // original pairing failure. Native process teardown also clears it.
+      }
       command.dispose();
     }
   }

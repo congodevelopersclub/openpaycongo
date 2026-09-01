@@ -63,4 +63,48 @@ class MobileEnvelopeFormatTest {
     }
 
     @Test
+    fun counterReservationPersistsBeforeReturnAndContinuesAfterRestart() {
+        val store = InMemoryCounterStore()
+
+        assertEquals(1L, MobileEnvelopeCounterAllocator(store).reserve())
+        assertEquals(listOf(2L), store.persisted)
+        assertEquals(2L, MobileEnvelopeCounterAllocator(store).reserve())
+        assertEquals(listOf(2L, 3L), store.persisted)
+    }
+
+    @Test
+    fun counterReservationNeverReturnsAnUnpersistedOrExhaustedValue() {
+        val failedWrite = InMemoryCounterStore(failWrites = true)
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeCounterAllocator(failedWrite).reserve()
+        }
+        assertEquals(null, failedWrite.next)
+
+        val exhausted = InMemoryCounterStore(Long.MAX_VALUE)
+        assertEquals(Long.MAX_VALUE, MobileEnvelopeCounterAllocator(exhausted).reserve())
+        assertEquals(0L, exhausted.next)
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeCounterAllocator(exhausted).reserve()
+        }
+
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeCounterAllocator(InMemoryCounterStore(-1L)).reserve()
+        }
+    }
+}
+
+private class InMemoryCounterStore(
+    initial: Long? = null,
+    private val failWrites: Boolean = false,
+) : MobileEnvelopeCounterStore {
+    var next: Long? = initial
+    val persisted = mutableListOf<Long>()
+
+    override fun readNext(): Long? = next
+
+    override fun persistNext(next: Long) {
+        if (failWrites) throw MobileEnvelopeException()
+        persisted += next
+        this.next = next
+    }
 }

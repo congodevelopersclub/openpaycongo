@@ -133,22 +133,23 @@ This section is normative for Android/Flutter pairing work. The wire protocol is
   compared mandatory SAS is the bootstrap only when local pin state is absent and the user grants explicit
   authenticated local recovery authorization. Both modes must inspect local pin state; an existing pin can
   never silently downgrade to first use. The device cannot activate before the administrator confirms SAS.
-- Generate fresh X25519 client keypair. Use maintained Sodium binding `crypto_kx_client_session_keys`; never
-  raw scalar multiplication or custom KDF. Generate unique random 24-byte XChaCha20-Poly1305 nonce. Client-send
-  encrypts exactly QR 32-byte secret with completion AAD. Client-receive decrypts result with response AAD.
-- Keep pending directional keys, QR, exact retry bytes, nonce, ciphertext, and SAS in Keystore-backed secure
-  storage. They cannot sign, sync, or authorize application calls before activation. Exact retry returns same
-  encrypted `201`; never re-encrypt changed plaintext under saved key/nonce. Crash without durable retry state
-  deletes pending material and requires new QR.
+- Android native code generates the fresh X25519 client keypair and calls maintained libsodium
+  `crypto_kx_client_session_keys`; never raw scalar multiplication or custom KDF. It generates the unique random
+  24-byte XChaCha20-Poly1305 nonce and client-send encrypts exactly the QR 32-byte secret with completion AAD.
+  Native client-receive decrypts the result with response AAD.
+- The one-time QR secret crosses the bootstrap bridge once. Directional keys stay in a process-scoped native exchange
+  until a response is authenticated and are then saved in Keystore-backed secure storage; neither key enters Dart,
+  a MethodChannel result, BLoC state, logs, analytics, notifications, screenshots, or backups. Dart holds only the
+  public exact retry request and SAS. Crash, cancellation, failure, or replacement wipes pending native material and
+  requires a fresh QR; no durable retry state exists in this slice.
 - Laravel confirmation, activation delivery, and `POST /mobile/envelopes` v1 exist. Android #211 adds native
   local deposit-envelope sealing only: foreground/unlock-gated, bounded payload, native send-key use,
   Keystore-encrypted no-backup counter, canonical AAD, and opaque routing-safe result. HTTP delivery, encrypted
   response handling, acknowledgement, revocation, rotation, and recovery remain follow-up work. After activation,
   active bodies use directional XChaCha20-Poly1305 envelopes with locked monotonic counter and canonical AAD; TLS
   terminator sees no cleartext business/PII body.
-- Initial pairing still derives directional-key copies in Dart and transfers them through a MethodChannel to native
-  storage. This is unresolved; do not claim an all-native directional-key lifecycle or that directional keys never
-  enter Dart. The native envelope use path does not return a key or bearer credential to Dart.
+- Initial pairing has an all-native directional-key lifecycle. The native envelope use path does not return a key or
+  bearer credential to Dart.
 - On mismatch, expiry, invalid completion, cancellation, or unrecoverable local state, delete pending secret,
   ephemeral key, directional keys, SAS, QR, nonce, ciphertext. Pin rotation/loss is not silent recovery.
 - Never put QR, SAS, ciphertext, directional keys, private keys, completion bodies, active envelope plaintext,

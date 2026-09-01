@@ -1,5 +1,71 @@
 #include <jni.h>
 #include <sodium.h>
+#include "pairing_v2_native.h"
+
+static jbyteArray openpay_new_byte_array(JNIEnv *env, const unsigned char *bytes, jsize length) {
+    jbyteArray result = (*env)->NewByteArray(env, length);
+    if (result != NULL) (*env)->SetByteArrayRegion(env, result, 0, length, (const jbyte *) bytes);
+    return result;
+}
+
+JNIEXPORT jobjectArray JNICALL Java_com_congodeveloperclub_opencongopay_pairing_PairingV2Native_begin(
+    JNIEnv *env, jobject self, jbyteArray intent, jbyteArray server_public_key, jbyteArray pairing_secret) {
+    (void) self;
+    jbyte *intent_bytes = NULL;
+    jbyte *server_public_key_bytes = NULL;
+    jbyte *pairing_secret_bytes = NULL;
+    openpay_pairing_v2_material material;
+    jobjectArray result = NULL;
+    jclass byte_array_class = NULL;
+    jbyteArray values[5] = {NULL, NULL, NULL, NULL, NULL};
+
+    openpay_pairing_v2_material_dispose(&material);
+    if (intent == NULL || server_public_key == NULL || pairing_secret == NULL ||
+        (*env)->GetArrayLength(env, intent) != OPENPAY_PAIRING_V2_INTENT_BYTES ||
+        (*env)->GetArrayLength(env, server_public_key) != crypto_kx_PUBLICKEYBYTES ||
+        (*env)->GetArrayLength(env, pairing_secret) != crypto_kx_SESSIONKEYBYTES) goto done;
+
+    intent_bytes = (*env)->GetByteArrayElements(env, intent, NULL);
+    server_public_key_bytes = (*env)->GetByteArrayElements(env, server_public_key, NULL);
+    pairing_secret_bytes = (*env)->GetByteArrayElements(env, pairing_secret, NULL);
+    if (intent_bytes == NULL || server_public_key_bytes == NULL || pairing_secret_bytes == NULL ||
+        openpay_pairing_v2_begin(
+            (const unsigned char *) intent_bytes,
+            (const unsigned char *) server_public_key_bytes,
+            (const unsigned char *) pairing_secret_bytes,
+            &material) != 0) goto done;
+
+    byte_array_class = (*env)->FindClass(env, "[B");
+    if (byte_array_class == NULL) goto done;
+    result = (*env)->NewObjectArray(env, 5, byte_array_class, NULL);
+    if (result == NULL) goto done;
+    values[0] = openpay_new_byte_array(env, material.client_public_key, sizeof(material.client_public_key));
+    values[1] = openpay_new_byte_array(env, material.nonce, sizeof(material.nonce));
+    values[2] = openpay_new_byte_array(env, material.ciphertext, sizeof(material.ciphertext));
+    values[3] = openpay_new_byte_array(env, material.send_key, sizeof(material.send_key));
+    values[4] = openpay_new_byte_array(env, material.receive_key, sizeof(material.receive_key));
+    for (int i = 0; i < 5; i += 1) {
+        if (values[i] == NULL) goto done;
+        (*env)->SetObjectArrayElement(env, result, i, values[i]);
+    }
+    goto success;
+
+done:
+    result = NULL;
+success:
+    for (int i = 0; i < 5; i += 1) {
+        if (values[i] != NULL) (*env)->DeleteLocalRef(env, values[i]);
+    }
+    if (byte_array_class != NULL) (*env)->DeleteLocalRef(env, byte_array_class);
+    if (intent_bytes != NULL) (*env)->ReleaseByteArrayElements(env, intent, intent_bytes, JNI_ABORT);
+    if (server_public_key_bytes != NULL) (*env)->ReleaseByteArrayElements(env, server_public_key, server_public_key_bytes, JNI_ABORT);
+    if (pairing_secret_bytes != NULL) {
+        sodium_memzero(pairing_secret_bytes, crypto_kx_SESSIONKEYBYTES);
+        (*env)->ReleaseByteArrayElements(env, pairing_secret, pairing_secret_bytes, JNI_ABORT);
+    }
+    openpay_pairing_v2_material_dispose(&material);
+    return result;
+}
 
 JNIEXPORT jbyteArray JNICALL Java_com_congodeveloperclub_opencongopay_pairing_PairingActivationNative_decrypt(
     JNIEnv *env, jobject self, jbyteArray receive_key, jbyteArray nonce, jbyteArray ciphertext, jbyteArray aad) {
