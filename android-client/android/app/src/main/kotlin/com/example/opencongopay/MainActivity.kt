@@ -31,6 +31,7 @@ import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
 import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyStorageException
 import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyVault
 import com.congodeveloperclub.opencongopay.pairing.PairingActivationException
+import com.congodeveloperclub.opencongopay.pairing.MobileEnvelopeVault
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -48,6 +49,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val pairingQrScannerChannelName = "openpaycongo/pairing_qr_scanner"
     private val pairingDirectionalKeysChannelName = "openpaycongo/pairing_directional_keys"
     private val pairingActivationChannelName = "openpaycongo/pairing_activation"
+    private val mobileEnvelopeChannelName = "openpaycongo/mobile_envelope"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
@@ -84,6 +86,8 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handlePairingDirectionalKeyCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingActivationChannelName)
             .setMethodCallHandler(::handlePairingActivationCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mobileEnvelopeChannelName)
+            .setMethodCallHandler(::handleMobileEnvelopeCall)
     }
 
     override fun onResume() {
@@ -324,6 +328,47 @@ class MainActivity : FlutterFragmentActivity() {
                 ciphertext.fill(0)
             }
         }
+    }
+
+    private fun handleMobileEnvelopeCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "seal") {
+            result.notImplemented()
+            return
+        }
+        val arguments = call.arguments as? Map<*, *>
+        val operation = arguments?.get("operation") as? String
+        val payload = arguments?.get("payload") as? ByteArray
+        if (arguments == null || arguments.keys != setOf("operation", "payload") || operation != "deposit" || payload == null) {
+            payload?.fill(0)
+            result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
+            return
+        }
+        val generation = requireSmsGatewayAccess(result)
+        if (generation == null) {
+            payload.fill(0)
+            return
+        }
+        smsTasks.submit(
+            generation = generation,
+            operation = {
+                try {
+                    MobileEnvelopeVault(
+                        context = applicationContext,
+                        accessLease = accessGuard.lease(
+                            permissionGranted = {
+                                checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                            },
+                            expectedGeneration = generation,
+                        ),
+                    ).seal(operation, payload)
+                } finally {
+                    payload.fill(0)
+                }
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("envelope_unavailable", "Mobile envelope is unavailable", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
     }
 
     private fun outboxIdentity(call: MethodCall): String =

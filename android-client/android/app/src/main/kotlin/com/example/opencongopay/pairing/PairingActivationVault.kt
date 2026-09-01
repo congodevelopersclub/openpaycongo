@@ -109,6 +109,34 @@ internal class PairingActivationCredentialVault(context: Context) {
         }
     }
 
+    /** Native-only lookup. Bearer token never leaves this vault. */
+    fun installationId(): String {
+        val payload = try { file.openRead().use { it.readBytes() } } catch (_: Exception) { throw PairingActivationException() }
+        var nonce = ByteArray(0)
+        var ciphertext = ByteArray(0)
+        var plaintext = ByteArray(0)
+        try {
+            if (payload.size <= 13 || payload[0].toInt() != 1) throw PairingActivationException()
+            nonce = payload.copyOfRange(1, 13)
+            ciphertext = payload.copyOfRange(13, payload.size)
+            plaintext = Cipher.getInstance("AES/GCM/NoPadding").run {
+                init(Cipher.DECRYPT_MODE, existingKey(), GCMParameterSpec(128, nonce))
+                updateAAD(AAD)
+                doFinal(ciphertext)
+            }
+            return PairingActivationCredential.parse(plaintext).installationId
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        } finally {
+            payload.fill(0)
+            nonce.fill(0)
+            ciphertext.fill(0)
+            plaintext.fill(0)
+        }
+    }
+
     private fun key(): SecretKey {
         val store = try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } } catch (_: Exception) { throw PairingActivationException() }
         val existing = try { store.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry } catch (_: Exception) { throw PairingActivationException() }
@@ -124,6 +152,18 @@ internal class PairingActivationCredentialVault(context: Context) {
                     .build())
             }.generateKey()
         } catch (_: Exception) { throw PairingActivationException() }
+    }
+
+    private fun existingKey(): SecretKey {
+        val store = try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } } catch (_: Exception) { throw PairingActivationException() }
+        return try {
+            (store.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+                ?: throw PairingActivationException()
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        }
     }
 
     private companion object {

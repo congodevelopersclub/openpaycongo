@@ -35,7 +35,8 @@ internal object PairingDirectionalKeyFormat {
 /**
  * Stores only current pairing directional keys. Keys are copied into one
  * versioned record, AEAD-encrypted with a non-exportable Android Keystore AES
- * key, then atomically replaced in no-backup storage. No read API exists.
+ * key, then atomically replaced in no-backup storage. No Flutter/Dart key-read
+ * API exists; native pairing and envelope code can use narrowly scoped reads.
  */
 internal class PairingDirectionalKeyVault(private val context: Context) {
     private val recordFile = File(context.noBackupFilesDir, RECORD_FILE)
@@ -104,6 +105,20 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
             receiveKey.fill(0)
             aad.fill(0)
             plaintext.fill(0)
+        }
+    }
+
+    /** Native-only access for outbound request sealing. Never exposed to Flutter. */
+    @Synchronized
+    fun readSendKey(): ByteArray {
+        val record = decryptRecord()
+        try {
+            if (record.size != 1 + (PairingDirectionalKeyFormat.KEY_BYTES * 2) || record[0].toInt() != 1) {
+                throw PairingActivationException()
+            }
+            return record.copyOfRange(1, 1 + PairingDirectionalKeyFormat.KEY_BYTES)
+        } finally {
+            record.fill(0)
         }
     }
 
