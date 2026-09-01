@@ -34,8 +34,9 @@ const qrTranscript = (qr) => Buffer.concat([
   field(qr.trust_mode),
 ]);
 
-test('ADR 004 fixes v2 crypto boundary and slice boundary', async () => {
+test('ADR 004 fixes v2 crypto boundary and the implemented server envelope boundary', async () => {
   const adr = await readFile(asset('adr-004-secure-device-enrollment.md'), 'utf8');
+  const envelope = await readFile(asset('mobile-envelope-v1.md'), 'utf8');
 
   assert.match(adr, /crypto_kx/i);
   assert.match(adr, /XChaCha20-Poly1305-IETF/i);
@@ -43,11 +44,17 @@ test('ADR 004 fixes v2 crypto boundary and slice boundary', async () => {
   assert.match(adr, /Laravel implements QR v2 issuance, completion\/replay, verified-administrator SAS confirmation, and server activation delivery/i);
   assert.match(adr, /the app retrieves only the opaque activation envelope over strict HTTPS without redirects/i);
   assert.match(adr, /official libsodium XChaCha20-Poly1305 implementation/i);
-  assert.match(adr, /post-activation encrypted transport remain unimplemented/i);
+  assert.match(adr, /Laravel now implements the server half of active mobile-envelope deposit transport/i);
+  assert.match(adr, /Android transport delivery, acknowledgement, revocation, rotation, and durable pairing recovery remain follow-up slices/i);
   assert.match(adr, /openpaycongo\/pairing\/activation-response\/v2/i);
   assert.match(adr, /0x002b.*exact 43-byte UTF-8 domain field/i);
   assert.match(adr, /no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation/i);
   assert.match(adr, /No forward secrecy, post-compromise.*edge-compromise-resistance/i);
+  assert.match(envelope, /POST \/mobile\/envelopes/i);
+  assert.match(envelope, /It has no bearer credential/i);
+  assert.match(envelope, /openpaycongo\/mobile\/request-envelope\/v1/i);
+  assert.match(envelope, /openpaycongo\/mobile\/response-envelope\/v1/i);
+  assert.match(envelope, /mobile_envelope_unavailable/i);
 });
 
 test('v2 signed QR fixture binds every field', async () => {
@@ -164,7 +171,7 @@ test('legacy v1 pairing assets are gone; v2 test plan remains', async () => {
   await access(asset('pairing-v2-test-plan.md'), constants.R_OK);
 });
 
-test('OpenAPI exposes confirmed pairing slices and keeps active envelopes planned', async () => {
+test('OpenAPI exposes confirmed pairing slices and the implemented server envelope', async () => {
   await SwaggerParser.validate(asset('openapi.yaml').pathname);
   const openapi = YAML.parse(await readFile(asset('openapi.yaml'), 'utf8'));
   const complete = openapi.paths['/v1/pairing/complete'].post;
@@ -190,6 +197,18 @@ test('OpenAPI exposes confirmed pairing slices and keeps active envelopes planne
     Object.keys(openapi.components.schemas.PairingActivationEnvelope.properties),
     ['version', 'nonce', 'ciphertext'],
   );
+  const envelope = openapi.paths['/mobile/envelopes'].post;
+  assert.equal(envelope['x-openpay-status'], 'implemented-server-slice');
+  assert.deepEqual(envelope.security, []);
+  assert.deepEqual(Object.keys(envelope.responses), ['200', '201', '404', '409']);
+  assert.equal(envelope.requestBody.content['application/json'].schema.$ref, '#/components/schemas/MobileEnvelopeRequest');
+  assert.equal(envelope.responses['404'].content['application/json'].schema.$ref, '#/components/schemas/MobileEnvelopeUnavailable');
+  assert.equal(openapi.components.headers.MobileEnvelopeNoStore.schema.const, 'no-store, private');
+  for (const status of ['200', '201', '404', '409']) {
+    assert.equal(envelope.responses[status].headers['Cache-Control'].$ref, '#/components/headers/MobileEnvelopeNoStore');
+  }
+  assert.deepEqual(Object.keys(openapi.components.schemas.MobileEnvelopeRequest.properties), ['version', 'installation_id', 'counter', 'nonce', 'ciphertext']);
+  assert.deepEqual(Object.keys(openapi.components.schemas.MobileEnvelopeResult.properties), ['version', 'nonce', 'ciphertext']);
   assert.equal(openapi.paths['/v1/pairing/device-status'].get['x-openpay-status'], 'planned');
 });
 

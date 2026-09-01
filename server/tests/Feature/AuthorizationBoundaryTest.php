@@ -47,6 +47,8 @@ final class AuthorizationBoundaryTest extends TestCase
         $cryptographicPossessionRoutes = [
             'GET|HEAD v1/pairing/intents/{intent_id}/activation' => [],
             'POST v1/pairing/complete' => [],
+            // Directional AEAD key possession authenticates this route; a bearer credential is intentionally absent.
+            'POST mobile/envelopes' => ['throttle:mobile-envelope'],
         ];
         $runtimeRouteCount = 0;
 
@@ -54,7 +56,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertCount(4, $signedFrameworkRoutes);
         self::assertCount(1, $confidentialClientTokenExchangeRoutes);
         self::assertCount(1, $authorizedRoutes);
-        self::assertCount(2, $cryptographicPossessionRoutes);
+        self::assertCount(3, $cryptographicPossessionRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
             $signature = implode('|', $route->methods()).' '.$route->uri();
@@ -107,7 +109,7 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(48, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(49, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void

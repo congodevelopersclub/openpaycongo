@@ -108,7 +108,7 @@ For an outcome whose completion status is unknown, the mobile client keeps the o
 
 Laravel implements QR v2 issuance, completion/replay, verified-administrator SAS confirmation, and server activation delivery. A matching administrator decision atomically creates one `SourceInstallation`, transfers its encrypted directional keys, creates one scope-limited Sanctum token, seals that token in an immutable activation envelope, and clears the intent's directional keys, SAS, completion replay result, and protected bootstrap material. An exact retry of the same administrator decision is idempotent; a different terminal decision conflicts. A mismatch or expiry creates no installation and clears temporary material.
 
-The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while marking the device inactive. After the administrator confirms the matching SAS, the user explicitly checks activation: the app retrieves only the opaque activation envelope over strict HTTPS without redirects, passes it to the Android native vault, decrypts it with the stored receiver key using the official libsodium XChaCha20-Poly1305 implementation, and stores the credential in a no-backup Android Keystore-backed vault. Directional keys, ciphertext plaintext, and the issued credential never enter Dart or logs; Dart receives only a redacted activation outcome. The issued token is never returned to the administrator session. Acknowledgement, active mobile envelopes, counter use, revocation, rotation, durable pairing recovery, and post-activation encrypted transport remain unimplemented. Follow-up slices must not claim the phone is active merely because the server has sealed an activation envelope.
+The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while marking the device inactive. After the administrator confirms the matching SAS, the user explicitly checks activation: the app retrieves only the opaque activation envelope over strict HTTPS without redirects, passes it to the Android native vault, decrypts it with the stored receiver key using the official libsodium XChaCha20-Poly1305 implementation, and stores the credential in a no-backup Android Keystore-backed vault. Directional keys, ciphertext plaintext, and the issued credential never enter Dart or logs; Dart receives only a redacted activation outcome. The issued token is never returned to the administrator session. Laravel now implements the server half of active mobile-envelope deposit transport; the exact contract is [mobile-envelope-v1.md](mobile-envelope-v1.md). Android transport delivery, acknowledgement, revocation, rotation, and durable pairing recovery remain follow-up slices. Follow-up slices must not claim the phone is active merely because the server has sealed an activation envelope.
 
 ## Activation delivery v2
 
@@ -133,13 +133,7 @@ This is a distinct protocol domain, but uses no derived key, custom KDF, alterna
 
 ## Active mobile envelope contract
 
-Accepted design, not current endpoint implementation. Active installation messages use 24-byte random nonce plus XChaCha20-Poly1305-IETF under directional pair key. No per-message signature: AEAD authenticates sender holding directional key. No cleartext business or PII payload reaches Laravel before envelope authentication/decryption.
-
-```json
-{"version":2,"installation_id":"uuid","counter":1,"nonce":"base64url-24-bytes","ciphertext":"base64url"}
-```
-
-AAD uses length-prefixed `openpaycongo/mobile-envelope/v2`, installation routing id, uppercase HTTP method, canonical path, decimal counter. Counter is locked monotonic replay protection. Reject changed version, installation id, method, path, counter, nonce, ciphertext, or AAD. PHP and Flutter must prove this before release.
+Laravel implements `POST /mobile/envelopes` protocol v1 for encrypted deposit submission. It uses a 24-byte random nonce plus XChaCha20-Poly1305-IETF under the pairing directional keys. No per-message signature: AEAD authenticates the sender holding its directional key. No cleartext business or PII payload reaches Laravel before envelope authentication/decryption. The exact request, response, AAD, counter, failure, and compatibility rules are in [mobile-envelope-v1.md](mobile-envelope-v1.md). PHP feature tests prove valid submission, replay, conflict, tampering, stale counters, and installation retargeting; Android must independently prove compatible native encryption before any Dart transport adapter is released.
 
 ## Interoperability evidence
 
