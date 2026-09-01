@@ -244,7 +244,7 @@ final class ConfirmPairingIntentTest extends TestCase
 
     private function activationAad(string $intentId): string
     {
-        return pack('n', 44).'openpaycongo/pairing/activation-response/v2'.pack('n', 16).$intentId;
+        return pack('n', 43).'openpaycongo/pairing/activation-response/v2'.pack('n', 16).$intentId;
     }
 
     private function asVerified(User $operator): self

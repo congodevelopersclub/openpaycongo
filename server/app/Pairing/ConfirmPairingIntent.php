@@ -13,6 +13,8 @@ use Illuminate\Support\Str;
 
 final class ConfirmPairingIntent
 {
+    private const string ACTIVATION_RESPONSE_DOMAIN = 'openpaycongo/pairing/activation-response/v2';
+
     /** @var list<string> */
     private const array MOBILE_ABILITIES = [
         'mobile:deposits:write',
@@ -186,6 +188,9 @@ final class ConfirmPairingIntent
 
     private function activationAad(string $intentId): string
     {
-        return pack('n', 44).'openpaycongo/pairing/activation-response/v2'.pack('n', 16).$intentId;
+        return pack('n', strlen(self::ACTIVATION_RESPONSE_DOMAIN))
+            .self::ACTIVATION_RESPONSE_DOMAIN
+            .pack('n', 16)
+            .$intentId;
     }
 }

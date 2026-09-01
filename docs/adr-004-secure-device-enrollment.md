@@ -126,7 +126,7 @@ After matching SAS confirmation, the phone may retrieve `GET /v1/pairing/intents
 
 The activation-response AAD is unsigned-16-bit-big-endian length plus bytes:
 
-1. `openpaycongo/pairing/activation-response/v2`
+1. `0x002b` followed by `openpaycongo/pairing/activation-response/v2` (the exact 43-byte UTF-8 domain field)
 2. raw 16-byte `intent_id`
 
 This is a distinct protocol domain, but uses no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation. Laravel stores both protocol ciphertext and nonce with encrypted Eloquent casts; the raw Sanctum token exists only while the server creates and seals the envelope. The server does not log, serialize, return, or retain the token plaintext.

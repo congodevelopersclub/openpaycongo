@@ -43,6 +43,7 @@ test('ADR 004 fixes v2 crypto boundary and slice boundary', async () => {
   assert.match(adr, /Laravel implements QR v2 issuance, completion\/replay, verified-administrator SAS confirmation, and server activation delivery/i);
   assert.match(adr, /Mobile activation-envelope retrieval, native durable credential consumption.*remain unimplemented/i);
   assert.match(adr, /openpaycongo\/pairing\/activation-response\/v2/i);
+  assert.match(adr, /0x002b.*exact 43-byte UTF-8 domain field/i);
   assert.match(adr, /no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation/i);
   assert.match(adr, /No forward secrecy, post-compromise.*edge-compromise-resistance/i);
 });
@@ -188,4 +189,13 @@ test('OpenAPI exposes confirmed server pairing slices and keeps phone activation
     ['version', 'nonce', 'ciphertext'],
   );
   assert.equal(openapi.paths['/v1/pairing/device-status'].get['x-openpay-status'], 'planned');
+});
+
+test('activation response AAD has the fixed 43-byte domain field', () => {
+  const domain = 'openpaycongo/pairing/activation-response/v2';
+  const encoded = field(domain);
+
+  assert.equal(Buffer.byteLength(domain, 'utf8'), 43);
+  assert.equal(encoded.readUInt16BE(0), 43);
+  assert.equal(encoded.subarray(2).toString('utf8'), domain);
 });
