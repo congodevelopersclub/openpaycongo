@@ -264,6 +264,8 @@ class MainActivity : FlutterFragmentActivity() {
         if (arguments == null || arguments.keys != setOf("send_key", "receive_key") ||
             sendKey == null || receiveKey == null || sendKey.size != 32 || receiveKey.size != 32
         ) {
+            sendKey?.fill(0)
+            receiveKey?.fill(0)
             result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
             return
         }
