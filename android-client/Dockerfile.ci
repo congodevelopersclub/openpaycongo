@@ -78,6 +78,15 @@ RUN set -eu; test -n "$TEST_PATH"; test -f "$TEST_PATH"; flutter test "$TEST_PAT
 FROM native-source AS native-test
 RUN flutter build apk --config-only --debug
 RUN cd android && ./gradlew :app:testDebugUnitTest
+RUN cd android/app/src/main/cpp/libsodium \
+    && ./configure --disable-shared --enable-static \
+    && make -j"$(nproc)" \
+    && cc -std=c11 -Wall -Wextra -Werror \
+        -I /workspace/android/app/src/main/cpp/libsodium/src/libsodium/include \
+        /workspace/android/app/src/test/cpp/mobile_envelope_native_test.c \
+        src/libsodium/.libs/libsodium.a \
+        -o /tmp/mobile-envelope-native-test \
+    && /tmp/mobile-envelope-native-test
 
 FROM native-test AS apk
 RUN flutter build apk --debug
