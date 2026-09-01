@@ -24,5 +24,7 @@ void main() {
     expect(activity, contains('openpaycongo/pairing_directional_keys'));
     expect(activity, contains('arguments.keys != setOf("send_key", "receive_key")'));
     expect(activity, contains('sendKey.size != 32 || receiveKey.size != 32'));
+    expect(activity, contains('sendKey.fill(0)'));
+    expect(activity, contains('receiveKey.fill(0)'));
   });
 }

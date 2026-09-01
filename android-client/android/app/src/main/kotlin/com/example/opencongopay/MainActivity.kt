@@ -279,6 +279,9 @@ class MainActivity : FlutterFragmentActivity() {
                 mainHandler.post {
                     result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
                 }
+            } finally {
+                sendKey.fill(0)
+                receiveKey.fill(0)
             }
         }
     }
