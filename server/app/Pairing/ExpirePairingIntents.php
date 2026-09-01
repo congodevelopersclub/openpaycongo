@@ -14,6 +14,18 @@ final class ExpirePairingIntents
 
     public function execute(): int
     {
+        $expired = 0;
+
+        do {
+            $page = $this->expirePage();
+            $expired += $page;
+        } while ($page === self::MAX_PER_RUN);
+
+        return $expired;
+    }
+
+    private function expirePage(): int
+    {
         return DB::transaction(function (): int {
             $now = CarbonImmutable::now('UTC');
             $intents = PairingIntent::query()

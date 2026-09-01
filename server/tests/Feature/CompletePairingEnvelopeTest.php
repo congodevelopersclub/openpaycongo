@@ -8,6 +8,7 @@ use App\Models\Organization;
 use App\Models\PairingIntent;
 use App\Pairing\KeyProtector;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -73,6 +74,7 @@ final class CompletePairingEnvelopeTest extends TestCase
             $this->postJson('/v1/pairing/complete', [...$payload, 'nonce' => $this->base64Url($wrongNonce), 'ciphertext' => $this->base64Url($wrongSecret)]),
         );
         $this->assertSame('pending', $intent->fresh()->state);
+        $this->assertSame(2, $intent->fresh()->invalid_proof_attempts);
 
         $response = $this->postJson('/v1/pairing/complete', $payload);
 
@@ -100,6 +102,91 @@ final class CompletePairingEnvelopeTest extends TestCase
         $this->assertSame('', $intent->fresh()->protected_server_private_material);
         $this->assertNotSame('', $intent->fresh()->server_receive_key);
         $this->assertNotSame('', $intent->fresh()->server_send_key);
+    }
+
+    public function test_invalid_proofs_exhaust_the_intent_and_destroy_temporary_material(): void
+    {
+        [$intent, $payload] = $this->newPendingEnvelope(random_bytes(16), now()->addMinute());
+        $invalidCiphertext = $this->decodeBase64Url($payload['ciphertext']);
+        $invalidCiphertext[0] = chr(ord($invalidCiphertext[0]) ^ 1);
+        $invalidPayload = [...$payload, 'ciphertext' => $this->base64Url($invalidCiphertext)];
+
+        for ($attempt = 1; $attempt <= 3; $attempt += 1) {
+            $this->assertPairingUnavailable($this->postJson('/v1/pairing/complete', $invalidPayload));
+            self::assertSame($attempt, $intent->fresh()->invalid_proof_attempts);
+        }
+
+        $exhausted = $intent->fresh();
+        self::assertSame('exhausted', $exhausted->state);
+        self::assertSame('', $exhausted->protected_server_private_material);
+        self::assertNull($exhausted->pairing_secret_digest);
+        self::assertNull($exhausted->server_receive_key);
+        self::assertNull($exhausted->server_send_key);
+        self::assertNull($exhausted->short_authentication_code);
+        self::assertNull($exhausted->completion_request_digest);
+        self::assertNull($exhausted->completion_result);
+        $this->assertPairingUnavailable($this->postJson('/v1/pairing/complete', $payload));
+    }
+
+    public function test_retryable_infrastructure_failure_returns_a_generic_no_store_503_without_consuming_the_intent(): void
+    {
+        [$intent, $payload] = $this->newPendingEnvelope(random_bytes(16), now()->addMinute());
+        app()->instance(KeyProtector::class, new class implements KeyProtector
+        {
+            public function protect(string $material, string $aad): string
+            {
+                throw new \RuntimeException('not used');
+            }
+
+            public function unprotect(string $protectedMaterial, string $aad): string
+            {
+                throw new \RuntimeException('key service unavailable');
+            }
+        });
+
+        try {
+            $response = $this->postJson('/v1/pairing/complete', $payload);
+        } finally {
+            app()->forgetInstance(KeyProtector::class);
+        }
+
+        $response
+            ->assertStatus(503)
+            ->assertHeader('Content-Type', 'application/problem+json')
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('type', 'https://openpaycongo.example/problems/pairing-request-failed')
+            ->assertJsonPath('title', 'Pairing request failed')
+            ->assertJsonPath('status', 503)
+            ->assertJsonPath('code', 'pairing_request_failed');
+        self::assertSame('pending', $intent->fresh()->state);
+        self::assertNotSame('', $intent->fresh()->protected_server_private_material);
+    }
+
+    public function test_completion_rate_limiter_admits_only_ten_requests_per_ip_per_minute(): void
+    {
+        $limitKey = 'pairing.complete:'.hash('sha256', '127.0.0.1');
+        RateLimiter::clear($limitKey);
+        $payload = [
+            'intent_id' => $this->base64Url(random_bytes(16)),
+            'client_public_key' => $this->base64Url(random_bytes(32)),
+            'nonce' => $this->base64Url(random_bytes(24)),
+            'ciphertext' => $this->base64Url(random_bytes(48)),
+        ];
+
+        try {
+            for ($attempt = 1; $attempt <= 10; $attempt += 1) {
+                $this->assertPairingUnavailable($this->postJson('/v1/pairing/complete', $payload));
+            }
+
+            $this->postJson('/v1/pairing/complete', $payload)
+                ->assertTooManyRequests()
+                ->assertHeader('Content-Type', 'application/problem+json')
+                ->assertHeader('Cache-Control', 'no-store, private')
+                ->assertHeader('Retry-After')
+                ->assertJsonPath('code', 'pairing_rate_limited');
+        } finally {
+            RateLimiter::clear($limitKey);
+        }
     }
 
     public function test_expiry_after_completion_removes_replay_and_directional_key_material(): void

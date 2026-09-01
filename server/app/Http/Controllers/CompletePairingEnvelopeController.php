@@ -9,16 +9,27 @@ use App\Pairing\CompletePairingEnvelope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Throwable;
 
 final class CompletePairingEnvelopeController
 {
     public function __invoke(Request $request, CompletePairingEnvelope $complete): JsonResponse
     {
         $limitKey = 'pairing.complete:'.hash('sha256', (string) $request->ip());
-        if (RateLimiter::tooManyAttempts($limitKey, 10)) {
-            return PairingProblem::rateLimited((string) RateLimiter::availableIn($limitKey));
-        }
-        RateLimiter::hit($limitKey, 60);
+        $response = RateLimiter::attempt(
+            $limitKey,
+            10,
+            fn (): JsonResponse => $this->complete($request, $complete),
+            60,
+        );
+
+        return $response instanceof JsonResponse
+            ? $response
+            : PairingProblem::rateLimited((string) RateLimiter::availableIn($limitKey));
+    }
+
+    private function complete(Request $request, CompletePairingEnvelope $complete): JsonResponse
+    {
         $input = $request->all();
         $expectedKeys = ['intent_id', 'client_public_key', 'nonce', 'ciphertext'];
         if (count($input) !== count($expectedKeys) || array_diff(array_keys($input), $expectedKeys) !== []) {
@@ -28,9 +39,15 @@ final class CompletePairingEnvelopeController
         $client = $this->decodeCanonicalBase64Url($input['client_public_key']);
         $nonce = $this->decodeCanonicalBase64Url($input['nonce']);
         $ciphertext = $this->decodeCanonicalBase64Url($input['ciphertext']);
-        $result = is_string($intentIdBytes) && strlen($intentIdBytes) === 16 && is_string($client) && is_string($nonce) && is_string($ciphertext)
-            ? $complete->execute($intentIdBytes, $client, $nonce, $ciphertext, hash('sha256', implode('', [$intentIdBytes, $client, $nonce, $ciphertext]), true))
-            : null;
+
+        try {
+            $result = is_string($intentIdBytes) && strlen($intentIdBytes) === 16 && is_string($client) && is_string($nonce) && is_string($ciphertext)
+                ? $complete->execute($intentIdBytes, $client, $nonce, $ciphertext, hash('sha256', implode('', [$intentIdBytes, $client, $nonce, $ciphertext]), true))
+                : null;
+        } catch (Throwable) {
+            return PairingProblem::requestFailed(503);
+        }
+
         if ($result === null) {
             return PairingProblem::unavailable();
         }

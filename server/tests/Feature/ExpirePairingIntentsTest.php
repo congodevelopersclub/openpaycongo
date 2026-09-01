@@ -54,7 +54,7 @@ final class ExpirePairingIntentsTest extends TestCase
         self::assertTrue($event->withoutOverlapping);
     }
 
-    public function test_action_processes_at_most_one_bounded_page_per_run(): void
+    public function test_action_drains_due_pages_in_bounded_transactions(): void
     {
         $now = CarbonImmutable::parse('2026-09-01 12:00:00 UTC');
         CarbonImmutable::setTestNow($now);
@@ -64,9 +64,9 @@ final class ExpirePairingIntentsTest extends TestCase
                 $this->intent('pending', $now->subSecond());
             }
 
-            self::assertSame(ExpirePairingIntents::MAX_PER_RUN, app(ExpirePairingIntents::class)->execute());
-            self::assertSame(ExpirePairingIntents::MAX_PER_RUN, PairingIntent::query()->where('state', 'expired')->count());
-            self::assertSame(1, PairingIntent::query()->where('state', 'pending')->count());
+            self::assertSame(ExpirePairingIntents::MAX_PER_RUN + 1, app(ExpirePairingIntents::class)->execute());
+            self::assertSame(ExpirePairingIntents::MAX_PER_RUN + 1, PairingIntent::query()->where('state', 'expired')->count());
+            self::assertSame(0, PairingIntent::query()->where('state', 'pending')->count());
         } finally {
             CarbonImmutable::setTestNow();
         }

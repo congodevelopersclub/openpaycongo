@@ -163,7 +163,7 @@ test('OpenAPI exposes current initial v2 slice and marks future pairing APIs pla
   const openapi = YAML.parse(await readFile(asset('openapi.yaml'), 'utf8'));
   const complete = openapi.paths['/v1/pairing/complete'].post;
   assert.equal(complete['x-openpay-status'], 'implemented-initial-slice');
-  assert.deepEqual(Object.keys(complete.responses), ['201', '404', '429', 'default']);
+  assert.deepEqual(Object.keys(complete.responses), ['201', '404', '429', '503', 'default']);
   assert.equal(complete.responses['429'].$ref, '#/components/responses/PairingRateLimited');
   assert.equal(
     openapi.paths['/v1/pairing/intents/{intent_id}/confirmation'].get['x-openpay-status'],

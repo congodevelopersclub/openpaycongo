@@ -83,8 +83,10 @@ paths:
           $ref: '#/components/responses/PairingUnavailable'
         '429':
           $ref: '#/components/responses/PairingRateLimited'
+        '503':
+          $ref: '#/components/responses/PairingProblem'
         default:
-          $ref: '#/components/responses/PairingUnavailable'
+          $ref: '#/components/responses/PairingProblem'
   /v1/pairing/intents/{intent_id}/confirmation:
     get:
       summary: 'Planned: read authenticated administrator pairing display state'
@@ -554,7 +556,7 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     PairingUnavailable:
-      description: Generic unavailable response for every unknown, expired, consumed, exhausted, malformed, invalid-proof, protector, or cleanup failure
+      description: Generic unavailable response for every unknown, expired, consumed, exhausted, malformed, or invalid-proof completion
       headers:
         Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
       content:
