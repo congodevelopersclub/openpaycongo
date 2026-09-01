@@ -18,7 +18,8 @@ final class CompletePairingEnvelope
         if (strlen($intentIdBytes) !== 16
             || strlen($clientPublicKey) !== SODIUM_CRYPTO_KX_PUBLICKEYBYTES
             || strlen($nonce) !== SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES
-            || $ciphertext === '' || strlen($ciphertext) > 256 || strlen($requestDigest) !== 32) {
+            || strlen($ciphertext) !== 32 + SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_ABYTES
+            || strlen($requestDigest) !== 32) {
             return null;
         }
         $intentId = $this->base64Url($intentIdBytes);

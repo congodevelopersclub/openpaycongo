@@ -58,6 +58,13 @@ final class CompletePairingEnvelopeTest extends TestCase
         $this->assertPairingUnavailable(
             $this->postJson('/v1/pairing/complete', [...$payload, 'ciphertext' => $this->base64Url($tampered)]),
         );
+
+        foreach ([substr($ciphertext, 0, -1), $ciphertext.chr(0)] as $wrongLengthCiphertext) {
+            $this->assertPairingUnavailable(
+                $this->postJson('/v1/pairing/complete', [...$payload, 'ciphertext' => $this->base64Url($wrongLengthCiphertext)]),
+            );
+        }
+
         $wrongNonce = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES);
         $wrongSecret = sodium_crypto_aead_xchacha20poly1305_ietf_encrypt(
             random_bytes(32), $this->aad($intent->intent_id_bytes, sodium_crypto_kx_publickey($client)), $wrongNonce, $keys[0],
