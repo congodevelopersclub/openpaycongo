@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_07_000000_add_kx_pairing_envelopes';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_08_010000_add_pairing_activation_delivery_to_source_installations';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
