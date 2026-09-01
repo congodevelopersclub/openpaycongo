@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:$PATH
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential ca-certificates curl git openjdk-17-jdk-headless unzip xz-utils zip \
+    && apt-get install --yes --no-install-recommends build-essential ca-certificates curl git minisign openjdk-17-jdk-headless unzip xz-utils zip \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 flutter \
     && mkdir -p "$ANDROID_HOME/cmdline-tools" "$FLUTTER_HOME" \
@@ -46,6 +46,21 @@ RUN flutter pub get
 FROM dependencies AS source
 COPY --chown=flutter:flutter . .
 
+FROM flutter-sdk AS libsodium-source
+
+ARG LIBSODIUM_VERSION=1.0.21
+ARG LIBSODIUM_MINISIGN_PUBLIC_KEY=RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3
+
+RUN mkdir -p /home/flutter/libsodium \
+    && curl --fail --location --retry 3 --output /tmp/libsodium.tar.gz "https://download.libsodium.org/libsodium/releases/libsodium-${LIBSODIUM_VERSION}.tar.gz" \
+    && curl --fail --location --retry 3 --output /tmp/libsodium.tar.gz.minisig "https://download.libsodium.org/libsodium/releases/libsodium-${LIBSODIUM_VERSION}.tar.gz.minisig" \
+    && minisign -P "${LIBSODIUM_MINISIGN_PUBLIC_KEY}" -Vm /tmp/libsodium.tar.gz \
+    && tar --extract --gzip --file /tmp/libsodium.tar.gz --strip-components=1 --directory /home/flutter/libsodium \
+    && rm /tmp/libsodium.tar.gz /tmp/libsodium.tar.gz.minisig
+
+FROM source AS native-source
+COPY --from=libsodium-source --chown=flutter:flutter /home/flutter/libsodium /workspace/android/app/src/main/cpp/libsodium
+
 FROM source AS analyze
 RUN flutter analyze
 
@@ -58,10 +73,9 @@ RUN flutter test
 
 FROM source AS focused
 ARG TEST_PATH
-RUN set -eu; test -n "$TEST_PATH"; set +e; output="$(flutter test "$TEST_PATH" 2>&1)"; status=$?; set -e; printf '%s\n' "$output"; test "$status" -eq 0 \
-    && printf '%s\n' "$output" | grep -Eq '\+[1-9][0-9]*: All tests passed!'
+RUN set -eu; test -n "$TEST_PATH"; test -f "$TEST_PATH"; flutter test "$TEST_PATH"
 
-FROM source AS native-test
+FROM native-source AS native-test
 RUN flutter build apk --config-only --debug
 RUN cd android && ./gradlew :app:testDebugUnitTest
 

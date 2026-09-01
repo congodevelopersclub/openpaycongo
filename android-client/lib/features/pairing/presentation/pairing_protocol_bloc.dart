@@ -23,15 +23,28 @@ abstract interface class PairingDirectionalKeyVault {
   Future<void> save(PairingDirectionalKeys keys);
 }
 
+/// Opaque activation request. Its routing bytes never enter BLoC state.
+abstract interface class PairingActivationPort {
+  Future<PairingActivationOutcome> activate(PairingActivationRequest request);
+}
+
+enum PairingActivationOutcome { activated, recoveryRequired }
+
+abstract interface class PairingActivationRequest {
+  void dispose();
+}
+
 final class PairingPendingMaterial {
   PairingPendingMaterial({
     required this.serverSas,
     required this.keys,
+    this.activationRequest,
     required this._onDispose,
   });
 
   final String serverSas;
   final PairingDirectionalKeys keys;
+  PairingActivationRequest? activationRequest;
   final void Function() _onDispose;
   bool _disposed = false;
 
@@ -39,6 +52,8 @@ final class PairingPendingMaterial {
     if (_disposed) return;
     _disposed = true;
     keys.dispose();
+    activationRequest?.dispose();
+    activationRequest = null;
     _onDispose();
   }
 }
@@ -51,6 +66,11 @@ final class PairingProtocolStarted extends PairingProtocolEvent {
   const PairingProtocolStarted(this.command);
 
   final PairingProtocolCommand command;
+}
+
+/// UI sends only confirmation progression; no credential/key/envelope fields.
+final class PairingActivationRequested extends PairingProtocolEvent {
+  const PairingActivationRequested();
 }
 
 sealed class PairingProtocolState {
@@ -74,20 +94,33 @@ final class PairingProtocolAwaitingConfirmation extends PairingProtocolState {
   final String sas;
 }
 
+final class PairingProtocolActivating extends PairingProtocolState {
+  const PairingProtocolActivating();
+}
+
+final class PairingProtocolActivated extends PairingProtocolState {
+  const PairingProtocolActivated();
+}
+
 final class PairingProtocolRecoveryRequired extends PairingProtocolState {
   const PairingProtocolRecoveryRequired();
 }
 
 final class PairingProtocolBloc
     extends Bloc<PairingProtocolEvent, PairingProtocolState> {
-  PairingProtocolBloc({required this.protocol, required this.vault})
-    : super(const PairingProtocolIdle()) {
+  PairingProtocolBloc({required this.protocol, required this.vault, PairingActivationPort? activation})
+    : activation = activation ?? const _UnavailableActivationPort(),
+      super(const PairingProtocolIdle()) {
     on<PairingProtocolStarted>(_start);
+    on<PairingActivationRequested>(_activate);
   }
 
   final PairingProtocolPort protocol;
   final PairingDirectionalKeyVault vault;
+  final PairingActivationPort activation;
   var _startActive = false;
+  var _activationActive = false;
+  PairingActivationRequest? _activationRequest;
 
   Future<void> _start(
     PairingProtocolStarted event,
@@ -103,6 +136,9 @@ final class PairingProtocolBloc
     try {
       material = await protocol.establish(event.command);
       await vault.save(material.keys);
+      _activationRequest?.dispose();
+      _activationRequest = material.activationRequest;
+      material.activationRequest = null;
       emit(PairingProtocolAwaitingConfirmation(material.serverSas));
     } on Object {
       emit(const PairingProtocolRecoveryRequired());
@@ -112,4 +148,43 @@ final class PairingProtocolBloc
       _startActive = false;
     }
   }
+
+  Future<void> _activate(
+    PairingActivationRequested event,
+    Emitter<PairingProtocolState> emit,
+  ) async {
+    final PairingActivationRequest? request = _activationRequest;
+    if (_activationActive || state is! PairingProtocolAwaitingConfirmation || request == null) return;
+    _activationActive = true;
+    _activationRequest = null;
+    emit(const PairingProtocolActivating());
+    try {
+      final PairingActivationOutcome outcome = await activation.activate(request);
+      if (outcome == PairingActivationOutcome.activated) {
+        emit(const PairingProtocolActivated());
+      } else {
+        emit(const PairingProtocolRecoveryRequired());
+      }
+    } on Object {
+      emit(const PairingProtocolRecoveryRequired());
+    } finally {
+      request.dispose();
+      _activationActive = false;
+    }
+  }
+
+  @override
+  Future<void> close() {
+    _activationRequest?.dispose();
+    _activationRequest = null;
+    return super.close();
+  }
+}
+
+final class _UnavailableActivationPort implements PairingActivationPort {
+  const _UnavailableActivationPort();
+
+  @override
+  Future<PairingActivationOutcome> activate(PairingActivationRequest request) async =>
+      PairingActivationOutcome.recoveryRequired;
 }

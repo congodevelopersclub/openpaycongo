@@ -112,10 +112,37 @@ final class _VerificationStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (protocol case PairingProtocolAwaitingConfirmation(:final sas)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _StatusCard(
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            message:
+                'Encrypted pairing response verified. Compare six-digit code $sas with administrator. Administrator confirmation is mandatory. Device is not active.',
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => context.read<PairingProtocolBloc>().add(
+              const PairingActivationRequested(),
+            ),
+            child: const Text('Check activation after administrator confirms'),
+          ),
+        ],
+      );
+    }
+    if (protocol is PairingProtocolActivating) {
+      return const Row(
+        children: <Widget>[
+          SizedBox(width: 20, height: 20, child: CircularProgressIndicator()),
+          SizedBox(width: 12),
+          Text('Checking pairing activation…'),
+        ],
+      );
+    }
+    if (protocol is PairingProtocolActivated) {
       return _StatusCard(
-        color: Theme.of(context).colorScheme.secondaryContainer,
-        message:
-            'Encrypted pairing response verified. Compare six-digit code $sas with administrator. Administrator confirmation is mandatory. Device is not active.',
+        color: Theme.of(context).colorScheme.primaryContainer,
+        message: 'Pairing activated.',
       );
     }
     if (protocol is PairingProtocolRecoveryRequired) {

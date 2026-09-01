@@ -36,7 +36,8 @@ final class PairingV2CompletionCommand implements PairingProtocolCommand {
   PairingV2CompletionCommand._({
     required this.endpoint,
     required this._credential,
-  });
+    required Uint8List intentId,
+  }) : _intentId = Uint8List.fromList(intentId);
 
   factory PairingV2CompletionCommand.fromQrMaterial(
     PairingQrCompletionMaterial material,
@@ -66,11 +67,13 @@ final class PairingV2CompletionCommand implements PairingProtocolCommand {
     return PairingV2CompletionCommand._(
       endpoint: parsedEndpoint,
       credential: credential,
+      intentId: intentId,
     );
   }
 
   final Uri endpoint;
   PairingV2QrCredential? _credential;
+  Uint8List? _intentId;
 
   PairingV2QrCredential takeCredential() {
     final PairingV2QrCredential? credential = _credential;
@@ -81,11 +84,46 @@ final class PairingV2CompletionCommand implements PairingProtocolCommand {
     return credential;
   }
 
+  PairingActivationRequest takeActivationRequest() {
+    final Uint8List? intentId = _intentId;
+    if (intentId == null) throw StateError('Pairing activation route is no longer usable');
+    _intentId = null;
+    try {
+      return PairingV2ActivationRequest(endpoint, intentId);
+    } finally {
+      intentId.fillRange(0, intentId.length, 0);
+    }
+  }
+
   @override
   void dispose() {
     final PairingV2QrCredential? credential = _credential;
     _credential = null;
     credential?.dispose();
+    _intentId?.fillRange(0, _intentId!.length, 0);
+    _intentId = null;
+  }
+}
+
+final class PairingV2ActivationRequest implements PairingActivationRequest {
+  PairingV2ActivationRequest(this.completionEndpoint, Uint8List intentId)
+      : _intentId = Uint8List.fromList(intentId);
+
+  final Uri completionEndpoint;
+  Uint8List? _intentId;
+
+  Uint8List takeIntentId() {
+    final Uint8List? intentId = _intentId;
+    if (intentId == null) throw StateError('Activation route disposed');
+    _intentId = null;
+    return intentId;
+  }
+
+  @override
+  void dispose() {
+    final Uint8List? intentId = _intentId;
+    _intentId = null;
+    intentId?.fillRange(0, intentId.length, 0);
   }
 }
 
@@ -212,6 +250,7 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
       return PairingPendingMaterial(
         serverSas: sas,
         keys: keys,
+        activationRequest: command.takeActivationRequest(),
         onDispose: exchange.dispose,
       );
     } catch (_) {

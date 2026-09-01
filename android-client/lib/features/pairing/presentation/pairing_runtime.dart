@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:sodium/sodium_sumo.dart';
 
 import '../infrastructure/platform_pairing_directional_key_vault.dart';
+import '../infrastructure/platform_pairing_activation_vault.dart';
+import '../infrastructure/pairing_activation_retrieval.dart';
 import '../infrastructure/platform_pairing_qr_scanner.dart';
 import '../infrastructure/platform_pairing_qr_trust_store.dart';
 import 'pairing_protocol_bloc.dart';
@@ -29,6 +31,12 @@ final class PairingRuntime {
         transport: DartIoPairingV2CompletionTransport(),
       ),
       vault: const PlatformPairingDirectionalKeyVault(),
+      activation: PairingV2ActivationPort(
+        consumer: PairingActivationConsumer(
+          transport: DartIoPairingActivationRetrievalTransport(),
+          vault: const PlatformPairingActivationVault(),
+        ),
+      ),
     );
     return PairingRuntime._(
       protocol: protocol,

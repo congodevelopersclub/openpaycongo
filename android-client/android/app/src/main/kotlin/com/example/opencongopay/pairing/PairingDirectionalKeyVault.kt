@@ -37,7 +37,7 @@ internal object PairingDirectionalKeyFormat {
  * versioned record, AEAD-encrypted with a non-exportable Android Keystore AES
  * key, then atomically replaced in no-backup storage. No read API exists.
  */
-internal class PairingDirectionalKeyVault(context: Context) {
+internal class PairingDirectionalKeyVault(private val context: Context) {
     private val recordFile = File(context.noBackupFilesDir, RECORD_FILE)
     private val atomicFile = AtomicFile(recordFile)
 
@@ -74,6 +74,63 @@ internal class PairingDirectionalKeyVault(context: Context) {
         }
     }
 
+    /**
+     * Native-only activation path. Directional keys never leave this vault:
+     * receive key enters JNI only for authenticated XChaCha decryption, then
+     * all temporary buffers are wiped before returning a redacted outcome.
+     */
+    @Synchronized
+    fun consumeActivation(intent: ByteArray, nonce: ByteArray, ciphertext: ByteArray) {
+        PairingActivationEnvelope.validate(intent, nonce, ciphertext)
+        val record = decryptRecord()
+        val receiveKey = ByteArray(PairingDirectionalKeyFormat.KEY_BYTES)
+        var aad = ByteArray(0)
+        var plaintext = ByteArray(0)
+        try {
+            if (record.size != 1 + (PairingDirectionalKeyFormat.KEY_BYTES * 2) || record[0].toInt() != 1) {
+                throw PairingActivationException()
+            }
+            System.arraycopy(record, 1 + PairingDirectionalKeyFormat.KEY_BYTES, receiveKey, 0, receiveKey.size)
+            aad = PairingActivationEnvelope.aad(intent)
+            plaintext = PairingActivationNative.decrypt(receiveKey, nonce, ciphertext, aad)
+                ?: throw PairingActivationException()
+            PairingActivationCredentialVault(context).save(PairingActivationCredential.parse(plaintext))
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        } finally {
+            record.fill(0)
+            receiveKey.fill(0)
+            aad.fill(0)
+            plaintext.fill(0)
+        }
+    }
+
+    private fun decryptRecord(): ByteArray {
+        val payload = try { atomicFile.openRead().use { it.readBytes() } } catch (_: Exception) { throw PairingActivationException() }
+        var nonce = ByteArray(0)
+        var ciphertext = ByteArray(0)
+        try {
+            if (payload.size <= 13 || payload[0] != ENVELOPE_VERSION) throw PairingActivationException()
+            nonce = payload.copyOfRange(1, 1 + GCM_NONCE_BYTES)
+            ciphertext = payload.copyOfRange(1 + GCM_NONCE_BYTES, payload.size)
+            return Cipher.getInstance("AES/GCM/NoPadding").run {
+                init(Cipher.DECRYPT_MODE, keyForRead(), GCMParameterSpec(GCM_TAG_BITS, nonce))
+                updateAAD(AAD)
+                doFinal(ciphertext)
+            }
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        } finally {
+            payload.fill(0)
+            nonce.fill(0)
+            ciphertext.fill(0)
+        }
+    }
+
     private fun keyForWrite(): SecretKey {
         val store = try {
             KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -105,6 +162,18 @@ internal class PairingDirectionalKeyVault(context: Context) {
             }.generateKey()
         } catch (_: Exception) {
             throw PairingDirectionalKeyStorageException()
+        }
+    }
+
+    private fun keyForRead(): SecretKey {
+        val store = try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } } catch (_: Exception) { throw PairingActivationException() }
+        return try {
+            (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+                ?: throw PairingActivationException()
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
         }
     }
 

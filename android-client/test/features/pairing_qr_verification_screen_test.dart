@@ -89,6 +89,30 @@ void main() {
     expect(find.textContaining('not active'), findsOneWidget);
     expect(find.text('Scan pairing QR'), findsOneWidget);
   });
+
+  testWidgets('confirmation action dispatches opaque activation only', (
+    WidgetTester tester,
+  ) async {
+    final PairingQrBloc qr = PairingQrBloc(trustStore: const _Store());
+    final PairingProtocolBloc protocol = PairingProtocolBloc(
+      protocol: _PendingProtocol(_ActivationRequest()),
+      vault: const _Vault(),
+      activation: const _Activation(),
+    );
+    addTearDown(qr.close);
+    addTearDown(protocol.close);
+    await tester.pumpWidget(
+      MaterialApp(home: PairingQrVerificationScreen(bloc: qr, protocol: protocol)),
+    );
+    protocol.add(const PairingProtocolStarted(_Command()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Check activation after administrator confirms'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pairing activated.'), findsOneWidget);
+    expect(find.textContaining('bearer'), findsNothing);
+  });
 }
 
 final class _Scanner implements PairingQrScanner {
@@ -121,7 +145,9 @@ final class _Command implements PairingProtocolCommand {
 }
 
 final class _PendingProtocol implements PairingProtocolPort {
-  const _PendingProtocol();
+  const _PendingProtocol([this.request]);
+
+  final PairingActivationRequest? request;
 
   @override
   Future<PairingPendingMaterial> establish(
@@ -132,6 +158,7 @@ final class _PendingProtocol implements PairingProtocolPort {
       sendKey: Uint8List(32),
       receiveKey: Uint8List(32),
     ),
+    activationRequest: request,
     onDispose: () {},
   );
 }
@@ -141,4 +168,17 @@ final class _Vault implements PairingDirectionalKeyVault {
 
   @override
   Future<void> save(PairingDirectionalKeys keys) async {}
+}
+
+final class _ActivationRequest implements PairingActivationRequest {
+  @override
+  void dispose() {}
+}
+
+final class _Activation implements PairingActivationPort {
+  const _Activation();
+
+  @override
+  Future<PairingActivationOutcome> activate(PairingActivationRequest request) async =>
+      PairingActivationOutcome.activated;
 }

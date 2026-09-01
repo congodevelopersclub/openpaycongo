@@ -5,8 +5,8 @@ info:
   description: |
     Laravel contract. It does not claim every endpoint is implemented.
     Pairing QR issuance, v2 completion to pending_confirmation, verified-administrator confirmation,
-    and server-side encrypted credential delivery are current slices. Mobile activation consumption,
-    pairing status, and active mobile envelopes remain planned.
+    server-side encrypted credential delivery, and Android activation consumption are current slices.
+    Pairing status and active mobile envelopes remain planned.
     V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
     wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
 servers:

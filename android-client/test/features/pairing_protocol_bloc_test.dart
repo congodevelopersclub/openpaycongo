@@ -309,6 +309,30 @@ void main() {
       expect(vault.receiveKey, storedReceiveKey);
     },
   );
+
+  test('confirmation activation exposes only redacted activated state', () async {
+    final _ActivationRequest request = _ActivationRequest();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _ActivationProtocol(request),
+      vault: _Vault(),
+      activation: const _Activation(PairingActivationOutcome.activated),
+    );
+    addTearDown(bloc.close);
+    final Future<PairingProtocolState> activated = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolActivated,
+    );
+    final Future<PairingProtocolState> awaiting = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await awaiting;
+    bloc.add(const PairingActivationRequested());
+
+    expect(await activated, isA<PairingProtocolActivated>());
+    expect(request.disposed, isTrue);
+    expect(bloc.state.toString(), isNot(contains('bearer')));
+  });
 }
 
 PairingV2Response _response({
@@ -448,4 +472,30 @@ final class _Vault implements PairingDirectionalKeyVault {
     sendKey = Uint8List.fromList(keys.sendKey);
     receiveKey = Uint8List.fromList(keys.receiveKey);
   }
+}
+
+final class _ActivationProtocol implements PairingProtocolPort {
+  const _ActivationProtocol(this.request);
+  final PairingActivationRequest request;
+
+  @override
+  Future<PairingPendingMaterial> establish(PairingProtocolCommand command) async => PairingPendingMaterial(
+    serverSas: '482901',
+    keys: PairingDirectionalKeys(sendKey: Uint8List(32), receiveKey: Uint8List(32)),
+    activationRequest: request,
+    onDispose: () {},
+  );
+}
+
+final class _ActivationRequest implements PairingActivationRequest {
+  var disposed = false;
+  @override
+  void dispose() => disposed = true;
+}
+
+final class _Activation implements PairingActivationPort {
+  const _Activation(this.outcome);
+  final PairingActivationOutcome outcome;
+  @override
+  Future<PairingActivationOutcome> activate(PairingActivationRequest request) async => outcome;
 }

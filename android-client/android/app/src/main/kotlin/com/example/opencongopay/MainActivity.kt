@@ -30,6 +30,7 @@ import com.congodeveloperclub.opencongopay.pairing.PairingQrScanGate
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
 import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyStorageException
 import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyVault
+import com.congodeveloperclub.opencongopay.pairing.PairingActivationException
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -46,6 +47,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val pairingQrTrustChannelName = "openpaycongo/pairing_qr_trust"
     private val pairingQrScannerChannelName = "openpaycongo/pairing_qr_scanner"
     private val pairingDirectionalKeysChannelName = "openpaycongo/pairing_directional_keys"
+    private val pairingActivationChannelName = "openpaycongo/pairing_activation"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
@@ -80,6 +82,8 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handlePairingQrScannerCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingDirectionalKeysChannelName)
             .setMethodCallHandler(::handlePairingDirectionalKeyCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingActivationChannelName)
+            .setMethodCallHandler(::handlePairingActivationCall)
     }
 
     override fun onResume() {
@@ -284,6 +288,40 @@ class MainActivity : FlutterFragmentActivity() {
             } finally {
                 sendKey.fill(0)
                 receiveKey.fill(0)
+            }
+        }
+    }
+
+    private fun handlePairingActivationCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "consume") {
+            result.notImplemented()
+            return
+        }
+        val arguments = call.arguments as? Map<*, *>
+        val intent = arguments?.get("intent_id") as? ByteArray
+        val nonce = arguments?.get("nonce") as? ByteArray
+        val ciphertext = arguments?.get("ciphertext") as? ByteArray
+        if (arguments == null || arguments.keys != setOf("intent_id", "nonce", "ciphertext") ||
+            intent == null || nonce == null || ciphertext == null
+        ) {
+            intent?.fill(0)
+            nonce?.fill(0)
+            ciphertext?.fill(0)
+            result.error("recovery_required", "Pairing activation recovery is required", null)
+            return
+        }
+        pairingDirectionalKeyTasks.execute {
+            try {
+                PairingDirectionalKeyVault(applicationContext).consumeActivation(intent, nonce, ciphertext)
+                mainHandler.post { result.success("activated") }
+            } catch (_: PairingActivationException) {
+                mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }
+            } catch (_: Exception) {
+                mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }
+            } finally {
+                intent.fill(0)
+                nonce.fill(0)
+                ciphertext.fill(0)
             }
         }
     }

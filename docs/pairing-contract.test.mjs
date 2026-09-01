@@ -41,7 +41,9 @@ test('ADR 004 fixes v2 crypto boundary and slice boundary', async () => {
   assert.match(adr, /XChaCha20-Poly1305-IETF/i);
   assert.match(adr, /raw X25519 scalar multiplication, custom HKDF.*OpenSSL/i);
   assert.match(adr, /Laravel implements QR v2 issuance, completion\/replay, verified-administrator SAS confirmation, and server activation delivery/i);
-  assert.match(adr, /Mobile activation-envelope retrieval, native durable credential consumption.*remain unimplemented/i);
+  assert.match(adr, /the app retrieves only the opaque activation envelope over strict HTTPS without redirects/i);
+  assert.match(adr, /official libsodium XChaCha20-Poly1305 implementation/i);
+  assert.match(adr, /post-activation encrypted transport remain unimplemented/i);
   assert.match(adr, /openpaycongo\/pairing\/activation-response\/v2/i);
   assert.match(adr, /0x002b.*exact 43-byte UTF-8 domain field/i);
   assert.match(adr, /no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation/i);
@@ -162,7 +164,7 @@ test('legacy v1 pairing assets are gone; v2 test plan remains', async () => {
   await access(asset('pairing-v2-test-plan.md'), constants.R_OK);
 });
 
-test('OpenAPI exposes confirmed server pairing slices and keeps phone activation planned', async () => {
+test('OpenAPI exposes confirmed pairing slices and keeps active envelopes planned', async () => {
   await SwaggerParser.validate(asset('openapi.yaml').pathname);
   const openapi = YAML.parse(await readFile(asset('openapi.yaml'), 'utf8'));
   const complete = openapi.paths['/v1/pairing/complete'].post;
