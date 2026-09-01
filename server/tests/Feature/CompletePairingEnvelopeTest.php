@@ -8,6 +8,7 @@ use App\Models\Organization;
 use App\Models\PairingIntent;
 use App\Pairing\KeyProtector;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -186,6 +187,29 @@ final class CompletePairingEnvelopeTest extends TestCase
                 ->assertJsonPath('code', 'pairing_rate_limited');
         } finally {
             RateLimiter::clear($limitKey);
+        }
+    }
+
+    public function test_completion_returns_retryable_503_when_atomic_rate_limit_admission_is_busy(): void
+    {
+        $limitKey = 'pairing.complete:'.hash('sha256', '127.0.0.1');
+        $lock = Cache::lock($limitKey.':admission', 5);
+        self::assertTrue($lock->get());
+        $payload = [
+            'intent_id' => $this->base64Url(random_bytes(16)),
+            'client_public_key' => $this->base64Url(random_bytes(32)),
+            'nonce' => $this->base64Url(random_bytes(24)),
+            'ciphertext' => $this->base64Url(random_bytes(48)),
+        ];
+
+        try {
+            $this->postJson('/v1/pairing/complete', $payload)
+                ->assertStatus(503)
+                ->assertHeader('Content-Type', 'application/problem+json')
+                ->assertHeader('Cache-Control', 'no-store, private')
+                ->assertJsonPath('code', 'pairing_request_failed');
+        } finally {
+            $lock->release();
         }
     }
 
