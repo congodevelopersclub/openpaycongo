@@ -1,7 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:opencongopay/features/pairing/presentation/pairing_protocol_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_qr_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_qr_verification_screen.dart';
+import 'package:opencongopay/features/pairing/presentation/pairing_v2_crypto.dart';
 
 void main() {
   test(
@@ -53,6 +57,38 @@ void main() {
       expect(find.text('Continue pairing'), findsNothing);
     },
   );
+
+  testWidgets('shows only SAS while administrator confirmation is mandatory', (
+    WidgetTester tester,
+  ) async {
+    final PairingQrBloc qr = PairingQrBloc(trustStore: const _Store());
+    final PairingProtocolBloc protocol = PairingProtocolBloc(
+      protocol: const _PendingProtocol(),
+      vault: const _Vault(),
+    );
+    addTearDown(qr.close);
+    addTearDown(protocol.close);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PairingQrVerificationScreen(bloc: qr, protocol: protocol),
+      ),
+    );
+    protocol.add(const PairingProtocolStarted(_Command()));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('482931'), findsOneWidget);
+    expect(
+      find.textContaining('Administrator confirmation is mandatory'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('A verified QR starts encrypted pairing'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('not active'), findsOneWidget);
+    expect(find.text('Scan pairing QR'), findsOneWidget);
+  });
 }
 
 final class _Scanner implements PairingQrScanner {
@@ -75,4 +111,34 @@ final class _Store implements PairingQrTrustStore {
   Future<PairingQrPinWrite> persistVerifiedFingerprint(
     String fingerprint,
   ) async => const PairingQrPinWrite.alreadyStored();
+}
+
+final class _Command implements PairingProtocolCommand {
+  const _Command();
+
+  @override
+  void dispose() {}
+}
+
+final class _PendingProtocol implements PairingProtocolPort {
+  const _PendingProtocol();
+
+  @override
+  Future<PairingPendingMaterial> establish(
+    PairingProtocolCommand command,
+  ) async => PairingPendingMaterial(
+    serverSas: '482931',
+    keys: PairingDirectionalKeys(
+      sendKey: Uint8List(32),
+      receiveKey: Uint8List(32),
+    ),
+    onDispose: () {},
+  );
+}
+
+final class _Vault implements PairingDirectionalKeyVault {
+  const _Vault();
+
+  @override
+  Future<void> save(PairingDirectionalKeys keys) async {}
 }
