@@ -167,6 +167,42 @@ void main() {
     expect(secret, everyElement(0));
     expect(command.takeCredential, throwsA(isA<StateError>()));
   });
+
+  test('does not extend the completion deadline after an unknown outcome',
+      () async {
+    final KeyPair server = sodium.crypto.kx.keyPair();
+    final Uint8List secret = Uint8List.fromList(List<int>.filled(32, 5));
+    final _DelayedTransientFailureTransport transport =
+        _DelayedTransientFailureTransport();
+    final PairingV2CompletionCommand command =
+        PairingV2CompletionCommand.fromVerifiedQr(
+          endpoint: 'https://pairing.example.test/v1/pairing/complete',
+          intentId: Uint8List(16),
+          serverKeyAgreementPublicKey: server.publicKey,
+          pairingSecret: secret,
+        );
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: PairingV2CompletionProtocol(
+        sodium: sodium,
+        transport: transport,
+        completionDeadline: const Duration(milliseconds: 5),
+      ),
+      vault: _Vault(),
+    );
+    addTearDown(() async {
+      await bloc.close();
+      server.dispose();
+    });
+    final Future<PairingProtocolState> state = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolRecoveryRequired,
+    );
+
+    bloc.add(PairingProtocolStarted(command));
+
+    expect(await state, isA<PairingProtocolRecoveryRequired>());
+    expect(transport.calls, 1);
+    expect(secret, everyElement(0));
+  });
 }
 
 final class _ServerTransport implements PairingV2CompletionTransport {
@@ -285,6 +321,18 @@ final class _TransientFailureTransport implements PairingV2CompletionTransport {
     return Future<PairingV2Response>.error(
       const PairingV2CompletionTransientFailure(),
     );
+  }
+}
+
+final class _DelayedTransientFailureTransport
+    implements PairingV2CompletionTransport {
+  var calls = 0;
+
+  @override
+  Future<PairingV2Response> complete(Uri endpoint, PairingV2Request request) async {
+    calls += 1;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    throw const PairingV2CompletionTransientFailure();
   }
 }
 

@@ -183,10 +183,15 @@ final class DartIoPairingV2CompletionTransport
 /// Concrete protocol port. It transfers keys only after encrypted response
 /// authentication; BLoC saves them then exposes server SAS for confirmation.
 final class PairingV2CompletionProtocol implements PairingProtocolPort {
-  PairingV2CompletionProtocol({required this.sodium, required this.transport});
+  PairingV2CompletionProtocol({
+    required this.sodium,
+    required this.transport,
+    this.completionDeadline = const Duration(seconds: 15),
+  });
 
   final SodiumSumo sodium;
   final PairingV2CompletionTransport transport;
+  final Duration completionDeadline;
 
   static const int _maximumCompletionAttempts = 2;
 
@@ -221,9 +226,18 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
     Uri endpoint,
     PairingV2Request request,
   ) async {
+    final Stopwatch deadline = Stopwatch()..start();
     for (var attempt = 0; attempt < _maximumCompletionAttempts; attempt += 1) {
+      final Duration remaining = completionDeadline - deadline.elapsed;
+      if (remaining <= Duration.zero) {
+        throw const PairingV2CompletionTransientFailure();
+      }
       try {
-        return await transport.complete(endpoint, request);
+        return await transport.complete(endpoint, request).timeout(remaining);
+      } on TimeoutException {
+        if (attempt + 1 == _maximumCompletionAttempts) {
+          throw const PairingV2CompletionTransientFailure();
+        }
       } on PairingV2CompletionTransientFailure {
         if (attempt + 1 == _maximumCompletionAttempts) rethrow;
       }
