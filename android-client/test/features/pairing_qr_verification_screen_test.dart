@@ -1,11 +1,8 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_protocol_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_qr_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_qr_verification_screen.dart';
-import 'package:opencongopay/features/pairing/presentation/pairing_v2_crypto.dart';
 
 void main() {
   test(
@@ -64,7 +61,6 @@ void main() {
     final PairingQrBloc qr = PairingQrBloc(trustStore: const _Store());
     final PairingProtocolBloc protocol = PairingProtocolBloc(
       protocol: const _PendingProtocol(),
-      vault: const _Vault(),
     );
     addTearDown(qr.close);
     addTearDown(protocol.close);
@@ -96,7 +92,6 @@ void main() {
     final PairingQrBloc qr = PairingQrBloc(trustStore: const _Store());
     final PairingProtocolBloc protocol = PairingProtocolBloc(
       protocol: _PendingProtocol(_ActivationRequest()),
-      vault: const _Vault(),
       activation: const _Activation(),
     );
     addTearDown(qr.close);
@@ -154,20 +149,9 @@ final class _PendingProtocol implements PairingProtocolPort {
     PairingProtocolCommand command,
   ) async => PairingPendingMaterial(
     serverSas: '482931',
-    keys: PairingDirectionalKeys(
-      sendKey: Uint8List(32),
-      receiveKey: Uint8List(32),
-    ),
     activationRequest: request,
     onDispose: () {},
   );
-}
-
-final class _Vault implements PairingDirectionalKeyVault {
-  const _Vault();
-
-  @override
-  Future<void> save(PairingDirectionalKeys keys) async {}
 }
 
 final class _ActivationRequest implements PairingActivationRequest {
