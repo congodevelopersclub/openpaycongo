@@ -102,7 +102,7 @@ Exact retry of saved request bytes returns same stored encrypted `201` response;
 
 ## Current implementation boundary
 
-Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. It does not implement administrator SAS display/decision, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or recovery. Follow-up slices must not describe these as available.
+Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while explicitly marking the device inactive. It does not implement administrator SAS display/decision on the server, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or recovery. Follow-up slices must not describe these as available.
 
 ## Active mobile envelope contract
 

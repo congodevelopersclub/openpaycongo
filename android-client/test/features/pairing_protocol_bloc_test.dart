@@ -250,6 +250,39 @@ void main() {
       expect(vault.sendKey, isNotNull);
     },
   );
+
+  test(
+    'pending confirmation rejects a new command without replacing its keys or SAS',
+    () async {
+      final _Protocol protocol = _Protocol();
+      final _Vault vault = _Vault();
+      final PairingProtocolBloc bloc = PairingProtocolBloc(
+        protocol: protocol,
+        vault: vault,
+      );
+      addTearDown(bloc.close);
+      final _TrackedCommand rejected = _TrackedCommand();
+      final Future<PairingProtocolState> pending = bloc.stream.firstWhere(
+        (PairingProtocolState state) =>
+            state is PairingProtocolAwaitingConfirmation,
+      );
+
+      bloc.add(const PairingProtocolStarted(_Command()));
+      final PairingProtocolAwaitingConfirmation state =
+          await pending as PairingProtocolAwaitingConfirmation;
+      final Uint8List storedSendKey = Uint8List.fromList(vault.sendKey!);
+      final Uint8List storedReceiveKey = Uint8List.fromList(vault.receiveKey!);
+
+      bloc.add(PairingProtocolStarted(rejected));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(protocol.calls, 1);
+      expect(rejected.disposed, isTrue);
+      expect(bloc.state, same(state));
+      expect(vault.sendKey, storedSendKey);
+      expect(vault.receiveKey, storedReceiveKey);
+    },
+  );
 }
 
 PairingV2Response _response({
@@ -311,18 +344,22 @@ String _base64Url(Uint8List value) =>
 
 final class _Protocol implements PairingProtocolPort {
   bool disposed = false;
+  var calls = 0;
 
   @override
   Future<PairingPendingMaterial> establish(
     PairingProtocolCommand command,
-  ) async => PairingPendingMaterial(
-    serverSas: '482901',
-    keys: PairingDirectionalKeys(
-      sendKey: Uint8List.fromList(List<int>.filled(32, 1)),
-      receiveKey: Uint8List.fromList(List<int>.filled(32, 2)),
-    ),
-    onDispose: () => disposed = true,
-  );
+  ) async {
+    calls += 1;
+    return PairingPendingMaterial(
+      serverSas: '482901',
+      keys: PairingDirectionalKeys(
+        sendKey: Uint8List.fromList(List<int>.filled(32, 1)),
+        receiveKey: Uint8List.fromList(List<int>.filled(32, 2)),
+      ),
+      onDispose: () => disposed = true,
+    );
+  }
 }
 
 final class _Command implements PairingProtocolCommand {

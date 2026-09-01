@@ -93,7 +93,7 @@ final class PairingProtocolBloc
     PairingProtocolStarted event,
     Emitter<PairingProtocolState> emit,
   ) async {
-    if (_startActive) {
+    if (_startActive || state is PairingProtocolAwaitingConfirmation) {
       event.command.dispose();
       return;
     }
