@@ -2,6 +2,7 @@ FROM nginx:alpine@sha256:1f25fedd50aec27413031afb3a4f8ee4effcc9d843f6a76e81bfa92
 
 # Keep the web tier on the exact OpenSSL remediation used by the FPM image.
 RUN apk add --no-cache --upgrade \
+        expat=2.8.4-r0 \
         libcrypto3=3.5.8-r0 \
         libssl3=3.5.8-r0 \
         openssl=3.5.8-r0
