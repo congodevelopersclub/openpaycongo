@@ -5,8 +5,8 @@ info:
   description: |
     Laravel contract. It does not claim every endpoint is implemented.
     Pairing QR issuance, v2 completion to pending_confirmation, verified-administrator confirmation,
-    server-side encrypted credential delivery, and Android activation consumption are current slices.
-    Pairing status and active mobile envelopes remain planned.
+    server-side encrypted credential delivery, Android activation consumption, and the Laravel half of
+    encrypted mobile deposit envelopes are current slices. The Android network adapter remains pending.
     V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
     wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
 servers:
@@ -251,6 +251,47 @@ paths:
             Cache-Control: { $ref: '#/components/headers/PairingNoStore' }
         '404': { $ref: '#/components/responses/PairingUnavailable' }
         default: { $ref: '#/components/responses/PairingUnavailable' }
+  /mobile/envelopes:
+    post:
+      summary: Submit one paired-phone deposit in a directional encrypted envelope
+      operationId: storeMobileEnvelope
+      x-openpay-status: implemented-server-slice
+      description: No bearer credential is accepted. Possession of the client-to-server directional pairing key authenticates the envelope. See docs/mobile-envelope-v1.md for the normative wire contract.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MobileEnvelopeRequest' }
+      responses:
+        '201':
+          description: Encrypted result for a newly recorded provider deposit
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MobileEnvelopeNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileEnvelopeResult' }
+        '200':
+          description: Encrypted idempotent replay result
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MobileEnvelopeNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileEnvelopeResult' }
+        '409':
+          description: Encrypted provider-reference conflict result
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MobileEnvelopeNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileEnvelopeResult' }
+        '404':
+          description: Indistinguishable malformed, unknown, stale, unauthenticated, or invalid envelope
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MobileEnvelopeNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileEnvelopeUnavailable' }
   /v1/analytics/sales:
     get:
       summary: Read a bounded tenant sales projection derived from immutable ledger events
@@ -506,6 +547,34 @@ components:
             ledger:ack: Acknowledge application of a pull cursor
             analytics:read: Read the authenticated merchant tenant's bounded ready sales projection
   schemas:
+    MobileEnvelopeRequest:
+      type: object
+      additionalProperties: false
+      required: [version, installation_id, counter, nonce, ciphertext]
+      properties:
+        version: { type: integer, const: 1 }
+        installation_id: { type: string, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' }
+        counter:
+          type: string
+          maxLength: 19
+          pattern: '^[1-9][0-9]*$'
+          description: Canonical positive decimal counter from 1 through 9223372036854775807.
+        nonce: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+        ciphertext: { type: string, minLength: 22, maxLength: 16384, pattern: '^[A-Za-z0-9_-]+$' }
+    MobileEnvelopeResult:
+      type: object
+      additionalProperties: false
+      required: [version, nonce, ciphertext]
+      properties:
+        version: { type: integer, const: 1 }
+        nonce: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' }
+        ciphertext: { type: string, minLength: 22, pattern: '^[A-Za-z0-9_-]+$' }
+    MobileEnvelopeUnavailable:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, const: mobile_envelope_unavailable }
     PairingConfirmationState:
       oneOf:
         - $ref: '#/components/schemas/PairingConfirmationPending'
@@ -574,6 +643,9 @@ components:
         adapter: { type: string }
         implementation: { type: string }
   headers:
+    MobileEnvelopeNoStore:
+      required: true
+      schema: { type: string, const: 'no-store, private' }
     PairingNoStore:
       required: true
       schema: { type: string, const: 'private, no-store' }

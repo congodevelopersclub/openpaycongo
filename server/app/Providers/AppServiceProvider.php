@@ -17,6 +17,7 @@ use App\Policies\DepositPolicy;
 use App\Security\EstablishedFinancialOperatorMfaSession;
 use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -69,6 +70,13 @@ class AppServiceProvider extends ServiceProvider
         ]);
         Passport::tokensExpireIn(now()->addMinutes(15));
         RateLimiter::for('mobile-api', static fn (Request $request): Limit => Limit::perMinute(60)->by((string) $request->user('mobile')?->getAuthIdentifier()));
+        RateLimiter::for('mobile-envelope', static function (Request $request): Limit {
+            return Limit::perMinute(60)
+                ->by('mobile-envelope:'.$request->ip())
+                ->response(static function (Request $request, array $headers): JsonResponse {
+                    return response()->json(['code' => 'mobile_envelope_unavailable'], 404, ['Cache-Control' => 'no-store, private']);
+                });
+        });
         Gate::policy(Deposit::class, DepositPolicy::class);
     }
 }
