@@ -52,6 +52,18 @@ abstract interface class PairingQrCredentialSink {
   Future<void> accept(PairingQrCompletionCredential credential);
 }
 
+abstract interface class PairingQrVerifier {
+  Future<PairingQrVerification?> parseAndVerify(String input);
+}
+
+final class _DefaultPairingQrVerifier implements PairingQrVerifier {
+  const _DefaultPairingQrVerifier();
+
+  @override
+  Future<PairingQrVerification?> parseAndVerify(String input) =>
+      PairingQrVerification.parseAndVerify(input);
+}
+
 /// Typed QR handoff. No raw-QR representation.
 ///
 /// Only [PairingQrCredentialSink] receives this. Never log, serialize, retain
@@ -203,8 +215,10 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
     required this.trustStore,
     this.scanner,
     this.credentialSink,
+    PairingQrVerifier? verifier,
     DateTime Function()? now,
-  }) : _now = now ?? DateTime.now,
+  }) : verifier = verifier ?? const _DefaultPairingQrVerifier(),
+       _now = now ?? DateTime.now,
        super(const PairingQrIdle()) {
     on<PairingQrScanRequested>(_requestScan);
     on<PairingQrScanned>(_scan);
@@ -213,6 +227,7 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
   final PairingQrTrustStore trustStore;
   final PairingQrScanner? scanner;
   final PairingQrCredentialSink? credentialSink;
+  final PairingQrVerifier verifier;
   final DateTime Function() _now;
   int _scanGeneration = 0;
   bool _scanRequestActive = false;
@@ -256,13 +271,15 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
     Emitter<PairingQrState> emit,
   ) async {
     final int generation = ++_scanGeneration;
-    final _PairingQr? qr = await _PairingQr.parseAndVerify(event.value);
+    final PairingQrVerification? qr = await verifier.parseAndVerify(
+      event.value,
+    );
+    if (generation != _scanGeneration) return;
     if (qr == null) {
       emit(const PairingQrRejected(PairingQrRejection.malformed));
       return;
     }
     try {
-      if (generation != _scanGeneration) return;
       if (!qr.expiresAt.isAfter(_now().toUtc())) {
         emit(const PairingQrRejected(PairingQrRejection.expired));
         return;
@@ -295,8 +312,8 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
       }
       final PairingQrCredentialSink? sink = credentialSink;
       if (sink != null) {
-        final PairingQrCompletionCredential credential =
-            qr.completionCredential();
+        final PairingQrCompletionCredential credential = qr
+            .completionCredential();
         try {
           await sink.accept(credential);
         } on Object {
@@ -315,8 +332,8 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
   }
 }
 
-final class _PairingQr {
-  const _PairingQr({
+final class PairingQrVerification {
+  const PairingQrVerification._({
     required this.endpoint,
     required this.intentId,
     required this.expiresAt,
@@ -345,7 +362,7 @@ final class _PairingQr {
   final Uint8List pairingSecret;
   final PairingQrTrustMode trustMode;
 
-  static Future<_PairingQr?> parseAndVerify(String input) async {
+  static Future<PairingQrVerification?> parseAndVerify(String input) async {
     if (input.length > 4096) return null;
     final Object decoded;
     try {
@@ -449,7 +466,7 @@ final class _PairingQr {
         return null;
       }
       if (!verified) return null;
-      final _PairingQr qr = _PairingQr(
+      final PairingQrVerification qr = PairingQrVerification._(
         endpoint: endpoint,
         intentId: intentIdBytes,
         expiresAt: expiry,

@@ -108,78 +108,78 @@ void main() {
     expect(store.lookups, 0);
   });
 
-  test('first use starts only provisional SAS flow without pin persistence',
-      () async {
-    final String qr = await _firstUseQr();
-    final _FirstUseStore store = _FirstUseStore();
-    final _RecordingCredentialSink sink = _RecordingCredentialSink();
-    final PairingQrBloc bloc = PairingQrBloc(
-      trustStore: store,
-      credentialSink: sink,
-      now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
-    );
-    final Future<PairingQrState> result = bloc.stream.first;
+  test(
+    'first use starts only provisional SAS flow without pin persistence',
+    () async {
+      final String qr = await _firstUseQr();
+      final _FirstUseStore store = _FirstUseStore();
+      final _RecordingCredentialSink sink = _RecordingCredentialSink();
+      final PairingQrBloc bloc = PairingQrBloc(
+        trustStore: store,
+        credentialSink: sink,
+        now: () => DateTime.utc(2026, 8, 10, 9, 31, 59),
+      );
+      final Future<PairingQrState> result = bloc.stream.first;
 
-    bloc.add(PairingQrScanned(qr));
+      bloc.add(PairingQrScanned(qr));
 
-    final PairingQrAccepted state = await result as PairingQrAccepted;
-    expect(state.trustMode, PairingQrTrustMode.firstUseRequiresSas);
-    expect(sink.receivedExpectedMaterial, isTrue);
-    expect(store.persistCalls, 0);
-    await bloc.close();
-  });
+      final PairingQrAccepted state = await result as PairingQrAccepted;
+      expect(state.trustMode, PairingQrTrustMode.firstUseRequiresSas);
+      expect(sink.receivedExpectedMaterial, isTrue);
+      expect(store.persistCalls, 0);
+      await bloc.close();
+    },
+  );
 
-  test('hands typed credential to pairing infrastructure, never BLoC state',
-      () async {
-    final _RecordingCredentialSink sink = _RecordingCredentialSink();
-    final PairingQrBloc bloc = PairingQrBloc(
-      trustStore: _MatchingPinStore(),
-      credentialSink: sink,
-      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
-    );
-    final Future<PairingQrState> result = bloc.stream.first;
+  test(
+    'hands typed credential to pairing infrastructure, never BLoC state',
+    () async {
+      final _RecordingCredentialSink sink = _RecordingCredentialSink();
+      final PairingQrBloc bloc = PairingQrBloc(
+        trustStore: _MatchingPinStore(),
+        credentialSink: sink,
+        now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+      );
+      final Future<PairingQrState> result = bloc.stream.first;
 
-    bloc.add(const PairingQrScanned(_signedQr));
+      bloc.add(const PairingQrScanned(_signedQr));
 
-    final PairingQrState state = await result;
-    expect(state, isA<PairingQrAccepted>());
-    expect(
-      state.toString(),
-      isNot(contains('QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8')),
-    );
-    expect(sink.credential, isA<PairingQrCompletionCredential>());
-    expect(
-      sink.credential!.materialize,
-      throwsA(isA<StateError>()),
-    );
-    expect(sink.receivedExpectedMaterial, isTrue);
-    final PairingQrCompletionMaterial material = sink.material!;
-    expect(material.intentId, everyElement(0));
-    expect(material.serverKeyAgreementPublicKey, everyElement(0));
-    expect(material.pairingSecret, everyElement(0));
-    await bloc.close();
-  });
+      final PairingQrState state = await result;
+      expect(state, isA<PairingQrAccepted>());
+      expect(
+        state.toString(),
+        isNot(contains('QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8')),
+      );
+      expect(sink.credential, isA<PairingQrCompletionCredential>());
+      expect(sink.credential!.materialize, throwsA(isA<StateError>()));
+      expect(sink.receivedExpectedMaterial, isTrue);
+      final PairingQrCompletionMaterial material = sink.material!;
+      expect(material.intentId, everyElement(0));
+      expect(material.serverKeyAgreementPublicKey, everyElement(0));
+      expect(material.pairingSecret, everyElement(0));
+      await bloc.close();
+    },
+  );
 
-  test('wipes credential when pairing infrastructure rejects handoff',
-      () async {
-    final _FailingCredentialSink sink = _FailingCredentialSink();
-    final PairingQrBloc bloc = PairingQrBloc(
-      trustStore: _MatchingPinStore(),
-      credentialSink: sink,
-      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
-    );
-    final Future<PairingQrState> result = bloc.stream.first;
+  test(
+    'wipes credential when pairing infrastructure rejects handoff',
+    () async {
+      final _FailingCredentialSink sink = _FailingCredentialSink();
+      final PairingQrBloc bloc = PairingQrBloc(
+        trustStore: _MatchingPinStore(),
+        credentialSink: sink,
+        now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+      );
+      final Future<PairingQrState> result = bloc.stream.first;
 
-    bloc.add(const PairingQrScanned(_signedQr));
+      bloc.add(const PairingQrScanned(_signedQr));
 
-    expect(await result, isA<PairingQrRejected>());
-    expect(sink.credential, isA<PairingQrCompletionCredential>());
-    expect(
-      sink.credential!.materialize,
-      throwsA(isA<StateError>()),
-    );
-    await bloc.close();
-  });
+      expect(await result, isA<PairingQrRejected>());
+      expect(sink.credential, isA<PairingQrCompletionCredential>());
+      expect(sink.credential!.materialize, throwsA(isA<StateError>()));
+      await bloc.close();
+    },
+  );
 
   test(
     'rejects pin conflict and fails closed when trust lookup fails',
@@ -212,14 +212,14 @@ void main() {
     );
     final List<PairingQrState> states = <PairingQrState>[];
     final Completer<void> accepted = Completer<void>();
-    final StreamSubscription<PairingQrState> subscription = bloc.stream.listen(
-      (PairingQrState state) {
-        states.add(state);
-        if (state is PairingQrAccepted && !accepted.isCompleted) {
-          accepted.complete();
-        }
-      },
-    );
+    final StreamSubscription<PairingQrState> subscription = bloc.stream.listen((
+      PairingQrState state,
+    ) {
+      states.add(state);
+      if (state is PairingQrAccepted && !accepted.isCompleted) {
+        accepted.complete();
+      }
+    });
 
     bloc.add(const PairingQrScanned(_signedQr));
     await store.firstLookupStarted.future;
@@ -234,28 +234,69 @@ void main() {
     await bloc.close();
   });
 
-  test('drops an overlapping scan request without invalidating the first scan',
-      () async {
-    final _ControlledScanner scanner = _ControlledScanner();
-    final PairingQrBloc bloc = PairingQrBloc(
-      trustStore: _MatchingPinStore(),
-      scanner: scanner,
-      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
-    );
-    final Future<PairingQrState> result = bloc.stream.firstWhere(
-      (PairingQrState state) => state is PairingQrAccepted,
-    );
+  test(
+    'newest scan wins when an older signature rejection completes later',
+    () async {
+      final String invalidSignature = _signedQr.replaceFirst(
+        '"signature":"v4',
+        '"signature":"w4',
+      );
+      final _DelayedFirstVerifier verifier = _DelayedFirstVerifier(
+        invalidSignature,
+      );
+      final PairingQrBloc bloc = PairingQrBloc(
+        trustStore: _MatchingPinStore(),
+        verifier: verifier,
+        now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+      );
+      final List<PairingQrState> states = <PairingQrState>[];
+      final Completer<void> accepted = Completer<void>();
+      final StreamSubscription<PairingQrState> subscription = bloc.stream
+          .listen((PairingQrState state) {
+            states.add(state);
+            if (state is PairingQrAccepted && !accepted.isCompleted) {
+              accepted.complete();
+            }
+          });
 
-    bloc
-      ..add(const PairingQrScanRequested())
-      ..add(const PairingQrScanRequested());
-    await scanner.started.future;
-    scanner.complete(_signedQr);
+      bloc.add(PairingQrScanned(invalidSignature));
+      await verifier.firstStarted.future;
+      bloc.add(const PairingQrScanned(_signedQr));
+      await accepted.future;
+      verifier.completeFirst();
+      await Future<void>.delayed(Duration.zero);
 
-    expect(await result, isA<PairingQrAccepted>());
-    expect(scanner.calls, 1);
-    await bloc.close();
-  });
+      expect(states, hasLength(1));
+      expect(states.single, isA<PairingQrAccepted>());
+      await subscription.cancel();
+      await bloc.close();
+    },
+  );
+
+  test(
+    'drops an overlapping scan request without invalidating the first scan',
+    () async {
+      final _ControlledScanner scanner = _ControlledScanner();
+      final PairingQrBloc bloc = PairingQrBloc(
+        trustStore: _MatchingPinStore(),
+        scanner: scanner,
+        now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+      );
+      final Future<PairingQrState> result = bloc.stream.firstWhere(
+        (PairingQrState state) => state is PairingQrAccepted,
+      );
+
+      bloc
+        ..add(const PairingQrScanRequested())
+        ..add(const PairingQrScanRequested());
+      await scanner.started.future;
+      scanner.complete(_signedQr);
+
+      expect(await result, isA<PairingQrAccepted>());
+      expect(scanner.calls, 1);
+      await bloc.close();
+    },
+  );
 
   test('scanner cancellation returns the original BLoC to idle', () async {
     final _ControlledScanner scanner = _ControlledScanner();
@@ -275,22 +316,28 @@ void main() {
     await bloc.close();
   });
 
-  test('rechecks exact expiry after delayed trust lookup before acceptance', () async {
-    final _DelayedLookupStore store = _DelayedLookupStore();
-    DateTime now = DateTime.utc(2026, 9, 1, 11, 59, 59);
-    final PairingQrBloc bloc = PairingQrBloc(trustStore: store, now: () => now);
-    final Future<PairingQrState> result = bloc.stream.first;
+  test(
+    'rechecks exact expiry after delayed trust lookup before acceptance',
+    () async {
+      final _DelayedLookupStore store = _DelayedLookupStore();
+      DateTime now = DateTime.utc(2026, 9, 1, 11, 59, 59);
+      final PairingQrBloc bloc = PairingQrBloc(
+        trustStore: store,
+        now: () => now,
+      );
+      final Future<PairingQrState> result = bloc.stream.first;
 
-    bloc.add(const PairingQrScanned(_signedQr));
-    await store.lookupStarted.future;
-    now = DateTime.utc(2026, 9, 1, 12);
-    store.releaseLookup();
+      bloc.add(const PairingQrScanned(_signedQr));
+      await store.lookupStarted.future;
+      now = DateTime.utc(2026, 9, 1, 12);
+      store.releaseLookup();
 
-    final PairingQrState state = await result;
-    expect((state as PairingQrRejected).reason, PairingQrRejection.expired);
-    expect(state.toString(), isNot(contains(_signedQr)));
-    await bloc.close();
-  });
+      final PairingQrState state = await result;
+      expect((state as PairingQrRejected).reason, PairingQrRejection.expired);
+      expect(state.toString(), isNot(contains(_signedQr)));
+      await bloc.close();
+    },
+  );
 
   test('rejects endpoint grammar and non-canonical base64url', () async {
     final Map<String, Object?> endpoint =
@@ -359,9 +406,7 @@ Future<String> _firstUseQr() async {
     'server_key_agreement_public_key': _b64(
       List<int>.generate(32, (int index) => index + 48),
     ),
-    'pairing_secret': _b64(
-      List<int>.generate(32, (int index) => index + 64),
-    ),
+    'pairing_secret': _b64(List<int>.generate(32, (int index) => index + 64)),
     'trust_mode': 'first_use_requires_sas',
   };
   value['enrollment_signing_fingerprint'] = _b64(
@@ -421,12 +466,12 @@ final class _RecordingCredentialSink implements PairingQrCredentialSink {
     material = copied;
     try {
       receivedExpectedMaterial =
-          copied.endpoint == 'https://pairing.example.test/v1/pairing/complete' &&
+          copied.endpoint ==
+              'https://pairing.example.test/v1/pairing/complete' &&
           copied.pairingSecret.length == 32 &&
-          copied.pairingSecret
-              .asMap()
-              .entries
-              .every((MapEntry<int, int> entry) => entry.value == entry.key + 64);
+          copied.pairingSecret.asMap().entries.every(
+            (MapEntry<int, int> entry) => entry.value == entry.key + 64,
+          );
     } finally {
       copied.dispose();
     }
@@ -449,8 +494,32 @@ final class _MatchingPinStore implements PairingQrTrustStore {
       const PairingQrPinState.matching();
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      const PairingQrPinWrite.alreadyStored();
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.alreadyStored();
+}
+
+final class _DelayedFirstVerifier implements PairingQrVerifier {
+  _DelayedFirstVerifier(this.firstValue);
+
+  final String firstValue;
+  final Completer<void> firstStarted = Completer<void>();
+  final Completer<PairingQrVerification?> _firstResult =
+      Completer<PairingQrVerification?>();
+
+  @override
+  Future<PairingQrVerification?> parseAndVerify(String input) {
+    if (input == firstValue) {
+      firstStarted.complete();
+      return _firstResult.future;
+    }
+
+    return PairingQrVerification.parseAndVerify(input);
+  }
+
+  void completeFirst() {
+    _firstResult.complete(null);
+  }
 }
 
 final class _CountingStore implements PairingQrTrustStore {
@@ -464,8 +533,9 @@ final class _CountingStore implements PairingQrTrustStore {
   }
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      const PairingQrPinWrite.alreadyStored();
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.alreadyStored();
 }
 
 final class _NoPinStore implements PairingQrTrustStore {
@@ -475,8 +545,9 @@ final class _NoPinStore implements PairingQrTrustStore {
       const PairingQrPinState.none();
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      const PairingQrPinWrite.stored();
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.stored();
 }
 
 final class _FirstUseStore implements PairingQrTrustStore {
@@ -487,7 +558,9 @@ final class _FirstUseStore implements PairingQrTrustStore {
       const PairingQrPinState.none();
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async {
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async {
     persistCalls++;
     return const PairingQrPinWrite.stored();
   }
@@ -500,8 +573,9 @@ final class _ConflictStore implements PairingQrTrustStore {
       const PairingQrPinState.conflict();
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      const PairingQrPinWrite.conflict();
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.conflict();
 }
 
 final class _FailingStore implements PairingQrTrustStore {
@@ -511,8 +585,9 @@ final class _FailingStore implements PairingQrTrustStore {
       throw StateError('secure store unavailable');
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      throw StateError('secure store unavailable');
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => throw StateError('secure store unavailable');
 }
 
 final class _DelayedFirstLookupStore implements PairingQrTrustStore {
@@ -532,8 +607,9 @@ final class _DelayedFirstLookupStore implements PairingQrTrustStore {
   void releaseFirstLookup() => _firstLookupRelease.complete();
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      const PairingQrPinWrite.alreadyStored();
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.alreadyStored();
 }
 
 final class _DelayedLookupStore implements PairingQrTrustStore {
@@ -550,8 +626,9 @@ final class _DelayedLookupStore implements PairingQrTrustStore {
   void releaseLookup() => _lookupRelease.complete();
 
   @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String fingerprint) async =>
-      const PairingQrPinWrite.alreadyStored();
+  Future<PairingQrPinWrite> persistVerifiedFingerprint(
+    String fingerprint,
+  ) async => const PairingQrPinWrite.alreadyStored();
 }
 
 final class _ControlledScanner implements PairingQrScanner {
