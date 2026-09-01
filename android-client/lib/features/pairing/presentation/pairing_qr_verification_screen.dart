@@ -83,6 +83,7 @@ final class _Scaffold extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed:
                     qr is PairingQrScanning ||
+                        protocol is PairingProtocolEstablishing ||
                         protocol is PairingProtocolAwaitingConfirmation
                     ? null
                     : () => context.read<PairingQrBloc>().add(

@@ -43,7 +43,10 @@ void main() {
           serverKeyAgreementPublicKey: server.publicKey,
           pairingSecret: qrSecret,
         );
-    final Future<PairingProtocolState> state = bloc.stream.first;
+    final Future<PairingProtocolState> state = bloc.stream.firstWhere(
+      (PairingProtocolState state) =>
+          state is PairingProtocolAwaitingConfirmation,
+    );
     bloc.add(PairingProtocolStarted(command));
 
     final PairingProtocolAwaitingConfirmation result =
@@ -80,7 +83,9 @@ void main() {
       server.dispose();
     });
 
-    final Future<PairingProtocolState> state = bloc.stream.first;
+    final Future<PairingProtocolState> state = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolRecoveryRequired,
+    );
     bloc.add(PairingProtocolStarted(command));
 
     expect(await state, isA<PairingProtocolRecoveryRequired>());

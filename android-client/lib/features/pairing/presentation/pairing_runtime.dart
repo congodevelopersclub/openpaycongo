@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:sodium/sodium_sumo.dart';
 
 import '../infrastructure/platform_pairing_directional_key_vault.dart';
@@ -18,7 +20,9 @@ final class PairingRuntime {
   static Future<PairingRuntime> create({
     Future<SodiumSumo> Function()? initializeSodium,
   }) async {
-    final SodiumSumo sodium = await (initializeSodium ?? SodiumSumoInit.init)();
+    final FutureOr<SodiumSumo> Function() initialize =
+        initializeSodium ?? SodiumSumoInit.init;
+    final SodiumSumo sodium = await initialize();
     final PairingProtocolBloc protocol = PairingProtocolBloc(
       protocol: PairingV2CompletionProtocol(
         sodium: sodium,

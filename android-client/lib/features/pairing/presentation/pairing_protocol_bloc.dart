@@ -61,6 +61,12 @@ final class PairingProtocolIdle extends PairingProtocolState {
   const PairingProtocolIdle();
 }
 
+/// One encrypted completion is in flight. Another QR must wait for recovery
+/// or the authenticated administrator-confirmation result.
+final class PairingProtocolEstablishing extends PairingProtocolState {
+  const PairingProtocolEstablishing();
+}
+
 /// Server-issued SAS only. Pairing activates only after server confirmation.
 final class PairingProtocolAwaitingConfirmation extends PairingProtocolState {
   const PairingProtocolAwaitingConfirmation(this.sas);
@@ -81,11 +87,18 @@ final class PairingProtocolBloc
 
   final PairingProtocolPort protocol;
   final PairingDirectionalKeyVault vault;
+  var _startActive = false;
 
   Future<void> _start(
     PairingProtocolStarted event,
     Emitter<PairingProtocolState> emit,
   ) async {
+    if (_startActive) {
+      event.command.dispose();
+      return;
+    }
+    _startActive = true;
+    emit(const PairingProtocolEstablishing());
     PairingPendingMaterial? material;
     try {
       material = await protocol.establish(event.command);
@@ -96,6 +109,7 @@ final class PairingProtocolBloc
     } finally {
       material?.dispose();
       event.command.dispose();
+      _startActive = false;
     }
   }
 }

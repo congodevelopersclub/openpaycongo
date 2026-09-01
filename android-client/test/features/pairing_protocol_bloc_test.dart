@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -14,9 +15,7 @@ void main() {
   });
 
   test('QR credential owns and wipes its source secret', () {
-    final Uint8List sourceSecret = Uint8List.fromList(
-      List<int>.filled(32, 7),
-    );
+    final Uint8List sourceSecret = Uint8List.fromList(List<int>.filled(32, 7));
     final KeyPair server = sodium.crypto.kx.keyPair();
     final PairingV2QrCredential credential = PairingV2QrCredential(
       intentId: _base64Url(Uint8List(16)),
@@ -187,7 +186,10 @@ void main() {
       );
       addTearDown(bloc.close);
 
-      final Future<PairingProtocolState> result = bloc.stream.first;
+      final Future<PairingProtocolState> result = bloc.stream.firstWhere(
+        (PairingProtocolState state) =>
+            state is PairingProtocolAwaitingConfirmation,
+      );
       bloc.add(const PairingProtocolStarted(_Command()));
 
       final PairingProtocolAwaitingConfirmation state =
@@ -208,12 +210,46 @@ void main() {
     );
     addTearDown(bloc.close);
 
-    final Future<PairingProtocolState> result = bloc.stream.first;
+    final Future<PairingProtocolState> result = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolRecoveryRequired,
+    );
     bloc.add(const PairingProtocolStarted(_Command()));
 
     expect(await result, isA<PairingProtocolRecoveryRequired>());
     expect(protocol.disposed, isTrue);
   });
+
+  test(
+    'second pairing command is disposed before protocol or vault access',
+    () async {
+      final _DeferredProtocol protocol = _DeferredProtocol();
+      final _Vault vault = _Vault();
+      final PairingProtocolBloc bloc = PairingProtocolBloc(
+        protocol: protocol,
+        vault: vault,
+      );
+      addTearDown(bloc.close);
+      final _TrackedCommand first = _TrackedCommand();
+      final _TrackedCommand second = _TrackedCommand();
+      final Future<PairingProtocolState> done = bloc.stream.firstWhere(
+        (PairingProtocolState state) =>
+            state is PairingProtocolAwaitingConfirmation,
+      );
+
+      bloc.add(PairingProtocolStarted(first));
+      await protocol.started.future;
+      bloc.add(PairingProtocolStarted(second));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(protocol.calls, 1);
+      expect(second.disposed, isTrue);
+      expect(vault.sendKey, isNull);
+
+      protocol.complete();
+      expect(await done, isA<PairingProtocolAwaitingConfirmation>());
+      expect(vault.sendKey, isNotNull);
+    },
+  );
 }
 
 PairingV2Response _response({
@@ -294,6 +330,38 @@ final class _Command implements PairingProtocolCommand {
 
   @override
   void dispose() {}
+}
+
+final class _TrackedCommand implements PairingProtocolCommand {
+  var disposed = false;
+
+  @override
+  void dispose() => disposed = true;
+}
+
+final class _DeferredProtocol implements PairingProtocolPort {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+  var calls = 0;
+
+  @override
+  Future<PairingPendingMaterial> establish(
+    PairingProtocolCommand command,
+  ) async {
+    calls += 1;
+    started.complete();
+    await _release.future;
+    return PairingPendingMaterial(
+      serverSas: '482901',
+      keys: PairingDirectionalKeys(
+        sendKey: Uint8List.fromList(List<int>.filled(32, 1)),
+        receiveKey: Uint8List.fromList(List<int>.filled(32, 2)),
+      ),
+      onDispose: () {},
+    );
+  }
+
+  void complete() => _release.complete();
 }
 
 final class _Vault implements PairingDirectionalKeyVault {
