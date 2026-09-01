@@ -32,11 +32,14 @@ final class PairingIntent extends Model
         'server_receive_key',
         'server_send_key',
         'short_authentication_code',
+        'confirmation_request_digest',
+        'confirmation_decision',
     ];
 
     protected $hidden = [
         'protected_server_private_material', 'completion_request_digest', 'completion_result',
         'pairing_secret_digest', 'server_receive_key', 'server_send_key', 'short_authentication_code',
+        'confirmation_request_digest', 'confirmation_decision',
     ];
 
     protected function casts(): array

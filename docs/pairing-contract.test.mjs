@@ -40,7 +40,10 @@ test('ADR 004 fixes v2 crypto boundary and slice boundary', async () => {
   assert.match(adr, /crypto_kx/i);
   assert.match(adr, /XChaCha20-Poly1305-IETF/i);
   assert.match(adr, /raw X25519 scalar multiplication, custom HKDF.*OpenSSL/i);
-  assert.match(adr, /Current Laravel slice implements QR v2 issuance plus completion\/replay ending at `pending_confirmation`/i);
+  assert.match(adr, /Laravel implements QR v2 issuance, completion\/replay, verified-administrator SAS confirmation, and server activation delivery/i);
+  assert.match(adr, /Mobile activation-envelope retrieval, native durable credential consumption.*remain unimplemented/i);
+  assert.match(adr, /openpaycongo\/pairing\/activation-response\/v2/i);
+  assert.match(adr, /no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation/i);
   assert.match(adr, /No forward secrecy, post-compromise.*edge-compromise-resistance/i);
 });
 
@@ -158,7 +161,7 @@ test('legacy v1 pairing assets are gone; v2 test plan remains', async () => {
   await access(asset('pairing-v2-test-plan.md'), constants.R_OK);
 });
 
-test('OpenAPI exposes current initial v2 slice and marks future pairing APIs planned', async () => {
+test('OpenAPI exposes confirmed server pairing slices and keeps phone activation planned', async () => {
   await SwaggerParser.validate(asset('openapi.yaml').pathname);
   const openapi = YAML.parse(await readFile(asset('openapi.yaml'), 'utf8'));
   const complete = openapi.paths['/v1/pairing/complete'].post;
@@ -167,7 +170,22 @@ test('OpenAPI exposes current initial v2 slice and marks future pairing APIs pla
   assert.equal(complete.responses['429'].$ref, '#/components/responses/PairingRateLimited');
   assert.equal(
     openapi.paths['/v1/pairing/intents/{intent_id}/confirmation'].get['x-openpay-status'],
-    'planned',
+    'implemented-initial-slice',
+  );
+  assert.equal(
+    openapi.paths['/v1/pairing/intents/{intent_id}/confirmation'].post['x-openpay-status'],
+    'implemented-initial-slice',
+  );
+  const activation = openapi.paths['/v1/pairing/intents/{intent_id}/activation'].get;
+  assert.equal(activation['x-openpay-status'], 'implemented-server-slice');
+  assert.deepEqual(Object.keys(activation.responses), ['200', '404', '429', '503', 'default']);
+  assert.equal(
+    activation.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/PairingActivationEnvelope',
+  );
+  assert.deepEqual(
+    Object.keys(openapi.components.schemas.PairingActivationEnvelope.properties),
+    ['version', 'nonce', 'ciphertext'],
   );
   assert.equal(openapi.paths['/v1/pairing/device-status'].get['x-openpay-status'], 'planned');
 });

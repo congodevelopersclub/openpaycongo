@@ -40,6 +40,8 @@ final class CompletePairingEnvelope
                     'short_authentication_code' => null,
                     'completion_request_digest' => null,
                     'completion_result' => null,
+                    'confirmation_request_digest' => null,
+                    'confirmation_decision' => null,
                 ])->save();
 
                 return null;
@@ -123,6 +125,8 @@ final class CompletePairingEnvelope
                 'short_authentication_code' => null,
                 'completion_request_digest' => null,
                 'completion_result' => null,
+                'confirmation_request_digest' => null,
+                'confirmation_decision' => null,
             ])->save();
 
             return;

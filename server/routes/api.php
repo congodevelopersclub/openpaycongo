@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\CompletePairingEnvelopeController;
+use App\Http\Controllers\ConfirmPairingIntentController;
+use App\Http\Controllers\GetPairingActivationController;
+use App\Http\Controllers\GetPairingConfirmationController;
 use App\Http\Controllers\IssuePairingIntentController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Middleware\RequireClientCredentialsGrant;
@@ -48,6 +51,17 @@ Route::post('/mobile/deposits', StoreMobileDepositController::class)
 Route::post('/v1/pairing/intents', IssuePairingIntentController::class)
     ->middleware(['web', 'auth', 'pairing.issuer'])
     ->name('pairing.intents.store');
+
+Route::get('/v1/pairing/intents/{intent_id}/confirmation', GetPairingConfirmationController::class)
+    ->middleware(['web', 'auth', 'pairing.issuer'])
+    ->name('pairing.intents.confirmation.show');
+
+Route::post('/v1/pairing/intents/{intent_id}/confirmation', ConfirmPairingIntentController::class)
+    ->middleware(['web', 'auth', 'pairing.issuer'])
+    ->name('pairing.intents.confirmation.store');
+
+Route::get('/v1/pairing/intents/{intent_id}/activation', GetPairingActivationController::class)
+    ->name('pairing.intents.activation.show');
 
 Route::post('/v1/pairing/complete', CompletePairingEnvelopeController::class)
     ->name('pairing.complete');

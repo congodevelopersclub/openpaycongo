@@ -106,7 +106,30 @@ For an outcome whose completion status is unknown, the mobile client keeps the o
 
 ## Current implementation boundary
 
-Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while explicitly marking the device inactive. It does not implement administrator SAS display/decision on the server, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or durable pairing recovery. Follow-up slices must not describe these as available.
+Laravel implements QR v2 issuance, completion/replay, verified-administrator SAS confirmation, and server activation delivery. A matching administrator decision atomically creates one `SourceInstallation`, transfers its encrypted directional keys, creates one scope-limited Sanctum token, seals that token in an immutable activation envelope, and clears the intent's directional keys, SAS, completion replay result, and protected bootstrap material. An exact retry of the same administrator decision is idempotent; a different terminal decision conflicts. A mismatch or expiry creates no installation and clears temporary material.
+
+The mobile runtime still verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while marking the device inactive. The issued token is never returned to the administrator session. Mobile activation-envelope retrieval, native durable credential consumption, acknowledgement, active mobile envelopes, counter use, revocation, rotation, and durable pairing recovery remain unimplemented. Follow-up slices must not claim the phone is active merely because the server has sealed an activation envelope.
+
+## Activation delivery v2
+
+After matching SAS confirmation, the phone may retrieve `GET /v1/pairing/intents/{intent_id}/activation` without a bearer credential. The 128-bit random canonical `intent_id` is routing metadata only; a caller that knows it receives ciphertext, never a credential in cleartext. Unknown, revoked, expired, malformed, or incomplete activation resolves to the same no-store pairing-unavailable response. The response is immutable so an interrupted mobile retrieval can repeat safely:
+
+```json
+{"version":2,"nonce":"base64url-24-bytes","ciphertext":"base64url"}
+```
+
+`ciphertext` uses the existing server-send / phone-receive `crypto_kx` key and XChaCha20-Poly1305-IETF. Its plaintext is exactly UTF-8 JSON:
+
+```json
+{"version":2,"installation_id":"uuid","bearer_token":"sanctum-token"}
+```
+
+The activation-response AAD is unsigned-16-bit-big-endian length plus bytes:
+
+1. `openpaycongo/pairing/activation-response/v2`
+2. raw 16-byte `intent_id`
+
+This is a distinct protocol domain, but uses no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation. Laravel stores both protocol ciphertext and nonce with encrypted Eloquent casts; the raw Sanctum token exists only while the server creates and seals the envelope. The server does not log, serialize, return, or retain the token plaintext.
 
 ## Active mobile envelope contract
 
