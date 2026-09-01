@@ -274,12 +274,13 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
     final PairingQrVerification? qr = await verifier.parseAndVerify(
       event.value,
     );
-    if (generation != _scanGeneration) return;
     if (qr == null) {
+      if (generation != _scanGeneration) return;
       emit(const PairingQrRejected(PairingQrRejection.malformed));
       return;
     }
     try {
+      if (generation != _scanGeneration) return;
       if (!qr.expiresAt.isAfter(_now().toUtc())) {
         emit(const PairingQrRejected(PairingQrRejection.expired));
         return;

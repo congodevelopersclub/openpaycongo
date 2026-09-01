@@ -234,44 +234,40 @@ void main() {
     await bloc.close();
   });
 
-  test(
-    'newest scan wins when an older signature rejection completes later',
-    () async {
-      final String invalidSignature = _signedQr.replaceFirst(
-        '"signature":"v4',
-        '"signature":"w4',
-      );
-      final _DelayedFirstVerifier verifier = _DelayedFirstVerifier(
-        invalidSignature,
-      );
-      final PairingQrBloc bloc = PairingQrBloc(
-        trustStore: _MatchingPinStore(),
-        verifier: verifier,
-        now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
-      );
-      final List<PairingQrState> states = <PairingQrState>[];
-      final Completer<void> accepted = Completer<void>();
-      final StreamSubscription<PairingQrState> subscription = bloc.stream
-          .listen((PairingQrState state) {
-            states.add(state);
-            if (state is PairingQrAccepted && !accepted.isCompleted) {
-              accepted.complete();
-            }
-          });
+  test('newest scan wipes an older verified QR that completes later', () async {
+    final _DelayedFirstVerifier verifier = _DelayedFirstVerifier();
+    final PairingQrBloc bloc = PairingQrBloc(
+      trustStore: _MatchingPinStore(),
+      verifier: verifier,
+      now: () => DateTime.utc(2026, 9, 1, 11, 59, 59),
+    );
+    final List<PairingQrState> states = <PairingQrState>[];
+    final Completer<void> accepted = Completer<void>();
+    final StreamSubscription<PairingQrState> subscription = bloc.stream.listen((
+      PairingQrState state,
+    ) {
+      states.add(state);
+      if (state is PairingQrAccepted && !accepted.isCompleted) {
+        accepted.complete();
+      }
+    });
 
-      bloc.add(PairingQrScanned(invalidSignature));
-      await verifier.firstStarted.future;
-      bloc.add(const PairingQrScanned(_signedQr));
-      await accepted.future;
-      verifier.completeFirst();
-      await Future<void>.delayed(Duration.zero);
+    bloc.add(const PairingQrScanned(_signedQr));
+    await verifier.firstStarted.future;
+    bloc.add(const PairingQrScanned(_signedQr));
+    await accepted.future;
+    await verifier.completeFirst();
+    await Future<void>.delayed(Duration.zero);
 
-      expect(states, hasLength(1));
-      expect(states.single, isA<PairingQrAccepted>());
-      await subscription.cancel();
-      await bloc.close();
-    },
-  );
+    expect(states, hasLength(1));
+    expect(states.single, isA<PairingQrAccepted>());
+    final PairingQrVerification stale = verifier.firstVerification!;
+    expect(stale.intentId, everyElement(0));
+    expect(stale.serverKeyAgreementPublicKey, everyElement(0));
+    expect(stale.pairingSecret, everyElement(0));
+    await subscription.cancel();
+    await bloc.close();
+  });
 
   test(
     'drops an overlapping scan request without invalidating the first scan',
@@ -500,16 +496,16 @@ final class _MatchingPinStore implements PairingQrTrustStore {
 }
 
 final class _DelayedFirstVerifier implements PairingQrVerifier {
-  _DelayedFirstVerifier(this.firstValue);
-
-  final String firstValue;
   final Completer<void> firstStarted = Completer<void>();
   final Completer<PairingQrVerification?> _firstResult =
       Completer<PairingQrVerification?>();
+  String? _firstInput;
+  PairingQrVerification? firstVerification;
 
   @override
   Future<PairingQrVerification?> parseAndVerify(String input) {
-    if (input == firstValue) {
+    if (_firstInput == null) {
+      _firstInput = input;
       firstStarted.complete();
       return _firstResult.future;
     }
@@ -517,8 +513,11 @@ final class _DelayedFirstVerifier implements PairingQrVerifier {
     return PairingQrVerification.parseAndVerify(input);
   }
 
-  void completeFirst() {
-    _firstResult.complete(null);
+  Future<void> completeFirst() async {
+    final PairingQrVerification? verification =
+        await PairingQrVerification.parseAndVerify(_firstInput!);
+    firstVerification = verification;
+    _firstResult.complete(verification);
   }
 }
 
