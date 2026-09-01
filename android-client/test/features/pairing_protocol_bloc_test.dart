@@ -33,6 +33,32 @@ void main() {
     }
   });
 
+  test('wipes QR secret when client key generation fails', () {
+    final KeyPair server = sodium.crypto.kx.keyPair();
+    final Uint8List sourceSecret = Uint8List.fromList(List<int>.filled(32, 7));
+    final PairingV2QrCredential credential = PairingV2QrCredential(
+      intentId: _base64Url(Uint8List(16)),
+      serverPublicKey: _base64Url(server.publicKey),
+      pairingSecret: sourceSecret,
+    );
+
+    try {
+      expect(
+        () => PairingV2Exchange.begin(
+          sodium,
+          credential,
+          keyPairGenerator: const _ThrowingKeyPairGenerator(),
+        ),
+        throwsStateError,
+      );
+      expect(sourceSecret, Uint8List(32));
+      expect(credential.takePairingSecret, throwsStateError);
+    } finally {
+      credential.dispose();
+      server.dispose();
+    }
+  });
+
   test('libsodium crypto_kx matches client transmit with server receive', () {
     final KeyPair server = sodium.crypto.kx.keyPair();
     final KeyPair client = sodium.crypto.kx.keyPair();
@@ -360,6 +386,14 @@ final class _Protocol implements PairingProtocolPort {
       onDispose: () => disposed = true,
     );
   }
+}
+
+final class _ThrowingKeyPairGenerator implements PairingV2KeyPairGenerator {
+  const _ThrowingKeyPairGenerator();
+
+  @override
+  KeyPair generate(SodiumSumo sodium) =>
+      throw StateError('libsodium unavailable');
 }
 
 final class _Command implements PairingProtocolCommand {

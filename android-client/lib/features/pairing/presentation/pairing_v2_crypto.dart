@@ -97,6 +97,22 @@ final class PairingDirectionalKeys {
   }
 }
 
+/// Creates an ephemeral X25519 client key pair for one pairing exchange.
+///
+/// The narrow boundary keeps failure cleanup testable without reimplementing
+/// libsodium primitives.
+abstract interface class PairingV2KeyPairGenerator {
+  KeyPair generate(SodiumSumo sodium);
+}
+
+final class _SodiumPairingV2KeyPairGenerator
+    implements PairingV2KeyPairGenerator {
+  const _SodiumPairingV2KeyPairGenerator();
+
+  @override
+  KeyPair generate(SodiumSumo sodium) => sodium.crypto.kx.keyPair();
+}
+
 /// One pairing completion exchange.
 ///
 /// Uses libsodium's audited `crypto_kx` and XChaCha20-Poly1305-IETF APIs.
@@ -124,31 +140,36 @@ final class PairingV2Exchange {
 
   static PairingV2Exchange begin(
     SodiumSumo sodium,
-    PairingV2QrCredential credential,
-  ) {
+    PairingV2QrCredential credential, {
+    PairingV2KeyPairGenerator? keyPairGenerator,
+  }) {
     final Uint8List pairingSecret = credential.takePairingSecret();
     Uint8List intent = Uint8List(0);
     Uint8List serverPublicKey = Uint8List(0);
-    final KeyPair client = sodium.crypto.kx.keyPair();
+    KeyPair? client;
     SessionKeys? keys;
     Uint8List? nonce;
     Uint8List? requestAad;
     Uint8List? responseAad;
     try {
+      final KeyPair generatedClient =
+          (keyPairGenerator ?? const _SodiumPairingV2KeyPairGenerator())
+              .generate(sodium);
+      client = generatedClient;
       intent = _decodeExact(credential.intentId, 16);
       serverPublicKey = _decodeExact(
         credential.serverPublicKey,
         sodium.crypto.kx.publicKeyBytes,
       );
       keys = sodium.crypto.kx.clientSessionKeys(
-        clientPublicKey: client.publicKey,
-        clientSecretKey: client.secretKey,
+        clientPublicKey: generatedClient.publicKey,
+        clientSecretKey: generatedClient.secretKey,
         serverPublicKey: serverPublicKey,
       );
       nonce = sodium.randombytes.buf(
         sodium.crypto.aeadXChaCha20Poly1305IETF.nonceBytes,
       );
-      requestAad = _requestAad(intent, client.publicKey);
+      requestAad = _requestAad(intent, generatedClient.publicKey);
       responseAad = _completionResponseAad(intent);
       final Uint8List cipherText = sodium.crypto.aeadXChaCha20Poly1305IETF
           .encrypt(
@@ -159,7 +180,7 @@ final class PairingV2Exchange {
           );
       final PairingV2Request request = PairingV2Request(
         intentId: credential.intentId,
-        clientPublicKey: _encode(client.publicKey),
+        clientPublicKey: _encode(generatedClient.publicKey),
         nonce: _encode(nonce),
         ciphertext: _encode(cipherText),
       );
@@ -181,7 +202,7 @@ final class PairingV2Exchange {
       responseAad?.fillRange(0, responseAad.length, 0);
       keys?.dispose();
       // crypto_kx copied client secret into directional session keys.
-      client.dispose();
+      client?.dispose();
     }
   }
 

@@ -64,6 +64,8 @@ Phone checks JSON shape, endpoint, expiry, suite, `SHA-256(signing_public_key) =
 
 Phone creates fresh X25519 keypair then derives directional keys with `crypto_kx_client_session_keys(client_keypair, server_public_key)`. Server rebuilds ephemeral server keypair from protected seed then derives with `sodium_crypto_kx_server_session_keys(server_keypair, client_public_key)`.
 
+The phone transfers the QR secret into a cleanup scope before it asks libsodium to generate that keypair. A key-generation, RNG, or later exchange failure wipes the transferred secret; an exchange cannot be retried with it.
+
 `client_send_key == server_receive_key`. `client_receive_key == server_send_key`. Every directional key is 32 bytes and secret.
 
 Phone sends HTTPS `POST /v1/pairing/complete`:
