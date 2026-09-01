@@ -140,9 +140,15 @@ This section is normative for Android/Flutter pairing work. The wire protocol is
   storage. They cannot sign, sync, or authorize application calls before activation. Exact retry returns same
   encrypted `201`; never re-encrypt changed plaintext under saved key/nonce. Crash without durable retry state
   deletes pending material and requires new QR.
-- Confirmation, status bearer, activation, revocation, rotation, recovery, and active mobile envelopes are
-  planned. After activation, active bodies use directional XChaCha20-Poly1305 envelopes with locked monotonic
-  counter and canonical AAD; TLS terminator sees no cleartext business/PII body.
+- Laravel confirmation, activation delivery, and `POST /mobile/envelopes` v1 exist. Android #211 adds native
+  local deposit-envelope sealing only: foreground/unlock-gated, bounded payload, native send-key use,
+  Keystore-encrypted no-backup counter, canonical AAD, and opaque routing-safe result. HTTP delivery, encrypted
+  response handling, acknowledgement, revocation, rotation, and recovery remain follow-up work. After activation,
+  active bodies use directional XChaCha20-Poly1305 envelopes with locked monotonic counter and canonical AAD; TLS
+  terminator sees no cleartext business/PII body.
+- Initial pairing still derives directional-key copies in Dart and transfers them through a MethodChannel to native
+  storage. This is unresolved; do not claim an all-native directional-key lifecycle or that directional keys never
+  enter Dart. The native envelope use path does not return a key or bearer credential to Dart.
 - On mismatch, expiry, invalid completion, cancellation, or unrecoverable local state, delete pending secret,
   ephemeral key, directional keys, SAS, QR, nonce, ciphertext. Pin rotation/loss is not silent recovery.
 - Never put QR, SAS, ciphertext, directional keys, private keys, completion bodies, active envelope plaintext,
