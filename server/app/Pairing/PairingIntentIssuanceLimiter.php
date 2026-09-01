@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Pairing;
 
 use App\Models\User;
-use Illuminate\Support\Facades\RateLimiter;
 
 final class PairingIntentIssuanceLimiter
 {
@@ -13,15 +12,23 @@ final class PairingIntentIssuanceLimiter
 
     private const DECAY_SECONDS = 60;
 
+    public function __construct(private readonly PairingRateLimitAdmission $admission) {}
+
     public function consume(User $issuer): void
     {
         $key = $this->key($issuer);
 
-        if (RateLimiter::attempt($key, self::MAX_ATTEMPTS, static fn (): bool => true, self::DECAY_SECONDS)) {
+        try {
+            $retryAfter = $this->admission->consume($key, self::MAX_ATTEMPTS, self::DECAY_SECONDS);
+        } catch (PairingRateLimitAdmissionUnavailable) {
+            throw new PairingIntentRateLimited(1);
+        }
+
+        if ($retryAfter === null) {
             return;
         }
 
-        throw new PairingIntentRateLimited(RateLimiter::availableIn($key));
+        throw new PairingIntentRateLimited($retryAfter);
     }
 
     private function key(User $issuer): string

@@ -43,6 +43,98 @@ abstract interface class PairingQrScanner {
   Future<String?> scan();
 }
 
+/// Pairing-infrastructure boundary for verified, sensitive QR material.
+///
+/// BLoC calls this only after QR signature, expiry, trust checks. UI observes
+/// [PairingQrAccepted], never credential. Materialize, use, dispose copies
+/// before [accept] returns; BLoC disposes credential immediately afterward.
+abstract interface class PairingQrCredentialSink {
+  Future<void> accept(PairingQrCompletionCredential credential);
+}
+
+abstract interface class PairingQrVerifier {
+  Future<PairingQrVerification?> parseAndVerify(String input);
+}
+
+final class _DefaultPairingQrVerifier implements PairingQrVerifier {
+  const _DefaultPairingQrVerifier();
+
+  @override
+  Future<PairingQrVerification?> parseAndVerify(String input) =>
+      PairingQrVerification.parseAndVerify(input);
+}
+
+/// Typed QR handoff. No raw-QR representation.
+///
+/// Only [PairingQrCredentialSink] receives this. Never log, serialize, retain
+/// pairing secret beyond completion flow.
+final class PairingQrCompletionCredential {
+  PairingQrCompletionCredential._({
+    required this.endpoint,
+    required Uint8List intentId,
+    required Uint8List serverKeyAgreementPublicKey,
+    required Uint8List pairingSecret,
+  }) : _intentId = Uint8List.fromList(intentId),
+       _serverKeyAgreementPublicKey = Uint8List.fromList(
+         serverKeyAgreementPublicKey,
+       ),
+       _pairingSecret = Uint8List.fromList(pairingSecret);
+
+  final String endpoint;
+  final Uint8List _intentId;
+  final Uint8List _serverKeyAgreementPublicKey;
+  final Uint8List _pairingSecret;
+  var _disposed = false;
+
+  /// Creates short-lived copies for pairing infrastructure.
+  PairingQrCompletionMaterial materialize() {
+    if (_disposed) throw StateError('Pairing QR credential has been disposed');
+    return PairingQrCompletionMaterial._(
+      endpoint: endpoint,
+      intentId: _intentId,
+      serverKeyAgreementPublicKey: _serverKeyAgreementPublicKey,
+      pairingSecret: _pairingSecret,
+    );
+  }
+
+  /// Wipes material owned by this handoff after [PairingQrCredentialSink].
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _wipe(_intentId);
+    _wipe(_serverKeyAgreementPublicKey);
+    _wipe(_pairingSecret);
+  }
+}
+
+/// Completion-only sensitive material. Never place in BLoC state or widgets.
+final class PairingQrCompletionMaterial {
+  PairingQrCompletionMaterial._({
+    required this.endpoint,
+    required Uint8List intentId,
+    required Uint8List serverKeyAgreementPublicKey,
+    required Uint8List pairingSecret,
+  }) : intentId = Uint8List.fromList(intentId),
+       serverKeyAgreementPublicKey = Uint8List.fromList(
+         serverKeyAgreementPublicKey,
+       ),
+       pairingSecret = Uint8List.fromList(pairingSecret);
+
+  final String endpoint;
+  final Uint8List intentId;
+  final Uint8List serverKeyAgreementPublicKey;
+  final Uint8List pairingSecret;
+
+  /// Call when completion exchange finishes or aborts.
+  void dispose() {
+    _wipe(intentId);
+    _wipe(serverKeyAgreementPublicKey);
+    _wipe(pairingSecret);
+  }
+}
+
+void _wipe(Uint8List bytes) => bytes.fillRange(0, bytes.length, 0);
+
 sealed class PairingQrPinWrite {
   const PairingQrPinWrite();
   const factory PairingQrPinWrite.stored() = PairingQrPinStored;
@@ -70,7 +162,8 @@ final class PairingQrScanRequested extends PairingQrEvent {
   const PairingQrScanRequested();
 }
 
-/// Raw QR stays inside the BLoC handling path and never appears in state.
+/// Raw QR stays inside BLoC handling path; Dart strings cannot be wiped, so
+/// never persist, log, or place it in state.
 final class PairingQrScanned extends PairingQrEvent {
   const PairingQrScanned(this.value);
 
@@ -121,8 +214,11 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
   PairingQrBloc({
     required this.trustStore,
     this.scanner,
+    this.credentialSink,
+    PairingQrVerifier? verifier,
     DateTime Function()? now,
-  }) : _now = now ?? DateTime.now,
+  }) : verifier = verifier ?? const _DefaultPairingQrVerifier(),
+       _now = now ?? DateTime.now,
        super(const PairingQrIdle()) {
     on<PairingQrScanRequested>(_requestScan);
     on<PairingQrScanned>(_scan);
@@ -130,6 +226,8 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
 
   final PairingQrTrustStore trustStore;
   final PairingQrScanner? scanner;
+  final PairingQrCredentialSink? credentialSink;
+  final PairingQrVerifier verifier;
   final DateTime Function() _now;
   int _scanGeneration = 0;
   bool _scanRequestActive = false;
@@ -173,50 +271,80 @@ final class PairingQrBloc extends Bloc<PairingQrEvent, PairingQrState> {
     Emitter<PairingQrState> emit,
   ) async {
     final int generation = ++_scanGeneration;
-    final _PairingQr? qr = await _PairingQr.parseAndVerify(event.value);
-    if (generation != _scanGeneration) return;
+    final PairingQrVerification? qr = await verifier.parseAndVerify(
+      event.value,
+    );
     if (qr == null) {
+      if (generation != _scanGeneration) return;
       emit(const PairingQrRejected(PairingQrRejection.malformed));
       return;
     }
-    if (!qr.expiresAt.isAfter(_now().toUtc())) {
-      emit(const PairingQrRejected(PairingQrRejection.expired));
-      return;
-    }
-    final PairingQrPinState pin;
     try {
-      pin = await trustStore.lookup(qr.fingerprint);
-    } on Object {
       if (generation != _scanGeneration) return;
-      emit(const PairingQrRejected(PairingQrRejection.trustUnavailable));
-      return;
+      if (!qr.expiresAt.isAfter(_now().toUtc())) {
+        emit(const PairingQrRejected(PairingQrRejection.expired));
+        return;
+      }
+      final PairingQrPinState pin;
+      try {
+        pin = await trustStore.lookup(qr.fingerprint);
+      } on Object {
+        if (generation != _scanGeneration) return;
+        emit(const PairingQrRejected(PairingQrRejection.trustUnavailable));
+        return;
+      }
+      if (generation != _scanGeneration) return;
+      if (!qr.expiresAt.isAfter(_now().toUtc())) {
+        emit(const PairingQrRejected(PairingQrRejection.expired));
+        return;
+      }
+      final bool accepted = switch ((qr.trustMode, pin)) {
+        (PairingQrTrustMode.pinnedContinuity, PairingQrMatchingPin()) => true,
+        // This only starts the encrypted completion flow. It neither trusts
+        // the enrollment key nor activates the device: the independently
+        // compared SAS and a later authenticated server decision are still
+        // mandatory before either can happen.
+        (PairingQrTrustMode.firstUseRequiresSas, PairingQrNoPin()) => true,
+        _ => false,
+      };
+      if (!accepted) {
+        emit(const PairingQrRejected(PairingQrRejection.continuity));
+        return;
+      }
+      final PairingQrCredentialSink? sink = credentialSink;
+      if (sink != null) {
+        final PairingQrCompletionCredential credential = qr
+            .completionCredential();
+        try {
+          await sink.accept(credential);
+        } on Object {
+          if (generation != _scanGeneration) return;
+          emit(const PairingQrRejected(PairingQrRejection.trustUnavailable));
+          return;
+        } finally {
+          credential.dispose();
+        }
+      }
+      if (generation != _scanGeneration) return;
+      emit(PairingQrAccepted(qr.trustMode));
+    } finally {
+      qr.dispose();
     }
-    if (generation != _scanGeneration) return;
-    if (!qr.expiresAt.isAfter(_now().toUtc())) {
-      emit(const PairingQrRejected(PairingQrRejection.expired));
-      return;
-    }
-    final bool accepted = switch ((qr.trustMode, pin)) {
-      (PairingQrTrustMode.pinnedContinuity, PairingQrMatchingPin()) => true,
-      (PairingQrTrustMode.firstUseRequiresSas, PairingQrNoPin()) => false,
-      _ => false,
-    };
-    emit(
-      accepted
-          ? PairingQrAccepted(qr.trustMode)
-          : const PairingQrRejected(PairingQrRejection.continuity),
-    );
   }
 }
 
-final class _PairingQr {
-  const _PairingQr({
+final class PairingQrVerification {
+  const PairingQrVerification._({
+    required this.endpoint,
+    required this.intentId,
     required this.expiresAt,
     required this.fingerprint,
+    required this.serverKeyAgreementPublicKey,
+    required this.pairingSecret,
     required this.trustMode,
   });
 
-  static const String _suite = 'X25519-HKDF-SHA256-AES-256-GCM+Ed25519';
+  static const String _suite = 'X25519-crypto_kx-XChaCha20-Poly1305-IETF';
   static final RegExp _endpoint = RegExp(
     r'^https://(?=[^/:]*[a-z])[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?/v1/pairing/complete$',
   );
@@ -227,11 +355,15 @@ final class _PairingQr {
   static final RegExp _bytes32 = RegExp(r'^[A-Za-z0-9_-]{43}$');
   static final RegExp _bytes64 = RegExp(r'^[A-Za-z0-9_-]{86}$');
 
+  final String endpoint;
+  final Uint8List intentId;
   final DateTime expiresAt;
   final String fingerprint;
+  final Uint8List serverKeyAgreementPublicKey;
+  final Uint8List pairingSecret;
   final PairingQrTrustMode trustMode;
 
-  static Future<_PairingQr?> parseAndVerify(String input) async {
+  static Future<PairingQrVerification?> parseAndVerify(String input) async {
     if (input.length > 4096) return null;
     final Object decoded;
     try {
@@ -239,7 +371,7 @@ final class _PairingQr {
     } on FormatException {
       return null;
     }
-    if (decoded is! Map<Object?, Object?> || decoded.length != 11) return null;
+    if (decoded is! Map<Object?, Object?> || decoded.length != 12) return null;
     final Map<String, String>? fields = _fields(decoded);
     if (fields == null) return null;
     final String version = fields['version'] ?? '';
@@ -251,9 +383,10 @@ final class _PairingQr {
     final String fingerprint = fields['enrollment_signing_fingerprint'] ?? '';
     final String signingKey = fields['enrollment_signing_public_key'] ?? '';
     final String serverKey = fields['server_key_agreement_public_key'] ?? '';
+    final String pairingSecret = fields['pairing_secret'] ?? '';
     final String signature = fields['signature'] ?? '';
     final String mode = fields['trust_mode'] ?? '';
-    if (version != '1' ||
+    if (version != '2' ||
         endpoint.length > 512 ||
         !_endpoint.hasMatch(endpoint) ||
         !_bytes16.hasMatch(intentId) ||
@@ -263,6 +396,7 @@ final class _PairingQr {
         !_bytes32.hasMatch(fingerprint) ||
         !_bytes32.hasMatch(signingKey) ||
         !_bytes32.hasMatch(serverKey) ||
+        !_bytes32.hasMatch(pairingSecret) ||
         !_bytes64.hasMatch(signature)) {
       return null;
     }
@@ -273,55 +407,103 @@ final class _PairingQr {
     };
     if (trustMode == null) return null;
     final DateTime? expiry = _parseTimestamp(expires);
-    final Uint8List? intentIdBytes = _decode(intentId, 16);
-    final Uint8List? intentNonceBytes = _decode(intentNonce, 32);
-    final Uint8List? fingerprintBytes = _decode(fingerprint, 32);
-    final Uint8List? signingKeyBytes = _decode(signingKey, 32);
-    final Uint8List? serverKeyBytes = _decode(serverKey, 32);
-    final Uint8List? signatureBytes = _decode(signature, 64);
-    if (expiry == null ||
-        intentIdBytes == null ||
-        intentNonceBytes == null ||
-        fingerprintBytes == null ||
-        signingKeyBytes == null ||
-        serverKeyBytes == null ||
-        signatureBytes == null ||
-        !_sameBytes(sha256.convert(signingKeyBytes).bytes, fingerprintBytes)) {
-      return null;
-    }
-    final Uint8List transcript = _transcript(
-      version: version,
-      endpoint: endpoint,
-      intentId: intentIdBytes,
-      intentNonce: intentNonceBytes,
-      expires: expires,
-      algorithms: algorithms,
-      signingKey: signingKeyBytes,
-      fingerprint: fingerprintBytes,
-      serverKey: serverKeyBytes,
-      trustMode: mode,
-    );
-    final bool verified;
+    Uint8List? intentIdBytes;
+    Uint8List? intentNonceBytes;
+    Uint8List? fingerprintBytes;
+    Uint8List? signingKeyBytes;
+    Uint8List? serverKeyBytes;
+    Uint8List? pairingSecretBytes;
+    Uint8List? signatureBytes;
+    Uint8List? transcript;
+    var transferredToQr = false;
     try {
-      verified = await Ed25519().verify(
-        transcript,
-        signature: Signature(
-          signatureBytes,
-          publicKey: SimplePublicKey(
-            signingKeyBytes,
-            type: KeyPairType.ed25519,
-          ),
-        ),
+      intentIdBytes = _decode(intentId, 16);
+      intentNonceBytes = _decode(intentNonce, 32);
+      fingerprintBytes = _decode(fingerprint, 32);
+      signingKeyBytes = _decode(signingKey, 32);
+      serverKeyBytes = _decode(serverKey, 32);
+      pairingSecretBytes = _decode(pairingSecret, 32);
+      signatureBytes = _decode(signature, 64);
+      if (expiry == null ||
+          intentIdBytes == null ||
+          intentNonceBytes == null ||
+          fingerprintBytes == null ||
+          signingKeyBytes == null ||
+          serverKeyBytes == null ||
+          pairingSecretBytes == null ||
+          signatureBytes == null ||
+          !_sameBytes(
+            sha256.convert(signingKeyBytes).bytes,
+            fingerprintBytes,
+          )) {
+        return null;
+      }
+      transcript = _transcript(
+        version: version,
+        endpoint: endpoint,
+        intentId: intentIdBytes,
+        intentNonce: intentNonceBytes,
+        expires: expires,
+        algorithms: algorithms,
+        signingKey: signingKeyBytes,
+        fingerprint: fingerprintBytes,
+        serverKey: serverKeyBytes,
+        pairingSecret: pairingSecretBytes,
+        trustMode: mode,
       );
-    } on Object {
-      return null;
+      final bool verified;
+      try {
+        verified = await Ed25519().verify(
+          transcript,
+          signature: Signature(
+            signatureBytes,
+            publicKey: SimplePublicKey(
+              signingKeyBytes,
+              type: KeyPairType.ed25519,
+            ),
+          ),
+        );
+      } on Object {
+        return null;
+      }
+      if (!verified) return null;
+      final PairingQrVerification qr = PairingQrVerification._(
+        endpoint: endpoint,
+        intentId: intentIdBytes,
+        expiresAt: expiry,
+        fingerprint: fingerprint,
+        serverKeyAgreementPublicKey: serverKeyBytes,
+        pairingSecret: pairingSecretBytes,
+        trustMode: trustMode,
+      );
+      transferredToQr = true;
+      return qr;
+    } finally {
+      _wipeNullable(intentNonceBytes);
+      _wipeNullable(fingerprintBytes);
+      _wipeNullable(signingKeyBytes);
+      _wipeNullable(signatureBytes);
+      _wipeNullable(transcript);
+      if (!transferredToQr) {
+        _wipeNullable(intentIdBytes);
+        _wipeNullable(serverKeyBytes);
+        _wipeNullable(pairingSecretBytes);
+      }
     }
-    if (!verified) return null;
-    return _PairingQr(
-      expiresAt: expiry,
-      fingerprint: fingerprint,
-      trustMode: trustMode,
-    );
+  }
+
+  PairingQrCompletionCredential completionCredential() =>
+      PairingQrCompletionCredential._(
+        endpoint: endpoint,
+        intentId: intentId,
+        serverKeyAgreementPublicKey: serverKeyAgreementPublicKey,
+        pairingSecret: pairingSecret,
+      );
+
+  void dispose() {
+    _wipe(intentId);
+    _wipe(serverKeyAgreementPublicKey);
+    _wipe(pairingSecret);
   }
 
   static Map<String, String>? _fields(Map<Object?, Object?> value) {
@@ -335,6 +517,7 @@ final class _PairingQr {
       'enrollment_signing_fingerprint',
       'enrollment_signing_public_key',
       'server_key_agreement_public_key',
+      'pairing_secret',
       'signature',
       'trust_mode',
     };
@@ -365,10 +548,12 @@ final class _PairingQr {
   static Uint8List? _decode(String value, int length) {
     try {
       final Uint8List bytes = base64Url.decode(base64Url.normalize(value));
-      return bytes.length == length &&
-              base64UrlEncode(bytes).replaceAll('=', '') == value
-          ? bytes
-          : null;
+      if (bytes.length == length &&
+          base64UrlEncode(bytes).replaceAll('=', '') == value) {
+        return bytes;
+      }
+      _wipe(bytes);
+      return null;
     } on FormatException {
       return null;
     }
@@ -384,6 +569,7 @@ final class _PairingQr {
     required Uint8List signingKey,
     required Uint8List fingerprint,
     required Uint8List serverKey,
+    required Uint8List pairingSecret,
     required String trustMode,
   }) {
     final BytesBuilder result = BytesBuilder(copy: false);
@@ -398,6 +584,7 @@ final class _PairingQr {
       signingKey,
       fingerprint,
       serverKey,
+      pairingSecret,
       Uint8List.fromList(utf8.encode(trustMode)),
     ]) {
       result.add(<int>[field.length >> 8, field.length & 0xff]);
@@ -414,4 +601,8 @@ final class _PairingQr {
     }
     return difference == 0;
   }
+}
+
+void _wipeNullable(Uint8List? bytes) {
+  if (bytes != null) _wipe(bytes);
 }

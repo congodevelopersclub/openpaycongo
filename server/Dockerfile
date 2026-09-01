@@ -143,7 +143,8 @@ EXPOSE 9000
 
 FROM production AS production-contract
 
-RUN php -m | grep -qx pdo_pgsql \
+RUN php -m | grep -qx sodium \
+    && php -m | grep -qx pdo_pgsql \
     && php -m | grep -qx pdo_mysql \
     && php -m | grep -qx pdo_sqlite \
     && php -m | grep -qx pcntl \

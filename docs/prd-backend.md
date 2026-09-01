@@ -98,48 +98,35 @@ The API is a portability boundary, not an instruction to expose a database direc
 43. As an administrator, I want the same transcript-derived short code shown on my authenticated screen and phone, so that first-use substitution cannot activate a device.
 44. As an operator, I want unique completion reservations separated from completed invalid-proof attempts, so that bounded concurrent KMS outages neither exhaust the client's proof budget nor delete a recoverable intent key.
 
-The normative protocol is [ADR 004](adr-004-secure-device-enrollment.md). Laravel will implement pairing through Eloquent models, migrations, Form Requests, Policies, and transactional Actions. It deliberately has no completed HTTP or SQLite implementation: the current store cannot yet prove atomic intent consumption, unique tenant/install identity, pending administrator confirmation, cached replay response, and protected-root persistence. Filament/Livewire administration and key rotation are subsequent Laravel slices.
+The normative protocol is [ADR 004](adr-004-secure-device-enrollment.md). Laravel pairing uses Eloquent models, migrations, Form Requests, Policies, transactional Actions, and encrypted casts. Current initial slice issues QR v2 and completes/replays one encrypted request to `pending_confirmation`; it does not activate an installation or issue mobile authority. Filament/Livewire confirmation, activation, active envelopes, rotation, and recovery are follow-up slices.
 
-The QR references the long-lived OpenPay enrollment-signing identity, never CDN/TLS SPKI, but a key delivered only inside that QR is not independent authentication. Authenticated administrator context plus mandatory short-code confirmation provides the physical trust step. The hosting edge, administrator UI delivery, and OAuth session are trusted during bootstrap; compromise of any of them can replace the QR or authorize an attacker. Device signatures and request MACs remain portable across direct container, Cloudflare, and Vercel hosting after activation, but no edge-compromise resistance is claimed.
+The QR references enrollment-signing identity, never CDN/TLS SPKI, but key delivered inside QR is not independent authentication. Authenticated administrator context plus mandatory short-code comparison is physical trust step. Hosting edge, administrator UI delivery, and administrator session are trusted during bootstrap; compromise can replace QR or authorize attacker. Inner mobile envelope design protects future message bodies from TLS terminators after activation, but bootstrap has no edge-compromise resistance.
 
 ### Mobile pairing acceptance
 
 - The app rejects unknown QR fields, non-HTTPS or non-canonical endpoints, unsupported versions/suites,
   non-UTC-second expiry, expired intents, and malformed fixed-size values before performing key agreement.
-- Before consulting continuity/trust state, the app requires
-  `SHA-256(enrollment_signing_public_key) == enrollment_signing_fingerprint`, then verifies the Ed25519
-  signature over the exact canonical QR transcript. The shared signed-QR vector and every signed-field
-  mutation must pass on Android and any future mobile implementation.
+- Before consulting continuity/trust state, app requires
+  `SHA-256(enrollment_signing_public_key) == enrollment_signing_fingerprint`, then verifies Ed25519
+  signature over exact v2 QR transcript, including `pairing_secret`. `pairing-v2.fixture.json` and every
+  signed-field mutation must pass on Android and future clients.
 - The signed QR carries `first_use_requires_sas` or `pinned_continuity`. Pinned mode requires an existing
   matching fingerprint. First use is provisional physical-QR bootstrap and can never activate before the
   mandatory independently compared SAS. Missing pins and signing-key rotation require a new authenticated
   first-use/SAS ceremony; silent pin replacement is forbidden.
-- For each accepted intent the app generates a fresh X25519 keypair and a cryptographically random 96-bit
-  AES-GCM nonce. It never reuses a nonce with the same derived key. RNG failure aborts pairing. It separately
-  creates or loads a non-exportable long-term Ed25519 device-signing key; the ephemeral X25519 key never
-  substitutes for device authorship.
-- The app derives the labeled `c2s`, `s2c-aead`, `s2c-confirm`, `install-root`, and unbiased six-digit SAS
-  values from the canonical transcript. It verifies response AEAD and key confirmation before accepting the
-  server result. It never sends or receives the install root.
-- The install root is stored as pending only in Keystore-backed secure storage. Pending material cannot sign
-  in, MAC requests, or authorize sync. The phone must display the derived SAS and activation requires an
-  authenticated administrator to report an exact display match; mismatch revokes pairing and deletes pending
-  root material on both sides.
-- An exact completion retry reuses the exact saved request bytes, client ephemeral key, and nonce. It must not
-  re-encrypt changed plaintext under the same key/nonce. If the app crashes before durably saving that retry
-  state, it discards the pending root and requires a new QR rather than guessing recovery state.
-- If the phone is offline before completion, expiry ends the attempt and pending material is deleted. If it
-  receives `pending_confirmation` and then goes offline, it keeps the root unusable, keeps showing the SAS,
-  and reconciles authenticated state when online; `revoked` or `expired` deletes the root. After activation,
-  later server revocation likewise makes the root unusable and removes it according to platform guarantees.
-- The encrypted completion response carries a random 256-bit pairing-status bearer whose digest is persisted.
-  Over HTTPS the phone uses it, without administrator OAuth, to read pending/terminal state and idempotently
-  acknowledge only the exact terminal state. It authorizes no ledger or application operation. Wrong bearers
-  and all unavailable completion cases return one fixed 404 problem with no detail or category oracle.
-- QR, SAS, ciphertext, roots, private keys, and completion bodies never enter analytics, crash reports, logs,
-  notifications, backups, or screenshots retained by the app. Administrator issue/read/confirm responses are
-  `private, no-store`; every other pairing success and error carries the same cache directive, and the UI
-  clears pairing material when leaving the flow.
+- For each accepted intent app creates fresh X25519 pair then calls libsodium `crypto_kx_client_session_keys`.
+  It creates fresh random 24-byte XChaCha20-Poly1305 nonce, encrypts exactly QR 32-byte `pairing_secret`
+  with client-send key, and uses canonical completion AAD. RNG failure aborts pairing.
+- App decrypts response with client-receive key and canonical response AAD. Plaintext must exactly be
+  `pending_confirmation` plus six-digit SAS. Pending directional keys and SAS remain unusable for business
+  traffic until future confirmation/activation slice.
+- Exact retry reuses exact durable request bytes, client key, nonce, ciphertext; server returns same encrypted
+  `201` response. Changed request after consumption is unavailable. Crash before durable retry state deletes
+  pending material and requires new QR.
+- Offline before completion ends at expiry. Pending completion must not become active without administrator
+  SAS decision. Status, terminal acknowledgement, revocation, rotation, and recovery APIs remain future work.
+- QR, SAS, ciphertext, directional keys, private keys, and completion bodies never enter analytics, crash
+  reports, logs, notifications, backups, or retained screenshots. Every pairing response is `private, no-store`.
 
 ## Compact sales analytics slice
 

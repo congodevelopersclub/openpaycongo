@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openpaycongo.example/schemas/pairing-qr.schema.json",
-  "title": "One-time PairingIntent QR",
+  "title": "PairingIntent QR v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,11 +14,12 @@
     "enrollment_signing_fingerprint",
     "enrollment_signing_public_key",
     "server_key_agreement_public_key",
+    "pairing_secret",
+    "trust_mode",
     "signature"
-    ,"trust_mode"
   ],
   "properties": {
-    "version": { "const": "1" },
+    "version": { "const": "2" },
     "endpoint": {
       "type": "string",
       "format": "uri",
@@ -32,25 +33,17 @@
       "format": "date-time",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
     },
-    "algorithms": { "const": "X25519-HKDF-SHA256-AES-256-GCM+Ed25519" },
+    "algorithms": { "const": "X25519-crypto_kx-XChaCha20-Poly1305-IETF" },
     "enrollment_signing_fingerprint": { "$ref": "#/$defs/bytes32" },
     "enrollment_signing_public_key": { "$ref": "#/$defs/bytes32" },
     "server_key_agreement_public_key": { "$ref": "#/$defs/bytes32" },
-    "signature": { "$ref": "#/$defs/bytes64" },
-    "trust_mode": { "enum": ["first_use_requires_sas", "pinned_continuity"] }
+    "pairing_secret": { "$ref": "#/$defs/bytes32" },
+    "trust_mode": { "enum": ["first_use_requires_sas", "pinned_continuity"] },
+    "signature": { "$ref": "#/$defs/bytes64" }
   },
   "$defs": {
-    "bytes16": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{22}$"
-    },
-    "bytes32": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{43}$"
-    },
-    "bytes64": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{86}$"
-    }
+    "bytes16": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" },
+    "bytes32": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+    "bytes64": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
   }
 }

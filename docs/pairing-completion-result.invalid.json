@@ -1,0 +1,5 @@
+{
+  "state": "active",
+  "nonce": "too-short",
+  "ciphertext": "plaintext-short-authentication-code"
+}

@@ -47,11 +47,11 @@ final class IssuePairingIntentHttpTest extends TestCase
             ->assertJsonStructure([
                 'version', 'endpoint', 'intent_id', 'intent_nonce', 'expires_at', 'algorithms',
                 'enrollment_signing_fingerprint', 'enrollment_signing_public_key',
-                'server_key_agreement_public_key', 'trust_mode', 'signature',
+                'server_key_agreement_public_key', 'pairing_secret', 'trust_mode', 'signature',
             ])
             ->assertJsonMissing(['protected_server_private_material']);
         $this->assertPairingNoStore($response);
-        self::assertCount(11, $response->json());
+        self::assertCount(12, $response->json());
         self::assertSame($organization->getKey(), PairingIntent::query()->sole()->organization_id);
         self::assertNotSame(
             PairingIntent::query()->sole()->protected_server_private_material,

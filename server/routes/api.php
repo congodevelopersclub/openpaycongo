@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\CompletePairingEnvelopeController;
 use App\Http\Controllers\IssuePairingIntentController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Middleware\RequireClientCredentialsGrant;
@@ -47,6 +48,9 @@ Route::post('/mobile/deposits', StoreMobileDepositController::class)
 Route::post('/v1/pairing/intents', IssuePairingIntentController::class)
     ->middleware(['web', 'auth', 'pairing.issuer'])
     ->name('pairing.intents.store');
+
+Route::post('/v1/pairing/complete', CompletePairingEnvelopeController::class)
+    ->name('pairing.complete');
 
 Route::get('/services/identity', static function () {
     /** @var DeveloperApplication $application */

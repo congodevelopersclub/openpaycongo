@@ -1,189 +1,123 @@
-# ADR 004: Authenticated Diffie-Hellman device pairing
+# ADR 004: Non-ratcheting encrypted mobile enrollment
 
-Status: accepted protocol contract; Laravel implementation remains pending beyond the documented contract fixtures.
+Status: accepted.
 
-## Trust and public protocol
+This ADR is pairing contract v2. Deleted v1 `X25519-HKDF-SHA256-AES-256-GCM+Ed25519` schemas, vectors, proof, response, key-schedule files are not alternatives.
 
-X25519 creates shared key material; it does not authenticate either party. Trust begins when an already
-authenticated tenant administrator requests a short-lived `PairingIntent` and physically presents its QR
-to the phone. The QR is a temporary bearer credential and contains exactly:
+## Decision
 
-- version `1`, bounded HTTPS completion URL without userinfo, query, or fragment, 128-bit random intent ID,
-  expiry, and 256-bit intent nonce;
-- fixed suite `X25519-HKDF-SHA256-AES-256-GCM+Ed25519`;
-- fresh server X25519 public key; and
-- OpenPay enrollment-signing Ed25519 public key, SHA-256 fingerprint, and signature over the bounded QR
-  transcript; and
-- typed trust mode `first_use_requires_sas` or `pinned_continuity`.
+Pair by physical QR plus six-digit Short Authentication String (SAS). QR is out-of-band bootstrap material. Completion uses one libsodium key-exchange API plus XChaCha20-Poly1305-IETF. Later active mobile traffic uses directional encrypted envelopes. No ratchet.
 
-The signing key is a long-lived logical OpenPay identity, not CDN/TLS SPKI. A public key included only in
-the same QR does not independently authenticate that QR. Its signature provides continuity only when the
-fingerprint is already trusted through an independent channel. In `pinned_continuity`, a matching previously
-trusted fingerprint is required. In `first_use_requires_sas`, the self-consistent signed QR is accepted only
-when the local trust store reports no existing pin and the user grants explicit authenticated local recovery
-authorization. The trust store is consulted for both modes; zero-lookup fallback is forbidden. It is then
-provisional: the physical QR plus mandatory independently compared SAS is the bootstrap, and activation is
-impossible before the authenticated administrator confirms the exact match. Loss or planned replacement of a
-pin requires a new authenticated first-use/SAS ceremony; silent fallback from pinned continuity is forbidden.
-Automated enrollment-signing-key rotation and multi-device recovery remain out of this slice.
+Server: PHP ext-sodium. Mobile: maintained Sodium binding. Both use `crypto_kx` session-key APIs. Do not implement raw X25519 scalar multiplication, custom HKDF, custom nonce derivation, OpenSSL wire crypto, Laravel `Crypt`, or Composer crypto package for protocol encryption.
 
-The hosting edge and administrator UI delivery are trusted during bootstrap, together with the
-administrator OAuth session and physical QR handoff. Diffie-Hellman protects the pairing exchange after an
-authentic QR is received; it does not protect against a compromised hosting edge, administrator UI, or OAuth session
-that replaces the QR or authorizes an attacker. Cloudflare and Vercel may transport the protocol but are in
-this trusted bootstrap path. They do not independently establish device identity.
+QR issue and completion still use HTTPS. HTTPS protects endpoint routing and ordinary transport exposure; pairing and later mobile envelopes protect inner content from TLS terminator. Outer envelopes expose timing, size, route, installation-routing metadata.
 
-The mandatory short authentication code detects a transcript mismatch only when the administrator compares
-the phone display with an authentic server display. An independent display channel strengthens that check.
-A code delivered through the same hosting edge cannot detect malicious edge replacement because that edge
-can replace both the QR and administrator display. This slice therefore makes no edge-compromise resistance
-claim.
+## Bootstrap trust and limits
 
-The app validates HTTPS, version, expiry, suite, signature, and any previously trusted fingerprint. It
-generates a fresh X25519 key and a long-term non-exportable Ed25519 device signing key (hardware-backed
-where supported). Its outer completion contains the app X25519 public key and AES-256-GCM nonce. The
-bounded ciphertext contains install ID, device signing public key, and an Ed25519 proof over the normative
-device-proof transcript below. Tenant claims are server-bound to the intent and never accepted from QR or completion.
-Tenant and install IDs use only bounded ASCII letters, digits, hyphen, underscore, period, and colon so
-Supported SQL adapters do not reinterpret control characters, Unicode normalization, or separators.
-The completion URL grammar is exact: lowercase ASCII DNS with at least two labels, optional canonical decimal
-port 1-65535, and path `/v1/pairing/complete`; IP literals, userinfo, query, fragment, percent-encoding,
-alternate paths, and trailing slash are rejected identically by schema and application core.
+Authenticated administrator starts intent then physically presents QR. QR contains no organization id, customer data, API credential, SAS, or private key. Server derives organization from administrator session. QR must never enter logs, analytics, telemetry, crash reports, browser history, retained screenshots, notifications, or backups.
 
-## Key schedule and confirmation
+QR signature detects modification and continuity-pin mismatch. It is not independent authentication when signing key arrives inside QR. `first_use_requires_sas` stays provisional until administrator and phone compare same SAS. `pinned_continuity` additionally requires existing matching pin. Existing pin cannot silently downgrade. Compromised hosting edge, administrator UI, administrator session, or physical QR display can subvert bootstrap. No forward secrecy, post-compromise recovery, device-provenance, multi-device recovery, or edge-compromise-resistance claim.
 
-The parties use standard-library RFC 7748 X25519 and RFC 5869 HKDF-SHA256. The HKDF extract salt is the
-intent nonce. Separate labeled HKDF expands derive 32-byte `c2s`, `s2c-aead`, `s2c-confirm`, and
-`install-root` values plus a
-short-authentication-code value. Every label is bound to the digest of version, suite, intent ID/nonce,
-enrollment-signing fingerprint, both X25519 public keys, and label. `c2s` protects the proof;
-`s2c-aead` protects the response; `s2c-confirm` authenticates the key-confirmation value. The encrypted
-response contains only device ID, state, that HMAC-based key confirmation, and a random 256-bit pairing-status
-bearer. The bearer is generated by the server RNG, stored server-side only as a digest, and disclosed only
-inside authenticated `s2c-aead` ciphertext. The install root is never
-transmitted.
+One-time private material and QR secret must be destroyed after completion, expiry, cancellation, failure cleanup, or revocation. Re-pair/revoke/reset rotates pairwise keys. No per-message ratchet.
 
-All transcript fields are encoded as an unsigned 16-bit big-endian byte length followed by the raw bytes;
-text is UTF-8 and wire time is exactly UTC seconds (`YYYY-MM-DDTHH:MM:SSZ`) with no fractional seconds or
-offset. A complete transcript may not exceed 4096 bytes. Field order is normative:
+## QR v2
 
-- QR signature: `openpaycongo/pairing/qr`, version, endpoint, intent ID, intent nonce, expiry, suite,
-  enrollment-signing public key, enrollment-signing fingerprint, server X25519 public key, trust mode. Before any
-  trust-store lookup, the verifier must require `SHA-256(enrollment-signing public key)` to equal the
-  fingerprint, then verify the signature using that exact public key.
-  [The shared signed-QR vector](pairing-signed-qr.vector.json) is verified by the contract test suite; mutations of every
-  signed field must fail.
-- Completion AEAD AAD: `openpaycongo/pairing/completion-aad`, version, suite, intent ID, intent nonce,
-  enrollment-signing fingerprint, server X25519 public key, client X25519 public key.
-- Device proof signature: `openpaycongo/pairing/device-proof`, version, suite, intent ID, intent nonce,
-  enrollment-signing fingerprint, install ID, client X25519 public key, device Ed25519 public key.
-- HKDF info is the SHA-256 digest of: `openpaycongo/pairing/key`, version, suite, label, intent ID, intent
-  nonce, enrollment-signing fingerprint, server X25519 public key, client X25519 public key.
-- Response AEAD AAD: `openpaycongo/pairing/completion-response`, version, device ID. Key confirmation is
-  HMAC-SHA-256 under `s2c-confirm` over that same response AAD; AES-GCM uses `s2c-aead`.
+QR JSON has exactly fields defined by `pairing-qr.schema.json`:
 
-The encrypted proof and response plaintexts are constrained by
-[pairing-proof.schema.json](pairing-proof.schema.json) and
-[pairing-response-plaintext.schema.json](pairing-response-plaintext.schema.json). The shared
-[key-schedule vector](pairing-key-schedule.vector.json) is checked by the contract test suite.
-The [full protocol vector](pairing-protocol.vector.json) additionally fixes both X25519 keypairs, all HKDF
-outputs, Ed25519 device proof, c2s AES-GCM ciphertext, s2c AES-GCM ciphertext, and key confirmation.
+```json
+{
+  "version":"2",
+  "endpoint":"https://host/v1/pairing/complete",
+  "intent_id":"base64url-16-bytes",
+  "intent_nonce":"base64url-32-bytes",
+  "expires_at":"UTC-second",
+  "algorithms":"X25519-crypto_kx-XChaCha20-Poly1305-IETF",
+  "enrollment_signing_fingerprint":"base64url-32-bytes",
+  "enrollment_signing_public_key":"base64url-32-bytes",
+  "server_key_agreement_public_key":"base64url-32-bytes",
+  "pairing_secret":"base64url-32-bytes",
+  "trust_mode":"first_use_requires_sas|pinned_continuity",
+  "signature":"base64url-64-bytes"
+}
+```
 
-The short code is exactly six decimal digits including leading zeroes. To avoid modulo bias, the
-reference expands four bounded 32-bit candidates under the `short-authentication-code` label, accepts the
-first value below `4,294,000,000`, and reduces it modulo `1,000,000`; exhausting all four is a terminal
-derivation error. The checked-in deterministic vector derives code `638920`, c2s
-`09e1b7ee2effa3f217a3b4bcffd77d4d23a1b5e767ef367c202635234b4aaceb`, s2c-aead
-`99109ebbc3a8d5bcc3acc1e9a0af2770aba0f15235803418c0dbe9263b016242`, s2c-confirm
-`bc03af99db29687fe75b7e151051588679fc781c6e4ff17edaca899ce9e96435`, and install root
-`63967d168e639b9f5ea021d2b683c73a06142033f87973c5c35f6bb94581f003`.
+All binary fields are unpadded canonical base64url. Endpoint is lowercase ASCII DNS, optional canonical decimal port, exact `/v1/pairing/complete`; reject IP literals, userinfo, query, fragment, percent encoding, alternate path, trailing slash, upper-case host, non-UTC-second expiry.
 
-The phone stores its pending install root only in Keystore-backed secure storage and must not use it for
-requests before activation. It deletes pending material on mismatch, revocation, or expiry. The server
-protects its copy behind the deployment-master-key `KeyProtector` port before persistence. The derived six-digit short code
-is independently derived by the phone and shown by an authenticated administrator UI. It is display-only:
-the server never accepts the code itself as authentication or in the confirmation request. Completion creates only a
-`pending_confirmation` device; it must not authorize sync or request MACs until the administrator confirms
-that both displays match. The Laravel pairing Action implements the authenticated match/mismatch/timeout state transition.
-The HTTP handler and administrator UI remain the next vertical slice, so no deployed activation claim is made.
+Signature is Ed25519 over concatenated unsigned-16-bit-big-endian length plus bytes, in this order:
 
-The confirmation application API accepts only a typed verified administrator principal produced after OAuth
-verification. Tenant comes from that principal, never request JSON. Each decision includes a 128-bit request
-ID and a reason consistent with match or mismatch. The repository records actor, tenant, request ID, reason,
-decision, and server time. The first terminal decision wins; its exact request replay is idempotent, while a
-different or contradictory decision returns conflict, including under concurrency.
+1. `openpaycongo/pairing/qr`
+2. `version`
+3. `endpoint`
+4. raw `intent_id`
+5. raw `intent_nonce`
+6. `expires_at`
+7. `algorithms`
+8. raw `enrollment_signing_public_key`
+9. raw `enrollment_signing_fingerprint`
+10. raw `server_key_agreement_public_key`
+11. raw `pairing_secret`
+12. `trust_mode`
 
-The phone never needs administrator OAuth to learn the decision. It presents the pairing-status bearer over
-HTTPS to a dedicated status endpoint, which returns pending or terminal state without SAS. It acknowledges
-only the exact `active`, `revoked`, or `expired` terminal state; exact acknowledgement replay is idempotent.
-Wrong bearers and every unavailable enrollment condition use the same fixed 404 problem without `detail`.
-All pairing successes and errors require `Cache-Control: private, no-store`. This bearer authorizes pairing
-status only; it cannot authorize ledger sync or general application requests.
+Phone checks JSON shape, endpoint, expiry, suite, `SHA-256(signing_public_key) == fingerprint`, signature, trust mode, pin policy before key exchange. `intent_nonce` is signed intent metadata; v2 does not include it in completion or response AEAD AAD.
 
-`KeyProtector` accepts exactly 32-byte secret material plus bounded AAD and returns opaque protected material
-of at most 1024 bytes. The Laravel implementation uses the framework's application encrypter (`Crypt`) rather
-than a pairing-specific encryption format. It stores the exact domain-separated `(protocol, purpose, tenant,
-record ID)` AAD inside the Laravel-protected value and compares it in constant time after decryption. Malformed
-or oversized blobs, an AAD mismatch, and any Laravel decryption or integrity failure fail closed without
-returning partial plaintext. Application-key rotation follows Laravel's `APP_PREVIOUS_KEYS` mechanism; no
-pairing-specific key envelope or custom cryptography is introduced. The deterministic authenticated protector
-in historical tests is only a conformance fake; it is not a production protector.
+## Completion v2
 
-## Atomicity, replay, and limits
+Phone creates fresh X25519 keypair then derives directional keys with `crypto_kx_client_session_keys(client_keypair, server_public_key)`. Server rebuilds ephemeral server keypair from protected seed then derives with `sodium_crypto_kx_server_session_keys(server_keypair, client_public_key)`.
 
-- Intent lifetime is 30 seconds to 5 minutes; completed invalid-proof attempts are configured from 1 to 5.
-  In-flight proof work is independently capped at eight opaque reservations per intent.
-- One Laravel database transaction atomically consumes one intent, creates at most one pending device, protects the install
-  root, caches one encrypted result, and clears the protected ephemeral X25519 private key while preserving
-  non-secret replay metadata. It uniquely constrains intent ID and `(tenant_id, install_id)`.
-- Intent creation is insert-only: a random-ID collision leaves the original record unchanged and fails.
-- A `committed` outcome returns its result without error. Any proof, permanent protector, or known pre-commit failure runs a bounded
-  cleanup using a non-cancelled child context, atomically marks the uncommitted intent terminal, and clears its
-  protected ephemeral private key. Cleanup failure is internally observable while the public response remains
-  the fixed generic unavailable problem. Completion at or after expiry cannot commit.
-- The pairing Action reports `committed`, `not_committed`, or `unknown`. `not_committed` may abort safely;
-  `unknown` must reconcile by intent ID plus exact request digest and return the cached idempotent result when
-  present. It never blindly aborts an outcome that may already have committed.
-- KeyProtector dependency failures from either unsealing the intent key or sealing the install root are typed
-  retryable. The pairing Action atomically and idempotently releases that operation's unique 16-byte reservation,
-  so an infrastructure outage does not spend the client's bounded invalid-proof budget; the intent remains
-  subject to its original absolute expiry. Integrity, malformed-envelope, unknown-key, wrong-AAD, and tamper
-  failures are permanent and terminally clear the protected ephemeral key.
-- An exact completion-request digest retry returns the original encrypted result. A changed retry after
-  consumption receives the same generic response as unknown, expired, exhausted, or invalid input.
-- Every proof operation first receives a unique, fixed-size reservation under the independent in-flight bound.
-  Reservation alone never increments the invalid-proof counter. A completed invalid proof atomically converts
-  only its own reservation into one invalid attempt; retryable dependency cleanup releases only its own
-  reservation and repeated cleanup is idempotent. Reaching the in-flight bound rejects additional work without
-  clearing the intent key. Concurrent exact requests may receive the generic unavailable response while one
-  operation commits; a retry after that commit receives the cached encrypted result. Failure/completion races
-  never create two devices or exceed bounded proof work.
-- Expiry and attempt exhaustion destroy the protected ephemeral private key; mismatch or confirmation timeout
-  additionally destroys the protected install root and short code. A bounded cleanup operation examines at
-  most its configured page (maximum 100 candidates), performs the same destruction, and preserves replay
-  metadata. A stolen QR can race the legitimate phone, but cannot activate without administrator comparison
-  while the trusted bootstrap path remains intact.
-- Bodies, intent material, plaintext proof/root, ciphertext, and short code never enter logs, traces,
-  metrics labels, or problem details.
+The phone transfers the QR secret into a cleanup scope before it asks libsodium to generate that keypair. A key-generation, RNG, or later exchange failure wipes the transferred secret; an exchange cannot be retried with it.
 
-No forward-secrecy claim is made beyond using and deleting fresh intent X25519 private keys. Platform
-hardware attestation is also out of scope; the server proves device-key possession, not provenance.
+`client_send_key == server_receive_key`. `client_receive_key == server_send_key`. Every directional key is 32 bytes and secret.
 
-## After activation
+Phone sends HTTPS `POST /v1/pairing/complete`:
 
-Application requests use a later contract: HMAC over canonical method, path, UTC timestamp, random nonce,
-and body digest, with a bounded replay window and atomic nonce store. Offline ledger events additionally
-carry an Ed25519 device signature. This asymmetric signature is mandatory because a server holding the
-symmetric install root must not be able to masquerade as device authorship.
+```json
+{
+  "intent_id":"base64url-16-bytes",
+  "client_public_key":"base64url-32-bytes",
+  "nonce":"base64url-24-bytes",
+  "ciphertext":"base64url-of-48-decoded-bytes"
+}
+```
 
-## Architecture and persistence boundary
+`ciphertext` encrypts exactly raw 32-byte QR `pairing_secret` with XChaCha20-Poly1305-IETF, client-send key, 24-byte random nonce. Completion AAD is unsigned-16-bit-big-endian length plus bytes:
 
-Laravel owns pairing through Eloquent models, database migrations, Form Requests, Policies, Actions, Events,
-and queued listeners where asynchronous work is needed. The pairing Action owns transactional intent
-consumption, install creation, protected-root persistence, replay state, and terminal confirmation; controllers
-and Livewire components only delegate to it. SQLite support cannot yet prove the complete production transaction
-boundary, so this slice stops at the documented contract fixtures. Implementations must retain explicit bounds,
-simple control flow, fixed-size cryptographic values, paired checks, and no unbounded attempts or loops.
-Malformed external input remains a handled validation error, not an assertion.
+1. `openpaycongo/pairing/complete/v2`
+2. raw `intent_id`
+3. raw `client_public_key`
 
-Rotation remains deferred to [the ready follow-up issue](github-issue-pairing-rotation.md).
+Server row-locks pending unexpired intent, validates/decrypts envelope, constant-time compares SHA-256 secret digest, creates CSPRNG zero-padded six-digit SAS, persists encrypted directional keys and SAS, clears protected server seed and secret digest, then returns `201`:
+
+```json
+{
+  "state":"pending_confirmation",
+  "nonce":"base64url-24-bytes",
+  "ciphertext":"base64url-of-85-decoded-bytes"
+}
+```
+
+Result ciphertext encrypts exactly UTF-8 JSON `{"state":"pending_confirmation","short_authentication_code":"000000"}` with server-send key. Response AAD fields:
+
+1. `openpaycongo/pairing/complete-response/v2`
+2. raw `intent_id`
+
+Exact retry of saved request bytes returns same stored encrypted `201` response; it does not derive fresh keys, generate new SAS, or create a second pending pairing. Malformed, unknown, expired, altered, exhausted, or otherwise invalid completion returns indistinguishable fixed `404` pairing-unavailable problem. Failed proof authentication atomically consumes one of three per-intent attempts; the final failed proof terminally clears temporary material. The native per-IP completion limiter uses a Laravel cache lock around check-and-consume, atomically admitting at most ten requests per minute. With the default database cache, this is shared across workers. Lock-admission infrastructure failure returns generic no-store `503`; the phone makes its permitted exact retry without learning a failure category. Expiry cleanup locks and clears pages of at most 100 rows per transaction until no due pairing intents remain. Never return secret, directional key, SAS, organization id, failure category, or plaintext envelope. Every pairing response is `Cache-Control: private, no-store`.
+
+For an outcome whose completion status is unknown, the mobile client keeps the one live exchange and makes one immediate retry using the exact immutable four-field request only while the shared 15-second end-to-end budget remains. Unknown means the deadline elapses, the connection or HTTP framing fails, the server returns 408, 429, or 5xx, or a `201` response is oversized, truncated, or malformed before it can be authenticated. It never creates new keys, nonce, or ciphertext for that retry, and both attempts together never exceed the budget. A known non-`201` rejection and a second unknown result fail closed. A process restart before a valid response is not resumable in this initial slice; it destroys the exchange and requires a fresh QR. Durable retry recovery belongs to the recovery follow-up.
+
+## Current implementation boundary
+
+Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while explicitly marking the device inactive. It does not implement administrator SAS display/decision on the server, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or durable pairing recovery. Follow-up slices must not describe these as available.
+
+## Active mobile envelope contract
+
+Accepted design, not current endpoint implementation. Active installation messages use 24-byte random nonce plus XChaCha20-Poly1305-IETF under directional pair key. No per-message signature: AEAD authenticates sender holding directional key. No cleartext business or PII payload reaches Laravel before envelope authentication/decryption.
+
+```json
+{"version":2,"installation_id":"uuid","counter":1,"nonce":"base64url-24-bytes","ciphertext":"base64url"}
+```
+
+AAD uses length-prefixed `openpaycongo/mobile-envelope/v2`, installation routing id, uppercase HTTP method, canonical path, decimal counter. Counter is locked monotonic replay protection. Reject changed version, installation id, method, path, counter, nonce, ciphertext, or AAD. PHP and Flutter must prove this before release.
+
+## Interoperability evidence
+
+`pairing-v2.fixture.json` contains deterministic test-only QR/signing/KX/AEAD inputs and outputs. `pairing-v2-test-plan.md` is mandatory PHP/Flutter proof plan. Fixture values are never live material. Compatible client verifies QR signature and directional keys, encrypts/decrypts fixture envelopes, rejects one-field tampering.

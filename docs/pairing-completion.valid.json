@@ -1,7 +1,6 @@
 {
-  "version": "1",
-  "intent_id": "AAECAwQFBgcICQoLDA0ODw",
-  "client_key_agreement_public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-  "nonce": "AAECAwQFBgcICQoL",
-  "ciphertext": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+  "intent_id": "YGFiY2RlZmdoaWprbG1ubw",
+  "client_public_key": "mfRnTsyHwLjnEvGSuPSedEKpN2tIdZZ6urooRxAZqT4",
+  "nonce": "cHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaH",
+  "ciphertext": "iJ_q6yKHoeWKK9_mHpy522BpAehZLLckKlgakU0O7FQR_qNQhCRCCxCfj-mcUlZ1"
 }

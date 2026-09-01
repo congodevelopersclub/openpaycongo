@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_06_000000_add_pairing_completion_reservations';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_07_000000_add_kx_pairing_envelopes';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {

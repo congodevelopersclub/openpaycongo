@@ -8,14 +8,14 @@ This document is an open-source-safe inventory of repository evidence as of its 
 - **Planned requirement** means the source says what a future implementation must do; it is not evidence that it is deployed.
 - **Pending maintainer authority** identifies a decision that contributors and automation must not choose.
 
-No examples in this document contain personal data, usable credentials, private keys, raw message contents, or enrollment material.
+No examples in this document contain personal data, usable credentials, live private keys, raw message contents, or live enrollment material. `pairing-v2.fixture.json` contains clearly marked deterministic test-only seeds/secrets for cross-language verification; they must never be reused outside tests.
 
 ## Verified repository facts
 
 - The root README says the Android application and canonical Laravel server are incomplete prototypes and must not process real payments or real SMS data ([README](../README.md)).
 - Canonical public events exclude raw SMS. The event schema rejects fields outside the published shape, and the architecture says `tenant_id` is derived from authenticated server state rather than accepted from request JSON ([ledger event schema](ledger-event.schema.json), [architecture](architecture.md)).
 - The Android prototype stores trusted local evidence under Android Keystore-backed encryption and treats key invalidation or journal corruption as recovery-required rather than silently continuing ([mobile PRD](prd-mobile.md), [EncryptedSmsVault](../android-client/android/app/src/main/kotlin/com/example/opencongopay/sms/EncryptedSmsVault.kt)).
-- The pairing protocol binds an authenticated administrator ceremony to a bounded QR, uses protected ephemeral/private material, and requires `private, no-store` pairing responses. It explicitly does not protect a compromised hosting edge, administrator UI, or OAuth session ([ADR 004](adr-004-secure-device-enrollment.md)).
+- Pairing v2 binds administrator ceremony to bounded QR, uses libsodium `crypto_kx` plus XChaCha20-Poly1305-IETF, protected one-time material, exact encrypted replay, and `private, no-store`. It explicitly does not protect compromised hosting edge, administrator UI, or administrator session during bootstrap ([ADR 004](adr-004-secure-device-enrollment.md)).
 - The canonical Laravel implementation and Android client are not evidence of release signing, deployable server image, or completed authentication lifecycle ([README](../README.md)).
 - **Prototype warning:** the canonical Laravel server does not yet establish production authentication, secret storage, telemetry retention, or deployment readiness. It must not process real data.
 - **Legacy Flutter encryption remediation:** the durable V2 payment outbox moves a V1 database from the

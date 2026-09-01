@@ -13,9 +13,9 @@ use InvalidArgumentException;
 
 final readonly class IssuePendingPairingIntent
 {
-    private const VERSION = '1';
+    private const VERSION = '2';
 
-    private const SUITE = 'X25519-HKDF-SHA256-AES-256-GCM+Ed25519';
+    private const SUITE = 'X25519-crypto_kx-XChaCha20-Poly1305-IETF';
 
     public function __construct(private KeyProtector $protector, private PairingRandom $random) {}
 
@@ -26,8 +26,10 @@ final readonly class IssuePendingPairingIntent
 
         $intentId = $this->base64Url($this->random->bytes(16));
         $intentNonce = $this->base64Url($this->random->bytes(32));
-        $serverPrivateKey = $this->random->bytes(32);
-        $serverPublicKey = sodium_crypto_scalarmult_base($serverPrivateKey);
+        $serverSeed = $this->random->bytes(SODIUM_CRYPTO_KX_SEEDBYTES);
+        $serverKeypair = sodium_crypto_kx_seed_keypair($serverSeed);
+        $serverPublicKey = sodium_crypto_kx_publickey($serverKeypair);
+        $pairingSecret = $this->random->bytes(32);
         $expiresAt = CarbonImmutable::now('UTC')->addSeconds($lifetimeSeconds);
         if ($expiresAt->microsecond !== 0) {
             $expiresAt = $expiresAt->addSecond()->startOfSecond();
@@ -45,6 +47,7 @@ final readonly class IssuePendingPairingIntent
             'enrollment_signing_fingerprint' => $this->base64Url($signingFingerprint),
             'enrollment_signing_public_key' => $this->base64Url($signingPublicKey),
             'server_key_agreement_public_key' => $this->base64Url($serverPublicKey),
+            'pairing_secret' => $this->base64Url($pairingSecret),
             'trust_mode' => $trustMode,
         ];
         $qr['signature'] = $this->base64Url(sodium_crypto_sign_detached(
@@ -52,7 +55,7 @@ final readonly class IssuePendingPairingIntent
             sodium_crypto_sign_secretkey($keypair),
         ));
         $intentIdBytes = $this->decodeBase64Url($intentId, 16);
-        $protectedPrivateKey = $this->protector->protect($serverPrivateKey, $this->aad($organizationId, $intentId));
+        $protectedPrivateKey = $this->protector->protect($serverSeed, $this->aad($organizationId, $intentId));
 
         if ($protectedPrivateKey === '' || strlen($protectedPrivateKey) > 1024) {
             throw new PairingIntentUnavailable;
@@ -71,6 +74,7 @@ final readonly class IssuePendingPairingIntent
                 'enrollment_signing_fingerprint' => $qr['enrollment_signing_fingerprint'],
                 'server_key_agreement_public_key' => $qr['server_key_agreement_public_key'],
                 'trust_mode' => $qr['trust_mode'],
+                'pairing_secret_digest' => hash('sha256', $pairingSecret),
             ]));
         } catch (QueryException $exception) {
             throw new PairingIntentUnavailable(previous: $exception);
@@ -114,7 +118,8 @@ final readonly class IssuePendingPairingIntent
             $this->decodeBase64Url($qr['intent_nonce'], 32), $qr['expires_at'], $qr['algorithms'],
             $this->decodeBase64Url($qr['enrollment_signing_public_key'], 32),
             $this->decodeBase64Url($qr['enrollment_signing_fingerprint'], 32),
-            $this->decodeBase64Url($qr['server_key_agreement_public_key'], 32), $qr['trust_mode'],
+            $this->decodeBase64Url($qr['server_key_agreement_public_key'], 32),
+            $this->decodeBase64Url($qr['pairing_secret'], 32), $qr['trust_mode'],
         ];
         $transcript = '';
 

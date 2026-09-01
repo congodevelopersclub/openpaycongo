@@ -16,7 +16,12 @@ class SourceInstallation extends Model implements AuthenticatableContract
 
     protected $keyType = 'string';
 
-    protected $fillable = ['organization_id', 'installation_digest', 'installation_lookup_id', 'installation_key_version'];
+    protected $fillable = ['organization_id', 'installation_digest', 'installation_lookup_id', 'installation_key_version', 'mobile_receive_key', 'mobile_send_key', 'mobile_replay_counter'];
 
-    protected $hidden = ['installation_digest', 'installation_lookup_id', 'installation_key_version'];
+    protected $hidden = ['installation_digest', 'installation_lookup_id', 'installation_key_version', 'mobile_receive_key', 'mobile_send_key'];
+
+    protected function casts(): array
+    {
+        return ['mobile_receive_key' => 'encrypted', 'mobile_send_key' => 'encrypted', 'mobile_replay_counter' => 'integer'];
+    }
 }

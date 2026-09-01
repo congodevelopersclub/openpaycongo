@@ -5,9 +5,11 @@ import '../../pairing/presentation/pairing_session_status_card.dart';
 import '../../pairing/presentation/pairing_enrollment_bloc.dart';
 import '../../pairing/presentation/pairing_enrollment_status_card.dart';
 import '../../pairing/presentation/pairing_qr_bloc.dart';
+import '../../pairing/presentation/pairing_protocol_bloc.dart';
 import '../../pairing/presentation/pairing_qr_verification_card.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_bloc.dart';
 import '../../sync_diagnosis/presentation/sync_cursor_card.dart';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../sms_gateway/domain/sms_gateway.dart';
@@ -26,6 +28,8 @@ final class PaymentInboxScreen extends StatefulWidget {
     this.pairingEnrollment,
     this.pairingSession,
     this.pairingQr,
+    this.pairingProtocol,
+    this.pairingRuntimeUnavailable = false,
     this.paymentLifecycle,
     this.paymentRequestLifecycle,
     this.syncCursor,
@@ -37,6 +41,8 @@ final class PaymentInboxScreen extends StatefulWidget {
   final PairingEnrollmentBloc? pairingEnrollment;
   final PairingSessionBloc? pairingSession;
   final PairingQrBloc? pairingQr;
+  final PairingProtocolBloc? pairingProtocol;
+  final bool pairingRuntimeUnavailable;
   final PaymentLifecycleBloc? paymentLifecycle;
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final SyncCursorBloc? syncCursor;
@@ -102,9 +108,8 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                   const SizedBox(height: 8),
                   Text(
                     'Evidence first. Nothing below is confirmed payment.',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
+                    style: Theme.of(context).textTheme.bodyLarge
+                        ?.copyWith(color: colors.onSurfaceVariant),
                   ),
                   const SizedBox(height: 24),
                   _CaptureStatusCard(state: widget.smsPermissionState),
@@ -127,7 +132,14 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                   if (widget.pairingQr
                       case final PairingQrBloc pairing) ...<Widget>[
                     const SizedBox(height: 12),
-                    PairingQrVerificationCard(bloc: pairing),
+                    PairingQrVerificationCard(
+                      bloc: pairing,
+                      protocol: widget.pairingProtocol,
+                    ),
+                  ],
+                  if (widget.pairingRuntimeUnavailable) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const _PairingRuntimeUnavailableCard(),
                   ],
                   if (widget.syncCursor
                       case final SyncCursorBloc sync) ...<Widget>[
@@ -191,8 +203,7 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                       PaymentInboxAuthority.unknown) ...<Widget>[
                     const SizedBox(height: 12),
                     const _TrustedRulesStateCard(
-                      message:
-                          'Trusted sender state is unknown. Automatic capture cannot be trusted until reload succeeds.',
+                      message: 'Trusted sender state is unknown. Automatic capture cannot be trusted until reload succeeds.',
                     ),
                   ],
                   if (inbox.authority == PaymentInboxAuthority.authoritative &&
@@ -311,16 +322,12 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
   String? _feedbackMessage(PaymentInboxFeedback feedback) => switch (feedback) {
     PaymentInboxFeedback.inboxUnavailable =>
       'Encrypted SMS inbox is unavailable. No message was acknowledged.',
-    PaymentInboxFeedback.legacyRecoveryRequired =>
-      'Recovery required: legacy encrypted SMS data was detected. Use Android Clear storage or reinstall only after accepting local data loss.',
-    PaymentInboxFeedback.decisionReloaded =>
-      'Decision outcome is unknown. Authoritative encrypted inbox was reloaded.',
+    PaymentInboxFeedback.legacyRecoveryRequired => 'Recovery required: legacy encrypted SMS data was detected. Use Android Clear storage or reinstall only after accepting local data loss.',
+    PaymentInboxFeedback.decisionReloaded => 'Decision outcome is unknown. Authoritative encrypted inbox was reloaded.',
     PaymentInboxFeedback.decisionReloadFailed =>
       'Decision outcome is unknown. Authoritative reload also failed.',
-    PaymentInboxFeedback.decisionCommittedHealthUnknown =>
-      'Decision was committed. Capture status refresh failed; retry status safely.',
-    PaymentInboxFeedback.probeReloaded =>
-      'Storage probe outcome is unknown. Authoritative capture health was reloaded.',
+    PaymentInboxFeedback.decisionCommittedHealthUnknown => 'Decision was committed. Capture status refresh failed; retry status safely.',
+    PaymentInboxFeedback.probeReloaded => 'Storage probe outcome is unknown. Authoritative capture health was reloaded.',
     PaymentInboxFeedback.probeReloadFailed =>
       'Storage probe outcome is unknown. Authoritative reload also failed.',
     PaymentInboxFeedback.ruleAddReloaded =>
@@ -337,6 +344,21 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       'Rule clear outcome is unknown. Authoritative rules were reloaded.',
     _ => null,
   };
+}
+
+final class _PairingRuntimeUnavailableCard extends StatelessWidget {
+  const _PairingRuntimeUnavailableCard();
+
+  @override
+  Widget build(BuildContext context) => Card(
+    color: Theme.of(context).colorScheme.errorContainer,
+    child: const Padding(
+      padding: EdgeInsets.all(16),
+      child: Text(
+        'Encrypted pairing is unavailable. QR scanning is disabled. Restart after secure crypto setup is available.',
+      ),
+    ),
+  );
 }
 
 final class _CaptureStatusCard extends StatelessWidget {
@@ -390,14 +412,10 @@ final class _CaptureFaultCard extends StatelessWidget {
         fault == CaptureFault.corruption ||
         fault == CaptureFault.keyInvalidated;
     final String message = switch (fault) {
-      CaptureFault.capacity =>
-        'Capture paused: the encrypted inbox is full. Review captured messages to free capacity.',
-      CaptureFault.storage =>
-        'Capture paused after a storage failure. Existing evidence stays pending; retry review before trusting capture.',
-      CaptureFault.corruption =>
-        'Encrypted capture data failed authentication and was quarantined. No recovery is claimed.',
-      CaptureFault.keyInvalidated =>
-        'Android Keystore can no longer open captured data. Records are quarantined; no recovery is claimed.',
+      CaptureFault.capacity => 'Capture paused: the encrypted inbox is full. Review captured messages to free capacity.',
+      CaptureFault.storage => 'Capture paused after a storage failure. Existing evidence stays pending; retry review before trusting capture.',
+      CaptureFault.corruption => 'Encrypted capture data failed authentication and was quarantined. No recovery is claimed.',
+      CaptureFault.keyInvalidated => 'Android Keystore can no longer open captured data. Records are quarantined; no recovery is claimed.',
     };
     return Card(
       color: Theme.of(context).colorScheme.errorContainer,

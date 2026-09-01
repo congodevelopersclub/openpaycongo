@@ -137,7 +137,12 @@ final class PaymentOutboxSyncCoordinator {
         items: List<PaymentOutboxItem>.unmodifiable(claimed),
       ));
       if (cancellation.isCancelled) {
-        return _defer(claimed, normalized, PaymentSyncOutcome.cancelled, recovered.length);
+        return await _defer(
+          claimed,
+          normalized,
+          PaymentSyncOutcome.cancelled,
+          recovered.length,
+        );
       }
       final Set<String> acknowledged = response.acknowledgedIdempotencyKeys.toSet();
       int appliedAcks = 0;

@@ -1,8 +1,8 @@
 # ubuntu:24.04 verified amd64 manifest digest.
 FROM ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 AS flutter-sdk
 
-ARG FLUTTER_VERSION=3.44.9
-ARG FLUTTER_ARCHIVE_SHA256=a9120fa4a01048bdef438ddc3a2d4b7389662ea98a95db86eeaf10382bc4efcb
+ARG FLUTTER_VERSION=3.47.2
+ARG FLUTTER_ARCHIVE_SHA256=447878859d01ca9bfdb99a85f245af07ed8a15fedcd9d189c4749e8e92d1f185
 ARG ANDROID_COMMAND_LINE_TOOLS=13114758
 ARG ANDROID_NDK_VERSION=28.2.13676358
 
@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:$PATH
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl git openjdk-17-jdk-headless unzip xz-utils zip \
+    && apt-get install --yes --no-install-recommends build-essential ca-certificates curl git openjdk-17-jdk-headless unzip xz-utils zip \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 flutter \
     && mkdir -p "$ANDROID_HOME/cmdline-tools" "$FLUTTER_HOME" \
@@ -40,7 +40,7 @@ FROM flutter-sdk AS dependencies
 WORKDIR /workspace
 
 COPY --chown=flutter:flutter pubspec.yaml pubspec.lock ./
-RUN flutter --version | grep -F 'Flutter 3.44.9' && flutter --version | grep -F 'Dart 3.12.2'
+RUN flutter --version | grep -F 'Flutter 3.47.2' && flutter --version | grep -F 'Dart 3.13.2'
 RUN flutter pub get
 
 FROM dependencies AS source
