@@ -24,17 +24,11 @@ final class CompletePairingEnvelopeController
         if (count($input) !== count($expectedKeys) || array_diff(array_keys($input), $expectedKeys) !== []) {
             return PairingProblem::unavailable();
         }
-        $decode = static fn (mixed $value): string|false => is_string($value) && preg_match('/^[A-Za-z0-9_-]+$/D', $value) === 1
-            ? base64_decode(strtr($value, '-_', '+/').str_repeat('=', (4 - strlen($value) % 4) % 4), true)
-            : false;
-        $intentIdBytes = $decode($request->input('intent_id'));
-        $isCanonicalIntentId = is_string($intentIdBytes)
-            && strlen($intentIdBytes) === 16
-            && rtrim(strtr(base64_encode($intentIdBytes), '+/', '-_'), '=') === $request->input('intent_id');
-        $client = $decode($request->input('client_public_key'));
-        $nonce = $decode($request->input('nonce'));
-        $ciphertext = $decode($request->input('ciphertext'));
-        $result = $isCanonicalIntentId && is_string($client) && is_string($nonce) && is_string($ciphertext)
+        $intentIdBytes = $this->decodeCanonicalBase64Url($input['intent_id']);
+        $client = $this->decodeCanonicalBase64Url($input['client_public_key']);
+        $nonce = $this->decodeCanonicalBase64Url($input['nonce']);
+        $ciphertext = $this->decodeCanonicalBase64Url($input['ciphertext']);
+        $result = is_string($intentIdBytes) && strlen($intentIdBytes) === 16 && is_string($client) && is_string($nonce) && is_string($ciphertext)
             ? $complete->execute($intentIdBytes, $client, $nonce, $ciphertext, hash('sha256', implode('', [$intentIdBytes, $client, $nonce, $ciphertext]), true))
             : null;
         if ($result === null) {
@@ -46,5 +40,18 @@ final class CompletePairingEnvelopeController
             'nonce' => rtrim(strtr(base64_encode($result['nonce']), '+/', '-_'), '='),
             'ciphertext' => rtrim(strtr(base64_encode($result['ciphertext']), '+/', '-_'), '='),
         ], 201, ['Cache-Control' => 'private, no-store']);
+    }
+
+    private function decodeCanonicalBase64Url(mixed $value): string|false
+    {
+        if (! is_string($value) || preg_match('/^[A-Za-z0-9_-]+$/D', $value) !== 1) {
+            return false;
+        }
+
+        $decoded = base64_decode(strtr($value, '-_', '+/').str_repeat('=', (4 - strlen($value) % 4) % 4), true);
+
+        return is_string($decoded) && rtrim(strtr(base64_encode($decoded), '+/', '-_'), '=') === $value
+            ? $decoded
+            : false;
     }
 }

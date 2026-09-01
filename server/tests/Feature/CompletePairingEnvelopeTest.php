@@ -130,6 +130,18 @@ final class CompletePairingEnvelopeTest extends TestCase
         self::assertSame('pending_confirmation', $intent->fresh()->state);
     }
 
+    public function test_completion_rejects_noncanonical_base64url_after_a_valid_consume(): void
+    {
+        [$intent, $payload] = $this->newPendingEnvelope(random_bytes(16), now()->addMinute());
+
+        $this->postJson('/v1/pairing/complete', $payload)->assertCreated();
+        $noncanonical = $this->nonCanonicalBase64Url($payload['client_public_key']);
+        self::assertSame($this->decodeBase64Url($payload['client_public_key']), $this->decodeBase64Url($noncanonical));
+
+        $this->assertPairingUnavailable($this->postJson('/v1/pairing/complete', [...$payload, 'client_public_key' => $noncanonical]));
+        self::assertSame('pending_confirmation', $intent->fresh()->state);
+    }
+
     public function test_case_mutated_intent_id_cannot_select_a_different_binary_intent(): void
     {
         [$upperIntent, $upperPayload] = $this->newPendingEnvelope(hex2bin('000102030405060708090a0b0c0d0e0f'), now()->addMinute());
@@ -162,6 +174,18 @@ final class CompletePairingEnvelopeTest extends TestCase
         self::assertIsString($decoded);
 
         return $decoded;
+    }
+
+    private function nonCanonicalBase64Url(string $value): string
+    {
+        foreach (str_split('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_') as $replacement) {
+            $candidate = substr($value, 0, -1).$replacement;
+            if ($candidate !== $value && $this->decodeBase64Url($candidate) === $this->decodeBase64Url($value)) {
+                return $candidate;
+            }
+        }
+
+        self::fail('Expected an alternate base64url representation.');
     }
 
     /** @return array{PairingIntent, array{intent_id: string, client_public_key: string, nonce: string, ciphertext: string}} */
