@@ -56,7 +56,7 @@ FROM dependencies AS focused
 
 ARG TEST_FILTER
 COPY server/ ./
-COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json /docs/
+COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml
