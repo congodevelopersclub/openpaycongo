@@ -100,9 +100,11 @@ Result ciphertext encrypts exactly UTF-8 JSON `{"state":"pending_confirmation","
 
 Exact retry of saved request bytes returns same stored encrypted `201` response; it does not derive fresh keys, generate new SAS, or create a second pending pairing. Malformed, unknown, expired, altered, or otherwise invalid completion returns indistinguishable fixed `404` pairing-unavailable problem. Never return secret, directional key, SAS, organization id, failure category, or plaintext envelope. Every pairing response is `Cache-Control: private, no-store`.
 
+For a timeout or connection failure whose outcome is unknown, the mobile client keeps the one live exchange and makes one immediate retry using the exact immutable four-field request. It never creates new keys, nonce, or ciphertext for that retry. A process restart before a valid response is not resumable in this initial slice; it destroys the exchange and requires a fresh QR. Durable retry recovery belongs to the recovery follow-up.
+
 ## Current implementation boundary
 
-Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while explicitly marking the device inactive. It does not implement administrator SAS display/decision on the server, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or recovery. Follow-up slices must not describe these as available.
+Current Laravel slice implements QR v2 issuance plus completion/replay ending at `pending_confirmation`. The mobile runtime verifies the signed QR, completes the encrypted exchange, stores the pending directional keys in Android Keystore, and displays the SAS while explicitly marking the device inactive. It does not implement administrator SAS display/decision on the server, activation, `SourceInstallation` transfer, mobile bearer/status API, active mobile envelopes, counter storage, revocation, rotation, or durable pairing recovery. Follow-up slices must not describe these as available.
 
 ## Active mobile envelope contract
 

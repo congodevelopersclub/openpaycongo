@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -93,6 +94,12 @@ abstract interface class PairingV2CompletionTransport {
   Future<PairingV2Response> complete(Uri endpoint, PairingV2Request request);
 }
 
+/// The request outcome is unknown. Retrying the exact request is safe because
+/// the server stores an encrypted replay response for that request digest.
+final class PairingV2CompletionTransientFailure implements Exception {
+  const PairingV2CompletionTransientFailure();
+}
+
 /// Native Android transport for pairing. It accepts only HTTPS, never follows
 /// redirects, bounds server output, and avoids logging sensitive exchanges.
 final class DartIoPairingV2CompletionTransport
@@ -143,6 +150,10 @@ final class DartIoPairingV2CompletionTransport
         }
       }
       return _parseResponse(utf8.decode(body.takeBytes(), allowMalformed: false));
+    } on TimeoutException {
+      throw const PairingV2CompletionTransientFailure();
+    } on SocketException {
+      throw const PairingV2CompletionTransientFailure();
     } finally {
       client.close(force: true);
     }
@@ -157,6 +168,8 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
   final SodiumSumo sodium;
   final PairingV2CompletionTransport transport;
 
+  static const int _maximumCompletionAttempts = 2;
+
   @override
   Future<PairingPendingMaterial> establish(PairingProtocolCommand command) async {
     if (command is! PairingV2CompletionCommand) {
@@ -165,7 +178,7 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
     PairingV2Exchange? exchange;
     try {
       exchange = PairingV2Exchange.begin(sodium, command.takeCredential());
-      final PairingV2Response response = await transport.complete(
+      final PairingV2Response response = await _completeWithRetry(
         command.endpoint,
         exchange.request,
       );
@@ -182,6 +195,21 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
     } finally {
       command.dispose();
     }
+  }
+
+  Future<PairingV2Response> _completeWithRetry(
+    Uri endpoint,
+    PairingV2Request request,
+  ) async {
+    for (var attempt = 0; attempt < _maximumCompletionAttempts; attempt += 1) {
+      try {
+        return await transport.complete(endpoint, request);
+      } on PairingV2CompletionTransientFailure {
+        if (attempt + 1 == _maximumCompletionAttempts) rethrow;
+      }
+    }
+
+    throw StateError('Pairing completion retry loop exhausted');
   }
 }
 

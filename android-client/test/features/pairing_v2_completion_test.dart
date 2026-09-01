@@ -92,6 +92,81 @@ void main() {
     expect(secret, everyElement(0));
     expect(command.takeCredential, throwsA(isA<StateError>()));
   });
+
+  test('retries the exact completion request after a lost response', () async {
+    final KeyPair server = sodium.crypto.kx.keyPair();
+    final Uint8List secret = sodium.randombytes.buf(32);
+    final _ServerTransport serverTransport = _ServerTransport(
+      sodium: sodium,
+      server: server,
+      expectedSecret: Uint8List.fromList(secret),
+    );
+    final _ResponseLostOnceTransport transport = _ResponseLostOnceTransport(
+      serverTransport,
+    );
+    final _Vault vault = _Vault();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: PairingV2CompletionProtocol(sodium: sodium, transport: transport),
+      vault: vault,
+    );
+    addTearDown(() async {
+      await bloc.close();
+      serverTransport.dispose();
+      server.dispose();
+      secret.fillRange(0, secret.length, 0);
+    });
+
+    final PairingV2CompletionCommand command =
+        PairingV2CompletionCommand.fromVerifiedQr(
+          endpoint: 'https://pairing.example.test/v1/pairing/complete',
+          intentId: sodium.randombytes.buf(16),
+          serverKeyAgreementPublicKey: server.publicKey,
+          pairingSecret: Uint8List.fromList(secret),
+        );
+    final Future<PairingProtocolState> state = bloc.stream.firstWhere(
+      (PairingProtocolState state) =>
+          state is PairingProtocolAwaitingConfirmation,
+    );
+
+    bloc.add(PairingProtocolStarted(command));
+
+    expect(await state, isA<PairingProtocolAwaitingConfirmation>());
+    expect(transport.calls, 2);
+    expect(transport.replayedExactRequest, isTrue);
+    expect(vault.sendKey, isNotNull);
+    expect(vault.receiveKey, isNotNull);
+  });
+
+  test('stops after one exact retry when the outcome remains unknown', () async {
+    final KeyPair server = sodium.crypto.kx.keyPair();
+    final Uint8List secret = Uint8List.fromList(List<int>.filled(32, 4));
+    final _TransientFailureTransport transport = _TransientFailureTransport();
+    final PairingV2CompletionCommand command =
+        PairingV2CompletionCommand.fromVerifiedQr(
+          endpoint: 'https://pairing.example.test/v1/pairing/complete',
+          intentId: Uint8List(16),
+          serverKeyAgreementPublicKey: server.publicKey,
+          pairingSecret: secret,
+        );
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: PairingV2CompletionProtocol(sodium: sodium, transport: transport),
+      vault: _Vault(),
+    );
+    addTearDown(() async {
+      await bloc.close();
+      server.dispose();
+    });
+    final Future<PairingProtocolState> state = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolRecoveryRequired,
+    );
+
+    bloc.add(PairingProtocolStarted(command));
+
+    expect(await state, isA<PairingProtocolRecoveryRequired>());
+    expect(transport.calls, 2);
+    expect(secret, everyElement(0));
+    expect(command.takeCredential, throwsA(isA<StateError>()));
+  });
 }
 
 final class _ServerTransport implements PairingV2CompletionTransport {
@@ -104,7 +179,7 @@ final class _ServerTransport implements PairingV2CompletionTransport {
   final SodiumSumo sodium;
   final KeyPair server;
   final Uint8List expectedSecret;
-  late SessionKeys _keys;
+  SessionKeys? _keys;
   var received = false;
   late String requestJson;
 
@@ -117,6 +192,7 @@ final class _ServerTransport implements PairingV2CompletionTransport {
       'nonce': request.nonce,
       'ciphertext': request.ciphertext,
     });
+    _keys?.dispose();
     _keys = sodium.crypto.kx.serverSessionKeys(
       serverPublicKey: server.publicKey,
       serverSecretKey: server.secretKey,
@@ -125,7 +201,7 @@ final class _ServerTransport implements PairingV2CompletionTransport {
     final Uint8List opened = sodium.crypto.aeadXChaCha20Poly1305IETF.decrypt(
       cipherText: _decode(request.ciphertext),
       nonce: _decode(request.nonce),
-      key: _keys.rx,
+        key: _keys!.rx,
       additionalData: _transcript(
         'openpaycongo/pairing/complete/v2',
         <String>[request.intentId, request.clientPublicKey],
@@ -146,7 +222,7 @@ final class _ServerTransport implements PairingV2CompletionTransport {
         ),
       ),
       nonce: nonce,
-      key: _keys.tx,
+        key: _keys!.tx,
       additionalData: _transcript(
         'openpaycongo/pairing/complete-response/v2',
         <String>[request.intentId],
@@ -159,7 +235,7 @@ final class _ServerTransport implements PairingV2CompletionTransport {
   }
 
   void dispose() {
-    _keys.dispose();
+    _keys?.dispose();
     expectedSecret.fillRange(0, expectedSecret.length, 0);
   }
 }
@@ -172,6 +248,44 @@ final class _RejectedTransport implements PairingV2CompletionTransport {
       Future<PairingV2Response>.error(
         const FormatException('Pairing completion was rejected'),
       );
+}
+
+final class _ResponseLostOnceTransport implements PairingV2CompletionTransport {
+  _ResponseLostOnceTransport(this._server);
+
+  final _ServerTransport _server;
+  PairingV2Request? _firstRequest;
+  var calls = 0;
+  var replayedExactRequest = false;
+
+  @override
+  Future<PairingV2Response> complete(Uri endpoint, PairingV2Request request) async {
+    calls += 1;
+    final PairingV2Response response = await _server.complete(endpoint, request);
+    final PairingV2Request? firstRequest = _firstRequest;
+    if (firstRequest == null) {
+      _firstRequest = request;
+      throw const PairingV2CompletionTransientFailure();
+    }
+    replayedExactRequest =
+        request.intentId == firstRequest.intentId &&
+        request.clientPublicKey == firstRequest.clientPublicKey &&
+        request.nonce == firstRequest.nonce &&
+        request.ciphertext == firstRequest.ciphertext;
+    return response;
+  }
+}
+
+final class _TransientFailureTransport implements PairingV2CompletionTransport {
+  var calls = 0;
+
+  @override
+  Future<PairingV2Response> complete(Uri endpoint, PairingV2Request request) {
+    calls += 1;
+    return Future<PairingV2Response>.error(
+      const PairingV2CompletionTransientFailure(),
+    );
+  }
 }
 
 final class _Vault implements PairingDirectionalKeyVault {
