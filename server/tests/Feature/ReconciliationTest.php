@@ -10,8 +10,10 @@ use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\FinancialCorrectionAudit;
 use App\Models\LedgerEntry;
+use App\Models\PaymentRequest;
 use App\Models\SourceInstallation;
 use App\Models\User;
+use App\PaymentRequests\PaymentRequestStatus;
 use App\Reconciliation\ReconcileDeposit;
 use App\Reconciliation\RepairMissingCustomerCredit;
 use App\Reconciliation\ReverseDeposit;
@@ -347,6 +349,28 @@ final class ReconciliationTest extends TestCase
         DB::table('customers')->where('id', $deposit->customer_id)->update(['organization_id' => '00000000-0000-4000-8000-000000000099']);
 
         self::assertContains('customer_scope_mismatch', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
+    }
+
+    public function test_reconciliation_surfaces_a_charged_request_without_complete_allocation_evidence(): void
+    {
+        $deposit = app(RecordProviderDeposit::class)->record($this->transfer('partial-allocation'))->deposit;
+        PaymentRequest::query()->create([
+            'customer_id' => $deposit->customer_id,
+            'idempotency_digest' => hash('sha256', 'partial-allocation'),
+            'idempotency_key_fingerprint' => hash('sha256', 'partial-allocation-fingerprint'),
+            'currency' => $deposit->currency,
+            'amount_minor' => 5000,
+            'remaining_minor' => 1,
+            'status' => PaymentRequestStatus::Charged->value,
+            'expires_at' => now()->addHour(),
+            'charged_at' => null,
+        ]);
+        CustomerCredit::query()
+            ->where('customer_id', $deposit->customer_id)
+            ->where('currency', $deposit->currency)
+            ->update(['available_minor' => 7500]);
+
+        self::assertContains('payment_request_allocation', app(ReconcileDeposit::class)->report($deposit)->discrepancies);
     }
 
     public function test_reconciliation_requires_a_provider_credit_as_the_reversal_original(): void

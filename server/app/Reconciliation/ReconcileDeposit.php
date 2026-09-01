@@ -89,11 +89,18 @@ final class ReconcileDeposit
         $posted = CustomerCreditPosting::query()
             ->whereHas('customerCredit', fn ($query) => $query->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency))
             ->sum('amount_minor');
-        $allocated = PaymentRequest::query()
+        $chargedRequests = PaymentRequest::query()
             ->where('customer_id', $deposit->customer_id)
             ->where('currency', $deposit->currency)
-            ->where('status', 'charged')
-            ->sum('amount_minor');
+            ->where('status', 'charged');
+        if ((clone $chargedRequests)
+            ->where(function ($query): void {
+                $query->where('remaining_minor', '!=', 0)->orWhereNull('charged_at');
+            })
+            ->exists()) {
+            $discrepancies[] = 'payment_request_allocation';
+        }
+        $allocated = (clone $chargedRequests)->sum('amount_minor');
         if ($credit === null || (int) $credit->available_minor !== (int) $posted - (int) $allocated) {
             $discrepancies[] = 'customer_credit_balance';
         }
