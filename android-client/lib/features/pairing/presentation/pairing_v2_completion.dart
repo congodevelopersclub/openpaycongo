@@ -119,38 +119,10 @@ final class DartIoPairingV2CompletionTransport
     _validatedEndpoint(endpoint.toString());
     final HttpClient client = HttpClient()..connectionTimeout = timeout;
     try {
-      final HttpClientRequest httpRequest = await client
-          .postUrl(endpoint)
-          .timeout(timeout);
-      httpRequest
-        ..followRedirects = false
-        ..maxRedirects = 0
-        ..headers.contentType = ContentType.json
-        ..headers.set(HttpHeaders.acceptHeader, ContentType.json.mimeType);
-      httpRequest.write(
-        jsonEncode(<String, String>{
-          'intent_id': request.intentId,
-          'client_public_key': request.clientPublicKey,
-          'nonce': request.nonce,
-          'ciphertext': request.ciphertext,
-        }),
-      );
-      final HttpClientResponse response = await httpRequest.close().timeout(
-        timeout,
-      );
-      if (response.statusCode != HttpStatus.created ||
-          (response.contentLength > _maximumResponseBytes)) {
-        throw const FormatException('Pairing completion was rejected');
-      }
-      final BytesBuilder body = BytesBuilder(copy: false);
-      await for (final List<int> chunk in response.timeout(timeout)) {
-        body.add(chunk);
-        if (body.length > _maximumResponseBytes) {
-          throw const FormatException('Pairing completion response too large');
-        }
-      }
-      return _parseResponse(utf8.decode(body.takeBytes(), allowMalformed: false));
+      return await _complete(client, endpoint, request).timeout(timeout);
     } on TimeoutException {
+      throw const PairingV2CompletionTransientFailure();
+    } on HttpException {
       throw const PairingV2CompletionTransientFailure();
     } on SocketException {
       throw const PairingV2CompletionTransientFailure();
@@ -158,6 +130,54 @@ final class DartIoPairingV2CompletionTransport
       client.close(force: true);
     }
   }
+
+  Future<PairingV2Response> _complete(
+    HttpClient client,
+    Uri endpoint,
+    PairingV2Request request,
+  ) async {
+    final HttpClientRequest httpRequest = await client.postUrl(endpoint);
+    httpRequest
+      ..followRedirects = false
+      ..maxRedirects = 0
+      ..headers.contentType = ContentType.json
+      ..headers.set(HttpHeaders.acceptHeader, ContentType.json.mimeType);
+    httpRequest.write(
+      jsonEncode(<String, String>{
+        'intent_id': request.intentId,
+        'client_public_key': request.clientPublicKey,
+        'nonce': request.nonce,
+        'ciphertext': request.ciphertext,
+      }),
+    );
+    final HttpClientResponse response = await httpRequest.close();
+    if (response.statusCode != HttpStatus.created) {
+      if (_isAmbiguousStatus(response.statusCode)) {
+        throw const PairingV2CompletionTransientFailure();
+      }
+      throw const FormatException('Pairing completion was rejected');
+    }
+    if (response.contentLength > _maximumResponseBytes) {
+      throw const PairingV2CompletionTransientFailure();
+    }
+    final BytesBuilder body = BytesBuilder(copy: false);
+    await for (final List<int> chunk in response) {
+      body.add(chunk);
+      if (body.length > _maximumResponseBytes) {
+        throw const PairingV2CompletionTransientFailure();
+      }
+    }
+    try {
+      return _parseResponse(utf8.decode(body.takeBytes(), allowMalformed: false));
+    } on FormatException {
+      throw const PairingV2CompletionTransientFailure();
+    }
+  }
+
+  bool _isAmbiguousStatus(int statusCode) =>
+      statusCode == HttpStatus.requestTimeout ||
+      statusCode == HttpStatus.tooManyRequests ||
+      statusCode >= HttpStatus.internalServerError;
 }
 
 /// Concrete protocol port. It transfers keys only after encrypted response

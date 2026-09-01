@@ -100,7 +100,7 @@ Result ciphertext encrypts exactly UTF-8 JSON `{"state":"pending_confirmation","
 
 Exact retry of saved request bytes returns same stored encrypted `201` response; it does not derive fresh keys, generate new SAS, or create a second pending pairing. Malformed, unknown, expired, altered, or otherwise invalid completion returns indistinguishable fixed `404` pairing-unavailable problem. Never return secret, directional key, SAS, organization id, failure category, or plaintext envelope. Every pairing response is `Cache-Control: private, no-store`.
 
-For a timeout or connection failure whose outcome is unknown, the mobile client keeps the one live exchange and makes one immediate retry using the exact immutable four-field request. It never creates new keys, nonce, or ciphertext for that retry. A process restart before a valid response is not resumable in this initial slice; it destroys the exchange and requires a fresh QR. Durable retry recovery belongs to the recovery follow-up.
+For an outcome whose completion status is unknown, the mobile client keeps the one live exchange and makes one immediate retry using the exact immutable four-field request. Unknown means the 15-second end-to-end deadline elapses, the connection or HTTP framing fails, the server returns 408, 429, or 5xx, or a `201` response is oversized, truncated, or malformed before it can be authenticated. It never creates new keys, nonce, or ciphertext for that retry. A known non-`201` rejection and a second unknown result fail closed. A process restart before a valid response is not resumable in this initial slice; it destroys the exchange and requires a fresh QR. Durable retry recovery belongs to the recovery follow-up.
 
 ## Current implementation boundary
 
