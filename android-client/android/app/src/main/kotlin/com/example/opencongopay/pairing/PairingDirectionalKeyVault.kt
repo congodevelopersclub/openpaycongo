@@ -238,6 +238,16 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
         }
     }
 
+    /** Native-only response-envelope read. Never exposed to Flutter. */
+    fun readInboundMaterial(): PairingInboundMaterial = synchronized(STORAGE_LOCK) {
+        val record = readActiveRecord()
+        try {
+            PairingDirectionalKeyFormat.inboundMaterial(record)
+        } finally {
+            record.fill(0)
+        }
+    }
+
     private fun writeActiveGeneration(
         credential: PairingActivationCredential,
         canonicalServerBaseUrl: String,
