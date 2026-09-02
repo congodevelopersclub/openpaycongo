@@ -138,13 +138,15 @@ This section is normative for Android/Flutter pairing work. The wire protocol is
   24-byte XChaCha20-Poly1305 nonce and client-send encrypts exactly the QR 32-byte secret with completion AAD.
   Native client-receive decrypts the result with response AAD.
 - The one-time QR secret crosses the bootstrap bridge once. Directional keys stay in a process-scoped native exchange
-  until a response is authenticated and are then saved in Keystore-backed secure storage; neither key enters Dart,
-  a MethodChannel result, BLoC state, logs, analytics, notifications, screenshots, or backups. Dart holds only the
-  public exact retry request and SAS. Crash, cancellation, failure, or replacement wipes pending native material and
-  requires a fresh QR; no durable retry state exists in this slice.
+  until a response is authenticated and administrator-confirmed activation atomically promotes both directions plus
+  the installation identity in Keystore-backed secure storage; neither key enters Dart, a MethodChannel result,
+  BLoC state, logs, analytics, notifications, screenshots, or backups. Dart holds only the public exact retry request
+  and SAS. Crash, cancellation, failure, or replacement wipes pending native material and requires a fresh QR; no
+  durable retry state exists in this slice.
 - Laravel confirmation, activation delivery, and `POST /mobile/envelopes` v1 exist. Android #211 adds native
-  local deposit-envelope sealing only: foreground/unlock-gated, bounded payload, native send-key use,
-  Keystore-encrypted no-backup counter, canonical AAD, and opaque routing-safe result. HTTP delivery, encrypted
+  local deposit-envelope sealing only: foreground/unlock-gated, bounded payload, native send-key and installation-ID
+  use from the same atomic generation, Keystore-encrypted no-backup counter, canonical AAD, and opaque routing-safe
+  result. HTTP delivery, encrypted
   response handling, acknowledgement, revocation, rotation, and recovery remain follow-up work. After activation,
   active bodies use directional XChaCha20-Poly1305 envelopes with locked monotonic counter and canonical AAD; TLS
   terminator sees no cleartext business/PII body.

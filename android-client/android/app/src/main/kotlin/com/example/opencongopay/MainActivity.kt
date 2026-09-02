@@ -29,7 +29,6 @@ import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustVault
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanGate
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
 import com.congodeveloperclub.opencongopay.pairing.PairingActivationException
-import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyVault
 import com.congodeveloperclub.opencongopay.pairing.MobileEnvelopeVault
 import com.congodeveloperclub.opencongopay.pairing.PairingV2NativeCompletion
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -335,7 +334,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
         pairingDirectionalKeyTasks.execute {
             try {
-                PairingDirectionalKeyVault(applicationContext).consumeActivation(intent, nonce, ciphertext)
+                pairingV2Completion.consumeActivation(intent, nonce, ciphertext)
                 mainHandler.post { result.success("activated") }
             } catch (_: PairingActivationException) {
                 mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }

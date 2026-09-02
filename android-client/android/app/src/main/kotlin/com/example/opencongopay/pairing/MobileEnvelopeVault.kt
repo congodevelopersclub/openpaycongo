@@ -116,20 +116,21 @@ internal class MobileEnvelopeVault(
     @Synchronized
     fun seal(operation: String, payload: ByteArray): Map<String, Any> {
         var plaintext = ByteArray(0)
-        var sendKey = ByteArray(0)
+        var outbound: PairingOutboundMaterial? = null
         var nonce = ByteArray(0)
         var aad = ByteArray(0)
         var ciphertext = ByteArray(0)
         try {
             return accessLease.use {
                 plaintext = MobileEnvelopeFormat.plaintext(operation, payload)
-                val installation = PairingActivationCredentialVault(context).installationId()
+                val material = PairingDirectionalKeyVault(context).readOutboundMaterial()
+                outbound = material
+                val installation = material.installationId
                 val installationId = try { UUID.fromString(installation) } catch (_: Exception) { throw MobileEnvelopeException() }
                 val counter = counterAllocator.reserve()
-                sendKey = PairingDirectionalKeyVault(context).readSendKey()
                 nonce = ByteArray(MOBILE_ENVELOPE_NONCE_BYTES).also(SecureRandom()::nextBytes)
                 aad = MobileEnvelopeFormat.requestAad(installationId, counter)
-                ciphertext = MobileEnvelopeNative.seal(sendKey, nonce, plaintext, aad)
+                ciphertext = MobileEnvelopeNative.seal(material.sendKey, nonce, plaintext, aad)
                     ?: throw MobileEnvelopeException()
                 if (ciphertext.size !in MOBILE_ENVELOPE_TAG_BYTES..(MobileEnvelopeFormat.MAX_PAYLOAD_BYTES + MOBILE_ENVELOPE_TAG_BYTES + 128)) throw MobileEnvelopeException()
                 mapOf(
@@ -147,7 +148,7 @@ internal class MobileEnvelopeVault(
         } finally {
             payload.fill(0)
             plaintext.fill(0)
-            sendKey.fill(0)
+            outbound?.dispose()
             nonce.fill(0)
             aad.fill(0)
             ciphertext.fill(0)

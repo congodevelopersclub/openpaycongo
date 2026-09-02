@@ -82,12 +82,12 @@ final class PairingV2CompletionCommand implements PairingProtocolCommand {
     return credential;
   }
 
-  PairingActivationRequest takeActivationRequest() {
+  PairingActivationRequest takeActivationRequest({void Function()? onDispose}) {
     final Uint8List? intentId = _intentId;
     if (intentId == null) throw StateError('Pairing activation route is no longer usable');
     _intentId = null;
     try {
-      return PairingV2ActivationRequest(endpoint, intentId);
+      return PairingV2ActivationRequest(endpoint, intentId, onDispose: onDispose);
     } finally {
       intentId.fillRange(0, intentId.length, 0);
     }
@@ -104,10 +104,11 @@ final class PairingV2CompletionCommand implements PairingProtocolCommand {
 }
 
 final class PairingV2ActivationRequest implements PairingActivationRequest {
-  PairingV2ActivationRequest(this.completionEndpoint, Uint8List intentId)
+  PairingV2ActivationRequest(this.completionEndpoint, Uint8List intentId, {this.onDispose})
       : _intentId = Uint8List.fromList(intentId);
 
   final Uri completionEndpoint;
+  final void Function()? onDispose;
   Uint8List? _intentId;
 
   Uint8List takeIntentId() {
@@ -122,6 +123,7 @@ final class PairingV2ActivationRequest implements PairingActivationRequest {
     final Uint8List? intentId = _intentId;
     _intentId = null;
     intentId?.fillRange(0, intentId.length, 0);
+    onDispose?.call();
   }
 }
 
@@ -236,6 +238,7 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
     if (command is! PairingV2CompletionCommand) {
       throw ArgumentError.value(command, 'command', 'Unsupported pairing command');
     }
+    var established = false;
     try {
       final PairingV2Request request = await crypto.begin(command.takeCredential());
       final PairingV2Response response = await _completeWithRetry(
@@ -243,19 +246,25 @@ final class PairingV2CompletionProtocol implements PairingProtocolPort {
         request,
       );
       final String sas = await crypto.accept(response);
-      return PairingPendingMaterial(
+      final PairingPendingMaterial material = PairingPendingMaterial(
         serverSas: sas,
-        activationRequest: command.takeActivationRequest(),
+        activationRequest: command.takeActivationRequest(onDispose: () {
+          unawaited(crypto.dispose());
+        }),
         onDispose: () {},
       );
+      established = true;
+      return material;
     } catch (_) {
       rethrow;
     } finally {
-      try {
-        await crypto.dispose();
-      } on Object {
-        // A failed best-effort cancellation must not disclose or replace the
-        // original pairing failure. Native process teardown also clears it.
+      if (!established) {
+        try {
+          await crypto.dispose();
+        } on Object {
+          // A failed best-effort cancellation must not disclose or replace the
+          // original pairing failure. Native process teardown also clears it.
+        }
       }
       command.dispose();
     }

@@ -9,8 +9,8 @@ import java.security.MessageDigest
 
 /**
  * One in-memory pairing exchange. Directional keys are never returned through
- * Flutter: they survive only until an authenticated response saves them in the
- * Android Keystore-backed directional-key vault.
+ * Flutter: they survive only until server-confirmed activation atomically
+ * promotes their outbound-envelope generation in Android Keystore storage.
  */
 internal class PairingV2NativeCompletion(private val context: Context) {
     private var pending: PendingExchange? = null
@@ -73,7 +73,6 @@ internal class PairingV2NativeCompletion(private val context: Context) {
         var aad = ByteArray(0)
         var plaintext = ByteArray(0)
         var responseKey = ByteArray(0)
-        var accepted = false
         try {
             intent = decodeExact(intentId, INTENT_BYTES)
             nonce = decodeExact(nonceValue, NONCE_BYTES)
@@ -86,9 +85,8 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             plaintext = PairingActivationNative.decrypt(responseKey, nonce, ciphertext, aad)
                 ?: throw PairingActivationException()
             val sas = PairingV2CompletionResponse.readSas(plaintext)
-            PairingDirectionalKeyVault(context).save(current.sendKey, current.receiveKey)
-            pending = null
-            accepted = true
+            if (current.confirmed) throw PairingActivationException()
+            current.confirmed = true
             return sas
         } catch (_: PairingActivationException) {
             throw PairingActivationException()
@@ -101,7 +99,48 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             aad.fill(0)
             plaintext.fill(0)
             responseKey.fill(0)
-            if (accepted) current.dispose()
+        }
+    }
+
+    /**
+     * The activation credential is authenticated with the accepted pending
+     * receive key. Its installation identity and both directional keys are
+     * then promoted in one encrypted AtomicFile record, so sealing cannot use
+     * a previous installation with replacement directional keys.
+     */
+    @Synchronized
+    fun consumeActivation(intent: ByteArray, nonce: ByteArray, ciphertext: ByteArray) {
+        val current = pending ?: throw PairingActivationException()
+        var aad = ByteArray(0)
+        var responseKey = ByteArray(0)
+        var plaintext = ByteArray(0)
+        var promoted = false
+        try {
+            if (!current.confirmed) throw PairingActivationException()
+            PairingActivationEnvelope.validate(intent, nonce, ciphertext)
+            if (!MessageDigest.isEqual(current.intent, intent)) throw PairingActivationException()
+            aad = PairingActivationEnvelope.aad(intent)
+            responseKey = current.receiveKey.copyOf()
+            plaintext = PairingActivationNative.decrypt(responseKey, nonce, ciphertext, aad)
+                ?: throw PairingActivationException()
+            val credential = PairingActivationCredential.parse(plaintext)
+            PairingDirectionalKeyVault(context).save(
+                credential.installationId,
+                current.sendKey,
+                current.receiveKey,
+            )
+            PairingActivationCredentialVault(context).save(credential)
+            pending = null
+            promoted = true
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        } finally {
+            aad.fill(0)
+            responseKey.fill(0)
+            plaintext.fill(0)
+            if (promoted) current.dispose()
         }
     }
 
@@ -145,6 +184,8 @@ internal class PairingV2NativeCompletion(private val context: Context) {
         val sendKey: ByteArray,
         val receiveKey: ByteArray,
     ) {
+        var confirmed = false
+
         fun dispose() {
             intent.fill(0)
             sendKey.fill(0)

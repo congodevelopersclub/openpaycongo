@@ -62,8 +62,8 @@ void main() {
     expect(result.serverSas, '482901');
     expect(transport.calls, 2);
     expect(transport.exactReplay, isTrue);
-    expect(crypto.disposed, isTrue);
     result.dispose();
+    expect(crypto.disposed, isTrue);
   });
 
   test('native-crypto failure fails closed and protocol cancels session', () async {

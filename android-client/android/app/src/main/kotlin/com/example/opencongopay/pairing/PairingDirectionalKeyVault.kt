@@ -5,7 +5,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import java.io.File
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -15,36 +17,70 @@ import javax.crypto.spec.GCMParameterSpec
 
 internal class PairingDirectionalKeyStorageException : Exception()
 
-/** Fixed-format plaintext before Android Keystore AEAD encryption. */
+/**
+ * The installation identity and directional keys are one outbound-envelope
+ * generation. They must never be persisted independently: a reader sees the
+ * complete old generation or the complete promoted generation.
+ */
 internal object PairingDirectionalKeyFormat {
     const val KEY_BYTES = 32
-    private const val RECORD_VERSION: Byte = 1
+    const val INSTALLATION_ID_BYTES = 16
+    private const val RECORD_VERSION: Byte = 2
 
-    fun copyRecord(sendKey: ByteArray, receiveKey: ByteArray): ByteArray {
+    fun copyRecord(installationId: String, sendKey: ByteArray, receiveKey: ByteArray): ByteArray {
         if (sendKey.size != KEY_BYTES || receiveKey.size != KEY_BYTES) {
             throw PairingDirectionalKeyStorageException()
         }
-        return ByteArray(1 + (KEY_BYTES * 2)).also { record ->
-            record[0] = RECORD_VERSION
-            System.arraycopy(sendKey, 0, record, 1, KEY_BYTES)
-            System.arraycopy(receiveKey, 0, record, 1 + KEY_BYTES, KEY_BYTES)
+        val installation = try {
+            UUID.fromString(installationId)
+        } catch (_: Exception) {
+            throw PairingDirectionalKeyStorageException()
         }
+        return ByteArray(1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2)).also { record ->
+            record[0] = RECORD_VERSION
+            ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES)
+                .putLong(installation.mostSignificantBits)
+                .putLong(installation.leastSignificantBits)
+            System.arraycopy(sendKey, 0, record, 1 + INSTALLATION_ID_BYTES, KEY_BYTES)
+            System.arraycopy(receiveKey, 0, record, 1 + INSTALLATION_ID_BYTES + KEY_BYTES, KEY_BYTES)
+        }
+    }
+
+    fun outboundMaterial(record: ByteArray): PairingOutboundMaterial {
+        if (record.size != 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) || record[0] != RECORD_VERSION) {
+            throw PairingActivationException()
+        }
+        val installation = ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES).run {
+            UUID(long, long).toString()
+        }
+        val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+        return PairingOutboundMaterial(
+            installationId = installation,
+            sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
+        )
     }
 }
 
+internal class PairingOutboundMaterial(
+    val installationId: String,
+    val sendKey: ByteArray,
+) {
+    fun dispose() = sendKey.fill(0)
+}
+
 /**
- * Stores only current pairing directional keys. Keys are copied into one
- * versioned record, AEAD-encrypted with a non-exportable Android Keystore AES
- * key, then atomically replaced in no-backup storage. No Flutter/Dart key-read
- * API exists; native pairing and envelope code can use narrowly scoped reads.
+ * Stores the current outbound-envelope generation. Installation identity and
+ * directional keys are copied into one versioned record, AEAD-encrypted with a
+ * non-exportable Android Keystore AES key, then atomically replaced in
+ * no-backup storage. No Flutter/Dart key-read API exists.
  */
 internal class PairingDirectionalKeyVault(private val context: Context) {
     private val recordFile = File(context.noBackupFilesDir, RECORD_FILE)
     private val atomicFile = AtomicFile(recordFile)
 
     @Synchronized
-    fun save(sendKey: ByteArray, receiveKey: ByteArray) {
-        val plaintext = PairingDirectionalKeyFormat.copyRecord(sendKey, receiveKey)
+    fun save(installationId: String, sendKey: ByteArray, receiveKey: ByteArray) {
+        val plaintext = PairingDirectionalKeyFormat.copyRecord(installationId, sendKey, receiveKey)
         val nonce = ByteArray(GCM_NONCE_BYTES).also(SecureRandom()::nextBytes)
         var ciphertext = ByteArray(0)
         var payload = ByteArray(0)
@@ -75,48 +111,12 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
         }
     }
 
-    /**
-     * Native-only activation path. Directional keys never leave this vault:
-     * receive key enters JNI only for authenticated XChaCha decryption, then
-     * all temporary buffers are wiped before returning a redacted outcome.
-     */
+    /** Native-only outbound-envelope read. Never exposed to Flutter. */
     @Synchronized
-    fun consumeActivation(intent: ByteArray, nonce: ByteArray, ciphertext: ByteArray) {
-        PairingActivationEnvelope.validate(intent, nonce, ciphertext)
-        val record = decryptRecord()
-        val receiveKey = ByteArray(PairingDirectionalKeyFormat.KEY_BYTES)
-        var aad = ByteArray(0)
-        var plaintext = ByteArray(0)
-        try {
-            if (record.size != 1 + (PairingDirectionalKeyFormat.KEY_BYTES * 2) || record[0].toInt() != 1) {
-                throw PairingActivationException()
-            }
-            System.arraycopy(record, 1 + PairingDirectionalKeyFormat.KEY_BYTES, receiveKey, 0, receiveKey.size)
-            aad = PairingActivationEnvelope.aad(intent)
-            plaintext = PairingActivationNative.decrypt(receiveKey, nonce, ciphertext, aad)
-                ?: throw PairingActivationException()
-            PairingActivationCredentialVault(context).save(PairingActivationCredential.parse(plaintext))
-        } catch (_: PairingActivationException) {
-            throw PairingActivationException()
-        } catch (_: Exception) {
-            throw PairingActivationException()
-        } finally {
-            record.fill(0)
-            receiveKey.fill(0)
-            aad.fill(0)
-            plaintext.fill(0)
-        }
-    }
-
-    /** Native-only access for outbound request sealing. Never exposed to Flutter. */
-    @Synchronized
-    fun readSendKey(): ByteArray {
+    fun readOutboundMaterial(): PairingOutboundMaterial {
         val record = decryptRecord()
         try {
-            if (record.size != 1 + (PairingDirectionalKeyFormat.KEY_BYTES * 2) || record[0].toInt() != 1) {
-                throw PairingActivationException()
-            }
-            return record.copyOfRange(1, 1 + PairingDirectionalKeyFormat.KEY_BYTES)
+            return PairingDirectionalKeyFormat.outboundMaterial(record)
         } finally {
             record.fill(0)
         }

@@ -26,12 +26,17 @@ void main() {
     expect(vault, contains('updateAAD(AAD)'));
     expect(vault, contains('ENVELOPE_VERSION'));
     expect(vault, contains('KEY_BYTES = 32'));
+    expect(vault, contains('INSTALLATION_ID_BYTES = 16'));
+    expect(vault, contains('PairingOutboundMaterial'));
     expect(vault, isNot(contains('fun read(')));
     expect(activity, contains('openpaycongo/pairing_completion'));
     expect(activity, isNot(contains('openpaycongo/pairing_directional_keys')));
     expect(activity, contains('"pairing_secret"'));
     expect(activity, contains('pairingSecret.fill(0)'));
-    expect(completion, contains('PairingDirectionalKeyVault(context).save(current.sendKey, current.receiveKey)'));
+    expect(completion, contains('fun consumeActivation'));
+    expect(completion, contains('credential.installationId'));
+    expect(completion, contains('current.sendKey'));
+    expect(completion, contains('current.receiveKey'));
     expect(completion, isNot(contains('"send_key"')));
     expect(completion, isNot(contains('"receive_key"')));
     expect(bridge, isNot(contains('send_key')));
