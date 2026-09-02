@@ -41,10 +41,10 @@ void main() {
     expect(activity, contains('"pairing_secret"'));
     expect(activity, contains('pairingSecret.fill(0)'));
     expect(completion, contains('fun consumeActivation'));
-    expect(completion, contains('credential.installationId'));
+    expect(completion, contains('PairingDirectionalKeyVault(context).save('));
+    expect(completion, contains('                credential,'));
     expect(completion, contains('current.sendKey'));
     expect(completion, contains('current.receiveKey'));
-    expect(completion, contains('PairingDirectionalKeyVault(context).save('));
     expect(completion, isNot(contains('PairingActivationCredentialVault(context).save')));
     expect(protocol, contains('_activationActive ||'));
     expect(completion, isNot(contains('"send_key"')));
