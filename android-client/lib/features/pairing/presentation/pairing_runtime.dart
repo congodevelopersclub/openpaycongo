@@ -27,6 +27,7 @@ final class PairingRuntime {
           vault: const PlatformPairingActivationVault(),
         ),
       ),
+      recovery: const PlatformPairingConfirmedExchangeRecovery(),
     );
     return PairingRuntime._(
       protocol: protocol,

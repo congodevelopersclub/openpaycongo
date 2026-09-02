@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 /// Pairing crypto owns directional keys behind a platform boundary. BLoC owns
@@ -22,6 +24,27 @@ enum PairingActivationOutcome { activated, recoveryRequired }
 
 abstract interface class PairingActivationRequest {
   void dispose();
+}
+
+/// Startup-only native recovery boundary. It returns redacted SAS plus an
+/// opaque activation request; pairing keys and credentials stay native.
+abstract interface class PairingRecoveryPort {
+  Future<PairingRecoveredMaterial?> restore();
+}
+
+final class PairingRecoveredMaterial {
+  PairingRecoveredMaterial({
+    required this.serverSas,
+    required this.activationRequest,
+  });
+
+  final String serverSas;
+  PairingActivationRequest? activationRequest;
+
+  void dispose() {
+    activationRequest?.dispose();
+    activationRequest = null;
+  }
 }
 
 final class PairingPendingMaterial {
@@ -53,6 +76,13 @@ final class PairingProtocolStarted extends PairingProtocolEvent {
   const PairingProtocolStarted(this.command);
 
   final PairingProtocolCommand command;
+}
+
+/// App-unlocked startup requests native recovery through normal BLoC flow.
+final class PairingProtocolRecoveryRequested extends PairingProtocolEvent {
+  PairingProtocolRecoveryRequested(this.completion);
+
+  final Completer<void> completion;
 }
 
 /// UI sends only confirmation progression; no credential/key/envelope fields.
@@ -95,18 +125,61 @@ final class PairingProtocolRecoveryRequired extends PairingProtocolState {
 
 final class PairingProtocolBloc
     extends Bloc<PairingProtocolEvent, PairingProtocolState> {
-  PairingProtocolBloc({required this.protocol, PairingActivationPort? activation})
+  PairingProtocolBloc({
+    required this.protocol,
+    PairingActivationPort? activation,
+    PairingRecoveryPort? recovery,
+  })
     : activation = activation ?? const _UnavailableActivationPort(),
+      recovery = recovery ?? const _UnavailableRecoveryPort(),
       super(const PairingProtocolIdle()) {
     on<PairingProtocolStarted>(_start);
+    on<PairingProtocolRecoveryRequested>(_restore);
     on<PairingActivationRequested>(_activate);
   }
 
   final PairingProtocolPort protocol;
   final PairingActivationPort activation;
+  final PairingRecoveryPort recovery;
   var _startActive = false;
   var _activationActive = false;
   PairingActivationRequest? _activationRequest;
+
+  Future<void> restore() {
+    if (isClosed) return Future<void>.value();
+    final Completer<void> completion = Completer<void>();
+    add(PairingProtocolRecoveryRequested(completion));
+    return completion.future;
+  }
+
+  Future<void> _restore(
+    PairingProtocolRecoveryRequested event,
+    Emitter<PairingProtocolState> emit,
+  ) async {
+    if (_startActive || _activationActive || state is! PairingProtocolIdle) {
+      event.completion.complete();
+      return;
+    }
+    PairingRecoveredMaterial? material;
+    try {
+      material = await recovery.restore();
+      if (material == null || state is! PairingProtocolIdle) return;
+      final PairingActivationRequest? request = material.activationRequest;
+      if (request == null || !RegExp(r'^[0-9]{6}$').hasMatch(material.serverSas)) {
+        material.dispose();
+        emit(const PairingProtocolRecoveryRequired());
+        return;
+      }
+      material.activationRequest = null;
+      _activationRequest = request;
+      emit(PairingProtocolAwaitingConfirmation(material.serverSas));
+    } on Object {
+      emit(const PairingProtocolRecoveryRequired());
+    } finally {
+      material?.dispose();
+      if (!event.completion.isCompleted) event.completion.complete();
+    }
+  }
 
   Future<void> _start(
     PairingProtocolStarted event,
@@ -175,4 +248,11 @@ final class _UnavailableActivationPort implements PairingActivationPort {
   @override
   Future<PairingActivationOutcome> activate(PairingActivationRequest request) async =>
       PairingActivationOutcome.recoveryRequired;
+}
+
+final class _UnavailableRecoveryPort implements PairingRecoveryPort {
+  const _UnavailableRecoveryPort();
+
+  @override
+  Future<PairingRecoveredMaterial?> restore() async => null;
 }

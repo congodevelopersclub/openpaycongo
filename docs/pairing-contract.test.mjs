@@ -47,7 +47,8 @@ test('ADR 004 fixes v2 crypto boundary and implemented end-to-end mobile envelop
   assert.match(adr, /Laravel now implements the server half of active mobile-envelope deposit transport/i);
   assert.match(adr, /Dart posts exactly that encrypted envelope with no bearer header/i);
   assert.match(adr, /status-bound AEAD verification and outcome decryption/i);
-  assert.match(adr, /Revocation, rotation, and durable pairing recovery remain follow-up slices/i);
+  assert.match(adr, /After native authentication of a valid completion response, Android persists one no-backup Keystore-encrypted confirmed exchange/i);
+  assert.match(adr, /Revocation, rotation, and pre-completion durable retry recovery remain follow-up slices/i);
   assert.match(adr, /openpaycongo\/pairing\/activation-response\/v2/i);
   assert.match(adr, /0x002b.*exact 43-byte UTF-8 domain field/i);
   assert.match(adr, /no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation/i);

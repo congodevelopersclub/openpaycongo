@@ -22,6 +22,32 @@ void main() {
     expect(protocol.disposed, isTrue);
   });
 
+  test('startup restores native-confirmed pairing and can activate it', () async {
+    final _ActivationRequest request = _ActivationRequest();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      activation: const _Activation(PairingActivationOutcome.activated),
+      recovery: _Recovery(
+        PairingRecoveredMaterial(
+          serverSas: '482901',
+          activationRequest: request,
+        ),
+      ),
+    );
+    addTearDown(bloc.close);
+
+    final Future<PairingProtocolState> restored = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    await bloc.restore();
+
+    expect(await restored, isA<PairingProtocolAwaitingConfirmation>());
+    expect(bloc.state, isA<PairingProtocolAwaitingConfirmation>());
+    bloc.add(const PairingActivationRequested());
+    await bloc.stream.firstWhere((PairingProtocolState state) => state is PairingProtocolActivated);
+    expect(request.disposed, isTrue);
+  });
+
   test('second command is disposed without protocol access', () async {
     final _DeferredProtocol protocol = _DeferredProtocol();
     final PairingProtocolBloc bloc = PairingProtocolBloc(protocol: protocol);
@@ -143,6 +169,14 @@ final class _Activation implements PairingActivationPort {
   final PairingActivationOutcome outcome;
   @override
   Future<PairingActivationOutcome> activate(PairingActivationRequest request) async => outcome;
+}
+
+final class _Recovery implements PairingRecoveryPort {
+  const _Recovery(this.material);
+  final PairingRecoveredMaterial? material;
+
+  @override
+  Future<PairingRecoveredMaterial?> restore() async => material;
 }
 
 final class _DeferredActivation implements PairingActivationPort {
