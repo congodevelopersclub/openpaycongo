@@ -7,15 +7,16 @@ import org.junit.Test
 
 class PairingDirectionalKeyFormatTest {
     @Test
-    fun bindsInstallationIdentityAndDirectionalKeysIntoOneVersionedRecord() {
+    fun bindsCredentialIdentityAndDirectionalKeysIntoOneVersionedRecord() {
         val send = ByteArray(32) { 1 }
         val receive = ByteArray(32) { 2 }
         val installationId = "123e4567-e89b-12d3-a456-426614174000"
+        val credential = PairingActivationCredential(installationId, "opaque-token")
 
-        val record = PairingDirectionalKeyFormat.copyRecord(installationId, send, receive)
+        val record = PairingDirectionalKeyFormat.copyRecord(credential, send, receive)
 
-        assertEquals(81, record.size)
-        assertEquals(2, record[0].toInt())
+        assertEquals(95, record.size)
+        assertEquals(3, record[0].toInt())
         val material = PairingDirectionalKeyFormat.outboundMaterial(record)
         assertEquals(installationId, material.installationId)
         assertArrayEquals(send, material.sendKey)
@@ -27,11 +28,15 @@ class PairingDirectionalKeyFormatTest {
 
     @Test
     fun rejectsMalformedDirectionalKeyLengths() {
+        val credential = PairingActivationCredential(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "opaque-token",
+        )
         assertThrows(PairingDirectionalKeyStorageException::class.java) {
-            PairingDirectionalKeyFormat.copyRecord("123e4567-e89b-12d3-a456-426614174000", ByteArray(31), ByteArray(32))
+            PairingDirectionalKeyFormat.copyRecord(credential, ByteArray(31), ByteArray(32))
         }
         assertThrows(PairingDirectionalKeyStorageException::class.java) {
-            PairingDirectionalKeyFormat.copyRecord("123e4567-e89b-12d3-a456-426614174000", ByteArray(32), ByteArray(33))
+            PairingDirectionalKeyFormat.copyRecord(credential, ByteArray(32), ByteArray(33))
         }
     }
 }

@@ -10,7 +10,7 @@ import java.security.MessageDigest
 /**
  * One in-memory pairing exchange. Directional keys are never returned through
  * Flutter: they survive only until server-confirmed activation atomically
- * promotes their outbound-envelope generation in Android Keystore storage.
+ * promotes their complete active pairing generation in Android Keystore storage.
  */
 internal class PairingV2NativeCompletion(private val context: Context) {
     private var pending: PendingExchange? = null
@@ -104,9 +104,9 @@ internal class PairingV2NativeCompletion(private val context: Context) {
 
     /**
      * The activation credential is authenticated with the accepted pending
-     * receive key. Its installation identity and both directional keys are
-     * then promoted in one encrypted AtomicFile record, so sealing cannot use
-     * a previous installation with replacement directional keys.
+     * receive key. Its credential, installation identity, and both directional
+     * keys are then promoted in one encrypted AtomicFile record. Therefore a
+     * credential-write failure cannot replace an existing key generation.
      */
     @Synchronized
     fun consumeActivation(intent: ByteArray, nonce: ByteArray, ciphertext: ByteArray) {
@@ -125,11 +125,10 @@ internal class PairingV2NativeCompletion(private val context: Context) {
                 ?: throw PairingActivationException()
             val credential = PairingActivationCredential.parse(plaintext)
             PairingDirectionalKeyVault(context).save(
-                credential.installationId,
+                credential,
                 current.sendKey,
                 current.receiveKey,
             )
-            PairingActivationCredentialVault(context).save(credential)
             pending = null
             promoted = true
         } catch (_: PairingActivationException) {

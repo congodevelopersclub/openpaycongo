@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Android directional keys use a native-only Keystore atomic-write contract',
+  test('Android pairing state uses a native-only Keystore atomic-write contract',
       () {
     final String vault = File(
       'android/app/src/main/kotlin/com/example/opencongopay/pairing/PairingDirectionalKeyVault.kt',
@@ -28,6 +28,7 @@ void main() {
     expect(vault, contains('KEY_BYTES = 32'));
     expect(vault, contains('INSTALLATION_ID_BYTES = 16'));
     expect(vault, contains('PairingOutboundMaterial'));
+    expect(vault, contains('credential.bearerToken'));
     expect(vault, isNot(contains('fun read(')));
     expect(activity, contains('openpaycongo/pairing_completion'));
     expect(activity, isNot(contains('openpaycongo/pairing_directional_keys')));
@@ -37,6 +38,8 @@ void main() {
     expect(completion, contains('credential.installationId'));
     expect(completion, contains('current.sendKey'));
     expect(completion, contains('current.receiveKey'));
+    expect(completion, contains('PairingDirectionalKeyVault(context).save('));
+    expect(completion, isNot(contains('PairingActivationCredentialVault')));
     expect(completion, isNot(contains('"send_key"')));
     expect(completion, isNot(contains('"receive_key"')));
     expect(bridge, isNot(contains('send_key')));

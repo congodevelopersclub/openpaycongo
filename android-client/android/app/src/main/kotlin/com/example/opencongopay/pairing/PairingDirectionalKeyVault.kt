@@ -18,36 +18,61 @@ import javax.crypto.spec.GCMParameterSpec
 internal class PairingDirectionalKeyStorageException : Exception()
 
 /**
- * The installation identity and directional keys are one outbound-envelope
- * generation. They must never be persisted independently: a reader sees the
- * complete old generation or the complete promoted generation.
+ * The activation credential, installation identity, and directional keys are
+ * one installed pairing generation. They must never be persisted independently:
+ * a reader sees the complete old generation or the complete promoted generation.
  */
 internal object PairingDirectionalKeyFormat {
     const val KEY_BYTES = 32
     const val INSTALLATION_ID_BYTES = 16
-    private const val RECORD_VERSION: Byte = 2
+    private const val CREDENTIAL_LENGTH_BYTES = 2
+    private const val RECORD_VERSION: Byte = 3
 
-    fun copyRecord(installationId: String, sendKey: ByteArray, receiveKey: ByteArray): ByteArray {
+    fun copyRecord(
+        credential: PairingActivationCredential,
+        sendKey: ByteArray,
+        receiveKey: ByteArray,
+    ): ByteArray {
         if (sendKey.size != KEY_BYTES || receiveKey.size != KEY_BYTES) {
             throw PairingDirectionalKeyStorageException()
         }
         val installation = try {
-            UUID.fromString(installationId)
+            UUID.fromString(credential.installationId)
         } catch (_: Exception) {
             throw PairingDirectionalKeyStorageException()
         }
-        return ByteArray(1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2)).also { record ->
-            record[0] = RECORD_VERSION
-            ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES)
-                .putLong(installation.mostSignificantBits)
-                .putLong(installation.leastSignificantBits)
-            System.arraycopy(sendKey, 0, record, 1 + INSTALLATION_ID_BYTES, KEY_BYTES)
-            System.arraycopy(receiveKey, 0, record, 1 + INSTALLATION_ID_BYTES + KEY_BYTES, KEY_BYTES)
+        val bearerToken = credential.bearerToken.toByteArray(StandardCharsets.UTF_8)
+        try {
+            if (bearerToken.size !in 1..8192 ||
+                bearerToken.size != credential.bearerToken.length ||
+                credential.bearerToken.any { it.code <= 0x20 || it.code == 0x7f }
+            ) throw PairingDirectionalKeyStorageException()
+            val fixedBytes = 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
+            return ByteArray(fixedBytes + bearerToken.size).also { record ->
+                record[0] = RECORD_VERSION
+                ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES)
+                    .putLong(installation.mostSignificantBits)
+                    .putLong(installation.leastSignificantBits)
+                val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+                System.arraycopy(sendKey, 0, record, sendKeyStart, KEY_BYTES)
+                System.arraycopy(receiveKey, 0, record, sendKeyStart + KEY_BYTES, KEY_BYTES)
+                ByteBuffer.wrap(record, sendKeyStart + (KEY_BYTES * 2), CREDENTIAL_LENGTH_BYTES)
+                    .putShort(bearerToken.size.toShort())
+                System.arraycopy(bearerToken, 0, record, fixedBytes, bearerToken.size)
+            }
+        } finally {
+            bearerToken.fill(0)
         }
     }
 
     fun outboundMaterial(record: ByteArray): PairingOutboundMaterial {
-        if (record.size != 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) || record[0] != RECORD_VERSION) {
+        val fixedBytes = 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
+        if (record.size < fixedBytes || record[0] != RECORD_VERSION) {
+            throw PairingActivationException()
+        }
+        val bearerTokenBytes = ByteBuffer.wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
+            .short.toInt() and 0xffff
+        if (bearerTokenBytes !in 1..8192 || record.size != fixedBytes + bearerTokenBytes) {
             throw PairingActivationException()
         }
         val installation = ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES).run {
@@ -69,9 +94,9 @@ internal class PairingOutboundMaterial(
 }
 
 /**
- * Stores the current outbound-envelope generation. Installation identity and
- * directional keys are copied into one versioned record, AEAD-encrypted with a
- * non-exportable Android Keystore AES key, then atomically replaced in
+ * Stores the active pairing generation. The credential, installation identity,
+ * and directional keys are copied into one versioned record, AEAD-encrypted
+ * with a non-exportable Android Keystore AES key, then atomically replaced in
  * no-backup storage. No Flutter/Dart key-read API exists.
  */
 internal class PairingDirectionalKeyVault(private val context: Context) {
@@ -79,8 +104,12 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
     private val atomicFile = AtomicFile(recordFile)
 
     @Synchronized
-    fun save(installationId: String, sendKey: ByteArray, receiveKey: ByteArray) {
-        val plaintext = PairingDirectionalKeyFormat.copyRecord(installationId, sendKey, receiveKey)
+    fun save(
+        credential: PairingActivationCredential,
+        sendKey: ByteArray,
+        receiveKey: ByteArray,
+    ) {
+        val plaintext = PairingDirectionalKeyFormat.copyRecord(credential, sendKey, receiveKey)
         val nonce = ByteArray(GCM_NONCE_BYTES).also(SecureRandom()::nextBytes)
         var ciphertext = ByteArray(0)
         var payload = ByteArray(0)
@@ -193,12 +222,12 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
     }
 
     private companion object {
-        const val RECORD_FILE = "pairing_directional_keys_v1"
-        const val KEY_ALIAS = "openpaycongo.pairing.directional-keys.v1"
+        const val RECORD_FILE = "pairing_active_generation_v1"
+        const val KEY_ALIAS = "openpaycongo.pairing.active-generation.v1"
         const val ENVELOPE_VERSION: Byte = 1
         const val GCM_NONCE_BYTES = 12
         const val GCM_TAG_BITS = 128
-        val AAD = "openpaycongo/pairing/directional-keys/v1"
+        val AAD = "openpaycongo/pairing/active-generation/v1"
             .toByteArray(StandardCharsets.US_ASCII)
     }
 }
