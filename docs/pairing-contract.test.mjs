@@ -34,7 +34,7 @@ const qrTranscript = (qr) => Buffer.concat([
   field(qr.trust_mode),
 ]);
 
-test('ADR 004 fixes v2 crypto boundary and the implemented server envelope boundary', async () => {
+test('ADR 004 fixes v2 crypto boundary and implemented end-to-end mobile envelopes', async () => {
   const adr = await readFile(asset('adr-004-secure-device-enrollment.md'), 'utf8');
   const envelope = await readFile(asset('mobile-envelope-v1.md'), 'utf8');
 
@@ -45,7 +45,9 @@ test('ADR 004 fixes v2 crypto boundary and the implemented server envelope bound
   assert.match(adr, /the app retrieves only the opaque activation envelope over strict HTTPS without redirects/i);
   assert.match(adr, /official libsodium XChaCha20-Poly1305 implementation/i);
   assert.match(adr, /Laravel now implements the server half of active mobile-envelope deposit transport/i);
-  assert.match(adr, /Android transport delivery, acknowledgement, revocation, rotation, and durable pairing recovery remain follow-up slices/i);
+  assert.match(adr, /Dart posts exactly that encrypted envelope with no bearer header/i);
+  assert.match(adr, /status-bound AEAD verification and outcome decryption/i);
+  assert.match(adr, /Revocation, rotation, and durable pairing recovery remain follow-up slices/i);
   assert.match(adr, /openpaycongo\/pairing\/activation-response\/v2/i);
   assert.match(adr, /0x002b.*exact 43-byte UTF-8 domain field/i);
   assert.match(adr, /no derived key, custom KDF, alternative AEAD, or duplicated crypto implementation/i);
