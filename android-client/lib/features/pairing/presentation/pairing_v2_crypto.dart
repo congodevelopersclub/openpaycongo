@@ -8,6 +8,7 @@ final class PairingV2QrCredential {
   PairingV2QrCredential({
     required this.intentId,
     required this.serverPublicKey,
+    required this.canonicalServerBaseUrl,
     required Uint8List pairingSecret,
   }) : _pairingSecret = Uint8List.fromList(pairingSecret) {
     pairingSecret.fillRange(0, pairingSecret.length, 0);
@@ -23,6 +24,7 @@ final class PairingV2QrCredential {
 
   final String intentId;
   final String serverPublicKey;
+  final String canonicalServerBaseUrl;
   Uint8List? _pairingSecret;
 
   /// Transfers the owned secret to one exchange. It cannot be reused.

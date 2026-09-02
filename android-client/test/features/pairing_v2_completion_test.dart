@@ -11,12 +11,29 @@ void main() {
   late SodiumSumo sodium;
   setUpAll(() async => sodium = await SodiumSumoInit.init());
 
+  test('verified QR command binds canonical HTTPS origin into native begin credential', () {
+    final Uint8List secret = Uint8List.fromList(List<int>.filled(32, 7));
+    final PairingV2CompletionCommand command = PairingV2CompletionCommand.fromVerifiedQr(
+      endpoint: 'https://pairing.example.test/v1/pairing/complete',
+      intentId: Uint8List(16),
+      serverKeyAgreementPublicKey: Uint8List(32),
+      pairingSecret: secret,
+    );
+
+    final PairingV2QrCredential credential = command.takeCredential();
+    expect(credential.canonicalServerBaseUrl, 'https://pairing.example.test');
+    expect(secret, everyElement(0));
+    credential.dispose();
+    command.dispose();
+  });
+
   test('Sodium test adapter completes encrypted exchange and exposes SAS only', () async {
     final KeyPair server = sodium.crypto.kx.keyPair();
     final Uint8List secret = Uint8List.fromList(List<int>.filled(32, 7));
     final PairingV2QrCredential credential = PairingV2QrCredential(
       intentId: _encode(Uint8List(16)),
       serverPublicKey: _encode(server.publicKey),
+      canonicalServerBaseUrl: 'https://pairing.example.test',
       pairingSecret: Uint8List.fromList(secret),
     );
     final SodiumPairingV2Crypto crypto = SodiumPairingV2Crypto(sodium);

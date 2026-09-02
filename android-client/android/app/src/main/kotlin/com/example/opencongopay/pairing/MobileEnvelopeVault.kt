@@ -26,7 +26,10 @@ private const val MOBILE_ENVELOPE_TAG_BYTES = 16
 
 internal object MobileEnvelopeFormat {
     const val MAX_PAYLOAD_BYTES = 8192
-    private const val DOMAIN = "openpaycongo/mobile/request-envelope/v1"
+    private const val MAX_RESPONSE_CIPHERTEXT_BYTES = 1024
+    private const val REQUEST_DOMAIN = "openpaycongo/mobile/request-envelope/v1"
+    private const val RESPONSE_DOMAIN = "openpaycongo/mobile/response-envelope/v1"
+    private val BASE64_URL = Regex("^[A-Za-z0-9_-]+$")
 
     fun plaintext(operation: String, payload: ByteArray): ByteArray {
         if (operation != "deposit" || payload.size !in 2..MAX_PAYLOAD_BYTES) throw MobileEnvelopeException()
@@ -46,7 +49,7 @@ internal object MobileEnvelopeFormat {
 
     fun requestAad(installationId: UUID, counter: Long): ByteArray {
         if (counter <= 0L) throw MobileEnvelopeException()
-        val domain = DOMAIN.toByteArray(StandardCharsets.UTF_8)
+        val domain = REQUEST_DOMAIN.toByteArray(StandardCharsets.UTF_8)
         return ByteBuffer.allocate(2 + domain.size + 16 + 8)
             .putShort(domain.size.toShort())
             .put(domain)
@@ -60,6 +63,65 @@ internal object MobileEnvelopeFormat {
         if (counter <= 0L) throw MobileEnvelopeException()
         return counter.toString()
     }
+
+    fun responseAad(installationId: UUID, counter: Long, status: Int): ByteArray {
+        if (counter <= 0L || status !in setOf(200, 201, 409)) throw MobileEnvelopeException()
+        val domain = RESPONSE_DOMAIN.toByteArray(StandardCharsets.UTF_8)
+        return ByteBuffer.allocate(2 + domain.size + 16 + 8 + 2)
+            .putShort(domain.size.toShort())
+            .put(domain)
+            .putLong(installationId.mostSignificantBits)
+            .putLong(installationId.leastSignificantBits)
+            .putLong(counter)
+            .putShort(status.toShort())
+            .array()
+    }
+
+    fun canonicalCounter(value: String): Long {
+        if (!Regex("^[1-9][0-9]{0,18}$").matches(value)) throw MobileEnvelopeException()
+        return try {
+            value.toLong().also { if (it <= 0L || it.toString() != value) throw MobileEnvelopeException() }
+        } catch (_: NumberFormatException) {
+            throw MobileEnvelopeException()
+        }
+    }
+
+    fun decodeCanonicalBase64Url(value: String, minimumBytes: Int, maximumBytes: Int): ByteArray {
+        if (!BASE64_URL.matches(value)) throw MobileEnvelopeException()
+        val decoded = try {
+            Base64.decode(value, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        } catch (_: IllegalArgumentException) {
+            throw MobileEnvelopeException()
+        }
+        if (decoded.size !in minimumBytes..maximumBytes ||
+            Base64.encodeToString(decoded, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP) != value
+        ) {
+            decoded.fill(0)
+            throw MobileEnvelopeException()
+        }
+        return decoded
+    }
+
+    fun responseOutcome(status: Int, plaintext: ByteArray): String {
+        try {
+            val tokener = JSONTokener(String(plaintext, StandardCharsets.UTF_8))
+            val parsed = tokener.nextValue() as? JSONObject ?: throw MobileEnvelopeException()
+            if (tokener.nextClean().code != 0 || parsed.length() != 1) throw MobileEnvelopeException()
+            val outcome = parsed.opt("outcome") as? String ?: throw MobileEnvelopeException()
+            return when (status to outcome) {
+                201 to "recorded" -> outcome
+                200 to "replayed" -> outcome
+                409 to "conflict" -> outcome
+                else -> throw MobileEnvelopeException()
+            }
+        } catch (_: MobileEnvelopeException) {
+            throw MobileEnvelopeException()
+        } catch (_: Exception) {
+            throw MobileEnvelopeException()
+        }
+    }
+
+    fun maximumResponseCiphertextBytes(): Int = MAX_RESPONSE_CIPHERTEXT_BYTES
 }
 
 internal object MobileEnvelopeCounter {
@@ -98,6 +160,8 @@ internal object MobileEnvelopeNative {
     init { System.loadLibrary("openpay_activation") }
 
     external fun seal(sendKey: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray?
+
+    external fun open(receiveKey: ByteArray, nonce: ByteArray, ciphertext: ByteArray, aad: ByteArray): ByteArray?
 }
 
 /**
@@ -135,6 +199,7 @@ internal class MobileEnvelopeVault(
                 if (ciphertext.size !in MOBILE_ENVELOPE_TAG_BYTES..(MobileEnvelopeFormat.MAX_PAYLOAD_BYTES + MOBILE_ENVELOPE_TAG_BYTES + 128)) throw MobileEnvelopeException()
                 mapOf(
                     "version" to 1,
+                    "server_base_url" to material.canonicalServerBaseUrl,
                     "installation_id" to installation,
                     "counter" to MobileEnvelopeFormat.counterString(counter),
                     "nonce" to Base64.encodeToString(nonce, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP),
@@ -152,6 +217,58 @@ internal class MobileEnvelopeVault(
             nonce.fill(0)
             aad.fill(0)
             ciphertext.fill(0)
+        }
+    }
+
+    @Synchronized
+    fun open(
+        installationValue: String,
+        counterValue: String,
+        status: Int,
+        nonceValue: String,
+        ciphertextValue: String,
+    ): String {
+        var inbound: PairingInboundMaterial? = null
+        var nonce = ByteArray(0)
+        var ciphertext = ByteArray(0)
+        var aad = ByteArray(0)
+        var plaintext = ByteArray(0)
+        try {
+            return accessLease.use {
+                val installationId = try {
+                    UUID.fromString(installationValue)
+                } catch (_: Exception) {
+                    throw MobileEnvelopeException()
+                }
+                if (installationId.toString() != installationValue) throw MobileEnvelopeException()
+                val counter = MobileEnvelopeFormat.canonicalCounter(counterValue)
+                nonce = MobileEnvelopeFormat.decodeCanonicalBase64Url(
+                    nonceValue,
+                    MOBILE_ENVELOPE_NONCE_BYTES,
+                    MOBILE_ENVELOPE_NONCE_BYTES,
+                )
+                ciphertext = MobileEnvelopeFormat.decodeCanonicalBase64Url(
+                    ciphertextValue,
+                    MOBILE_ENVELOPE_TAG_BYTES,
+                    MobileEnvelopeFormat.maximumResponseCiphertextBytes(),
+                )
+                inbound = PairingDirectionalKeyVault(context).readInboundMaterial()
+                if (inbound!!.installationId != installationValue) throw MobileEnvelopeException()
+                aad = MobileEnvelopeFormat.responseAad(installationId, counter, status)
+                plaintext = MobileEnvelopeNative.open(inbound!!.receiveKey, nonce, ciphertext, aad)
+                    ?: throw MobileEnvelopeException()
+                MobileEnvelopeFormat.responseOutcome(status, plaintext)
+            }
+        } catch (_: MobileEnvelopeException) {
+            throw MobileEnvelopeException()
+        } catch (_: Exception) {
+            throw MobileEnvelopeException()
+        } finally {
+            inbound?.dispose()
+            nonce.fill(0)
+            ciphertext.fill(0)
+            aad.fill(0)
+            plaintext.fill(0)
         }
     }
 

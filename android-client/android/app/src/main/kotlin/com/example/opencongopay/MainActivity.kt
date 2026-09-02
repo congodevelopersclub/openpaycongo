@@ -270,15 +270,16 @@ class MainActivity : FlutterFragmentActivity() {
                         val arguments = call.arguments as? Map<*, *>
                         val intentId = arguments?.get("intent_id") as? String
                         val serverPublicKey = arguments?.get("server_public_key") as? String
+                        val canonicalServerBaseUrl = arguments?.get("canonical_server_base_url") as? String
                         val pairingSecret = arguments?.get("pairing_secret") as? ByteArray
-                        if (arguments == null || arguments.keys != setOf("intent_id", "server_public_key", "pairing_secret") ||
-                            intentId == null || serverPublicKey == null || pairingSecret == null
+                        if (arguments == null || arguments.keys != setOf("intent_id", "server_public_key", "canonical_server_base_url", "pairing_secret") ||
+                            intentId == null || serverPublicKey == null || canonicalServerBaseUrl == null || pairingSecret == null
                         ) {
                             pairingSecret?.fill(0)
                             throw PairingActivationException()
                         }
                         try {
-                            val request = pairingV2Completion.begin(intentId, serverPublicKey, pairingSecret)
+                            val request = pairingV2Completion.begin(intentId, serverPublicKey, canonicalServerBaseUrl, pairingSecret)
                             mainHandler.post { result.success(request) }
                         } finally {
                             pairingSecret.fill(0)
@@ -349,6 +350,10 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun handleMobileEnvelopeCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method == "open") {
+            openMobileEnvelope(call, result)
+            return
+        }
         if (call.method != "seal") {
             result.notImplemented()
             return
@@ -382,6 +387,39 @@ class MainActivity : FlutterFragmentActivity() {
                 } finally {
                     payload.fill(0)
                 }
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("envelope_unavailable", "Mobile envelope is unavailable", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
+    }
+
+    private fun openMobileEnvelope(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+        val installationId = arguments?.get("installation_id") as? String
+        val counter = arguments?.get("counter") as? String
+        val status = arguments?.get("status") as? Int
+        val nonce = arguments?.get("nonce") as? String
+        val ciphertext = arguments?.get("ciphertext") as? String
+        if (arguments == null || arguments.keys != setOf("installation_id", "counter", "status", "nonce", "ciphertext") ||
+            installationId == null || counter == null || status == null || nonce == null || ciphertext == null
+        ) {
+            result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
+            return
+        }
+        val generation = requireSmsGatewayAccess(result) ?: return
+        smsTasks.submit(
+            generation = generation,
+            operation = {
+                MobileEnvelopeVault(
+                    context = applicationContext,
+                    accessLease = accessGuard.lease(
+                        permissionGranted = {
+                            checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                        },
+                        expectedGeneration = generation,
+                    ),
+                ).open(installationId, counter, status, nonce, ciphertext)
             },
             onSuccess = result::success,
             onFailure = { result.error("envelope_unavailable", "Mobile envelope is unavailable", null) },

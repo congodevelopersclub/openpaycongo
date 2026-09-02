@@ -60,6 +60,7 @@ final class PairingV2CompletionCommand implements PairingProtocolCommand {
     final PairingV2QrCredential credential = PairingV2QrCredential(
       intentId: _base64Url(intentId),
       serverPublicKey: _base64Url(serverKeyAgreementPublicKey),
+      canonicalServerBaseUrl: parsedEndpoint.replace(path: '', query: null, fragment: null).toString(),
       pairingSecret: pairingSecret,
     );
     return PairingV2CompletionCommand._(

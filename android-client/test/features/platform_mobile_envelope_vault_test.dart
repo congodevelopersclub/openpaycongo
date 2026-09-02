@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:opencongopay/features/deposit_sync/data/mobile_envelope_sealer.dart';
 import 'package:opencongopay/features/deposit_sync/infrastructure/platform_mobile_envelope_vault.dart';
 
 void main() {
@@ -17,6 +18,7 @@ void main() {
           expect(call.arguments, <String, Object>{'operation': 'deposit', 'payload': payload});
           return <String, Object>{
             'version': 1,
+            'server_base_url': 'https://pairing.example.test',
             'installation_id': '123e4567-e89b-12d3-a456-426614174000',
             'counter': '1',
             'nonce': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -27,6 +29,7 @@ void main() {
     final MobileRequestEnvelope envelope = await const PlatformMobileEnvelopeVault().sealDeposit(payload);
 
     expect(envelope.counter, '1');
+    expect(envelope.serverBaseUrl, 'https://pairing.example.test');
     expect(envelope.ciphertext, 'opaque-ciphertext');
     expect(payload, everyElement(0));
   });
@@ -38,5 +41,38 @@ void main() {
 
     await expectLater(const PlatformMobileEnvelopeVault().sealDeposit(payload), throwsA(isA<StateError>()));
     expect(payload, everyElement(0));
+  });
+
+  test('returns only the native-authenticated envelope outcome', () async {
+    const MobileRequestEnvelope request = MobileRequestEnvelope(
+      version: 1,
+      serverBaseUrl: 'https://pairing.example.test',
+      installationId: '123e4567-e89b-12d3-a456-426614174000',
+      counter: '1',
+      nonce: 'request-nonce',
+      ciphertext: 'request-ciphertext',
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall call) async {
+          expect(call.method, 'open');
+          expect(call.arguments, <String, Object>{
+            'installation_id': request.installationId,
+            'counter': request.counter,
+            'status': 201,
+            'nonce': 'response-nonce',
+            'ciphertext': 'response-ciphertext',
+          });
+          return 'recorded';
+        });
+
+    final MobileEnvelopeResponseOutcome result =
+        await const PlatformMobileEnvelopeVault().openDepositResponse(
+          request: request,
+          status: 201,
+          nonce: 'response-nonce',
+          ciphertext: 'response-ciphertext',
+        );
+
+    expect(result, MobileEnvelopeResponseOutcome.recorded);
   });
 }

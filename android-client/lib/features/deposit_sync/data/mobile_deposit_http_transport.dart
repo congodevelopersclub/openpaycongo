@@ -129,7 +129,7 @@ final class DartMobileDepositHttpPort implements MobileDepositHttpPort {
       uri.scheme == 'https' &&
       uri.host.isNotEmpty &&
       uri.userInfo.isEmpty &&
-      uri.path == '/mobile/deposits' &&
+      (uri.path == '/mobile/deposits' || uri.path == '/mobile/envelopes') &&
       uri.query.isEmpty &&
       uri.fragment.isEmpty;
 }
@@ -273,7 +273,7 @@ final class AuthenticatedMobileDepositHttpTransport
             HttpHeaders.authorizationHeader: 'Bearer $_bearer',
             HttpHeaders.contentTypeHeader: ContentType.json.mimeType,
           },
-          body: utf8.encode(jsonEncode(_bodyFor(deposit))),
+          body: utf8.encode(jsonEncode(mobileDepositPayload(deposit))),
         ),
       );
       final MobileDepositHttpResponse response = await exchange.response.timeout(
@@ -290,21 +290,6 @@ final class AuthenticatedMobileDepositHttpTransport
       throw const DepositTransportUnavailable();
     }
   }
-
-  Map<String, Object> _bodyFor(ProviderDeposit deposit) => <String, Object>{
-    'customer_lookup_identifier': deposit.customerLookupIdentifier,
-    'provider_reference': deposit.providerReference,
-    'amount_minor': deposit.amountMinor,
-    'currency': deposit.currency,
-    'provider_occurred_at': deposit.providerOccurredAt,
-    if (deposit.senderIdentifier case final String value) 'sender_identifier': value,
-    if (deposit.receiverIdentifier case final String value)
-      'receiver_identifier': value,
-    if (deposit.customerName case final String value) 'customer_name': value,
-    if (deposit.customerAddress case final String value) 'customer_address': value,
-    if (deposit.customerPhone case final String value) 'customer_phone': value,
-    if (deposit.customerEmail case final String value) 'customer_email': value,
-  };
 
   DepositSubmissionResult _resultFor(MobileDepositHttpResponse response) {
     if (response.body.length > maximumResponseBytes) {
@@ -324,3 +309,18 @@ final class AuthenticatedMobileDepositHttpTransport
     };
   }
 }
+
+Map<String, Object> mobileDepositPayload(ProviderDeposit deposit) => <String, Object>{
+  'customer_lookup_identifier': deposit.customerLookupIdentifier,
+  'provider_reference': deposit.providerReference,
+  'amount_minor': deposit.amountMinor,
+  'currency': deposit.currency,
+  'provider_occurred_at': deposit.providerOccurredAt,
+  if (deposit.senderIdentifier case final String value) 'sender_identifier': value,
+  if (deposit.receiverIdentifier case final String value)
+    'receiver_identifier': value,
+  if (deposit.customerName case final String value) 'customer_name': value,
+  if (deposit.customerAddress case final String value) 'customer_address': value,
+  if (deposit.customerPhone case final String value) 'customer_phone': value,
+  if (deposit.customerEmail case final String value) 'customer_email': value,
+};

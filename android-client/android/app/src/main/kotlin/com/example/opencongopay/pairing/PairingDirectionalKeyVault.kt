@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import java.io.File
+import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -26,12 +27,14 @@ internal object PairingDirectionalKeyFormat {
     const val KEY_BYTES = 32
     const val INSTALLATION_ID_BYTES = 16
     private const val CREDENTIAL_LENGTH_BYTES = 2
-    private const val RECORD_VERSION: Byte = 3
+    private const val SERVER_BASE_URL_LENGTH_BYTES = 2
+    private const val RECORD_VERSION: Byte = 4
     private const val LEGACY_KEY_ONLY_RECORD_VERSION: Byte = 1
     private const val LEGACY_IDENTITY_RECORD_VERSION: Byte = 2
 
     fun copyRecord(
         credential: PairingActivationCredential,
+        canonicalServerBaseUrl: String,
         sendKey: ByteArray,
         receiveKey: ByteArray,
     ): ByteArray {
@@ -44,13 +47,16 @@ internal object PairingDirectionalKeyFormat {
             throw PairingDirectionalKeyStorageException()
         }
         val bearerToken = credential.bearerToken.toByteArray(StandardCharsets.UTF_8)
+        val serverBaseUrl = PairingServerAuthority.canonicalize(canonicalServerBaseUrl)
+            .toByteArray(StandardCharsets.UTF_8)
         try {
             if (bearerToken.size !in 1..8192 ||
-                credential.bearerToken.any { it.code <= 0x20 || it.code == 0x7f }
+                credential.bearerToken.any { it.code <= 0x20 || it.code == 0x7f } ||
+                serverBaseUrl.size !in 1..512
             ) throw PairingDirectionalKeyStorageException()
             val fixedBytes =
-                1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
-            return ByteArray(fixedBytes + bearerToken.size).also { record ->
+                1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES + SERVER_BASE_URL_LENGTH_BYTES
+            return ByteArray(fixedBytes + bearerToken.size + serverBaseUrl.size).also { record ->
                 record[0] = RECORD_VERSION
                 ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES)
                     .putLong(installation.mostSignificantBits)
@@ -61,33 +67,57 @@ internal object PairingDirectionalKeyFormat {
                 ByteBuffer.wrap(record, sendKeyStart + (KEY_BYTES * 2), CREDENTIAL_LENGTH_BYTES)
                     .putShort(bearerToken.size.toShort())
                 System.arraycopy(bearerToken, 0, record, fixedBytes, bearerToken.size)
+                ByteBuffer.wrap(record, fixedBytes - SERVER_BASE_URL_LENGTH_BYTES, SERVER_BASE_URL_LENGTH_BYTES)
+                    .putShort(serverBaseUrl.size.toShort())
+                System.arraycopy(serverBaseUrl, 0, record, fixedBytes + bearerToken.size, serverBaseUrl.size)
             }
         } finally {
             bearerToken.fill(0)
+            serverBaseUrl.fill(0)
         }
     }
 
     fun outboundMaterial(record: ByteArray): PairingOutboundMaterial {
+        val metadata = activeMetadata(record)
+        val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+        return PairingOutboundMaterial(
+            installationId = metadata.installationId,
+            canonicalServerBaseUrl = metadata.canonicalServerBaseUrl,
+            sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
+        )
+    }
+
+    fun inboundMaterial(record: ByteArray): PairingInboundMaterial {
+        val metadata = activeMetadata(record)
+        val receiveKeyStart = 1 + INSTALLATION_ID_BYTES + KEY_BYTES
+        return PairingInboundMaterial(
+            installationId = metadata.installationId,
+            receiveKey = record.copyOfRange(receiveKeyStart, receiveKeyStart + KEY_BYTES),
+        )
+    }
+
+    private fun activeMetadata(record: ByteArray): PairingActiveRecordMetadata {
         val fixedBytes =
-            1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
+            1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES + SERVER_BASE_URL_LENGTH_BYTES
         if (record.size < fixedBytes || record[0] != RECORD_VERSION) {
             throw PairingActivationException()
         }
         val bearerTokenBytes = ByteBuffer
-            .wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
+            .wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES - SERVER_BASE_URL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
             .short
             .toInt() and 0xffff
-        if (bearerTokenBytes !in 1..8192 || record.size != fixedBytes + bearerTokenBytes) {
-            throw PairingActivationException()
-        }
+        val serverBaseUrlBytes = ByteBuffer
+            .wrap(record, fixedBytes - SERVER_BASE_URL_LENGTH_BYTES, SERVER_BASE_URL_LENGTH_BYTES)
+            .short
+            .toInt() and 0xffff
+        if (bearerTokenBytes !in 1..8192 || serverBaseUrlBytes !in 1..512 ||
+            record.size != fixedBytes + bearerTokenBytes + serverBaseUrlBytes
+        ) throw PairingActivationException()
         val installation = ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES).run {
             UUID(long, long).toString()
         }
-        val sendKeyStart = 1 + INSTALLATION_ID_BYTES
-        return PairingOutboundMaterial(
-            installationId = installation,
-            sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
-        )
+        val serverBaseUrl = String(record, fixedBytes + bearerTokenBytes, serverBaseUrlBytes, StandardCharsets.UTF_8)
+        return PairingActiveRecordMetadata(installation, PairingServerAuthority.canonicalize(serverBaseUrl))
     }
 
     fun legacyGeneration(
@@ -124,9 +154,45 @@ internal object PairingDirectionalKeyFormat {
 
 internal class PairingOutboundMaterial(
     val installationId: String,
+    val canonicalServerBaseUrl: String,
     val sendKey: ByteArray,
 ) {
     fun dispose() = sendKey.fill(0)
+}
+
+internal class PairingInboundMaterial(
+    val installationId: String,
+    val receiveKey: ByteArray,
+) {
+    fun dispose() = receiveKey.fill(0)
+}
+
+private class PairingActiveRecordMetadata(
+    val installationId: String,
+    val canonicalServerBaseUrl: String,
+)
+
+/** The signed QR owns this public route; active pairing storage pins its exact origin. */
+internal object PairingServerAuthority {
+    fun canonicalize(value: String): String {
+        val uri = try {
+            URI(value)
+        } catch (_: Exception) {
+            throw PairingDirectionalKeyStorageException()
+        }
+        val host = uri.host ?: throw PairingDirectionalKeyStorageException()
+        if (uri.scheme != "https" || host.isEmpty() || uri.userInfo != null ||
+            !uri.rawPath.isNullOrEmpty() || uri.rawQuery != null || uri.rawFragment != null ||
+            (uri.port != -1 && uri.port !in 1..65535)
+        ) throw PairingDirectionalKeyStorageException()
+        val canonical = try {
+            URI("https", null, host, uri.port, null, null, null).toASCIIString()
+        } catch (_: Exception) {
+            throw PairingDirectionalKeyStorageException()
+        }
+        if (value != canonical) throw PairingDirectionalKeyStorageException()
+        return canonical
+    }
 }
 
 internal class PairingDirectionalKeyGeneration(
@@ -155,10 +221,11 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
 
     fun save(
         credential: PairingActivationCredential,
+        canonicalServerBaseUrl: String,
         sendKey: ByteArray,
         receiveKey: ByteArray,
     ) = synchronized(STORAGE_LOCK) {
-        writeActiveGeneration(credential, sendKey, receiveKey)
+        writeActiveGeneration(credential, canonicalServerBaseUrl, sendKey, receiveKey)
     }
 
     /** Native-only outbound-envelope read. Never exposed to Flutter. */
@@ -173,11 +240,13 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
 
     private fun writeActiveGeneration(
         credential: PairingActivationCredential,
+        canonicalServerBaseUrl: String,
         sendKey: ByteArray,
         receiveKey: ByteArray,
     ) {
         val plaintext = PairingDirectionalKeyFormat.copyRecord(
             credential,
+            canonicalServerBaseUrl,
             sendKey,
             receiveKey,
         )
@@ -229,30 +298,10 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
      * its embedded identity agrees with that credential.
      */
     private fun migrateLegacyGeneration(): ByteArray {
-        val hasLegacyDirections =
-            legacyRecordFile.exists() || File(legacyRecordFile.path + ".bak").exists()
-        val hasLegacyCredential = legacyCredentialVault.hasRecord()
-        if (!hasLegacyDirections || !hasLegacyCredential) throw PairingActivationException()
-        val legacyRecord = decryptRecord(
-            legacyAtomicFile,
-            keyForExisting(LEGACY_KEY_ALIAS),
-            LEGACY_AAD,
-        )
-        var generation: PairingDirectionalKeyGeneration? = null
-        try {
-            val credential = legacyCredentialVault.read()
-            generation = PairingDirectionalKeyFormat.legacyGeneration(
-                credential.installationId,
-                legacyRecord,
-            )
-            writeActiveGeneration(credential, generation.sendKey, generation.receiveKey)
-            legacyAtomicFile.delete()
-            legacyCredentialVault.delete()
-            return decryptRecord(atomicFile, keyForExisting(KEY_ALIAS), AAD)
-        } finally {
-            legacyRecord.fill(0)
-            generation?.dispose()
-        }
+        // Earlier records contain no QR-derived server origin. Promoting them
+        // would grant a caller authority to choose the mobile-envelope route.
+        // Recovery must re-pair and obtain a freshly signature-verified QR.
+        throw PairingActivationException()
     }
 
     private fun decryptRecord(

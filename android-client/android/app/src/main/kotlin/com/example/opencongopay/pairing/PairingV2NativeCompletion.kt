@@ -16,7 +16,12 @@ internal class PairingV2NativeCompletion(private val context: Context) {
     private var pending: PendingExchange? = null
 
     @Synchronized
-    fun begin(intentId: String, serverPublicKey: String, pairingSecret: ByteArray): Map<String, String> {
+    fun begin(
+        intentId: String,
+        serverPublicKey: String,
+        canonicalServerBaseUrl: String,
+        pairingSecret: ByteArray,
+    ): Map<String, String> {
         var intent = ByteArray(0)
         var serverKey = ByteArray(0)
         var nativeMaterial: Array<ByteArray>? = null
@@ -25,6 +30,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             if (pairingSecret.size != PairingDirectionalKeyFormat.KEY_BYTES) throw PairingActivationException()
             intent = decodeExact(intentId, INTENT_BYTES)
             serverKey = decodeExact(serverPublicKey, PairingDirectionalKeyFormat.KEY_BYTES)
+            val serverBaseUrl = PairingServerAuthority.canonicalize(canonicalServerBaseUrl)
             nativeMaterial = PairingV2Native.begin(intent, serverKey, pairingSecret)
                 ?: throw PairingActivationException()
             val material = nativeMaterial
@@ -37,6 +43,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             ) throw PairingActivationException()
             replacement = PendingExchange(
                 intent = intent.copyOf(),
+                canonicalServerBaseUrl = serverBaseUrl,
                 sendKey = material[3].copyOf(),
                 receiveKey = material[4].copyOf(),
             )
@@ -109,7 +116,11 @@ internal class PairingV2NativeCompletion(private val context: Context) {
      * credential-write failure cannot replace an existing key generation.
      */
     @Synchronized
-    fun consumeActivation(intent: ByteArray, nonce: ByteArray, ciphertext: ByteArray) {
+    fun consumeActivation(
+        intent: ByteArray,
+        nonce: ByteArray,
+        ciphertext: ByteArray,
+    ) {
         val current = pending ?: throw PairingActivationException()
         var aad = ByteArray(0)
         var responseKey = ByteArray(0)
@@ -126,6 +137,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             val credential = PairingActivationCredential.parse(plaintext)
             PairingDirectionalKeyVault(context).save(
                 credential,
+                current.canonicalServerBaseUrl,
                 current.sendKey,
                 current.receiveKey,
             )
@@ -180,6 +192,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
 
     private class PendingExchange(
         val intent: ByteArray,
+        val canonicalServerBaseUrl: String,
         val sendKey: ByteArray,
         val receiveKey: ByteArray,
     ) {

@@ -14,7 +14,9 @@ void main() {
         .setMockMethodCallHandler(channel, (MethodCall call) async {
           expect(call.method, 'consume');
           expect((call.arguments as Map<Object?, Object?>).keys, unorderedEquals(<String>[
-            'intent_id', 'nonce', 'ciphertext',
+            'intent_id',
+            'nonce',
+            'ciphertext',
           ]));
           return 'activated';
         });

@@ -12,37 +12,36 @@ class PairingDirectionalKeyFormatTest {
         val receive = ByteArray(32) { 2 }
         val installationId = "123e4567-e89b-12d3-a456-426614174000"
         val credential = PairingActivationCredential(installationId, "opaque-token")
+        val authority = "https://pairing.example.test"
 
-        val record = PairingDirectionalKeyFormat.copyRecord(credential, send, receive)
+        val record = PairingDirectionalKeyFormat.copyRecord(credential, authority, send, receive)
 
-        assertEquals(95, record.size)
-        assertEquals(3, record[0].toInt())
+        assertEquals(85 + "opaque-token".length + authority.length, record.size)
+        assertEquals(4, record[0].toInt())
         val material = PairingDirectionalKeyFormat.outboundMaterial(record)
         assertEquals(installationId, material.installationId)
+        assertEquals(authority, material.canonicalServerBaseUrl)
         assertArrayEquals(send, material.sendKey)
         send.fill(9)
         receive.fill(9)
         assertEquals(1, material.sendKey[0].toInt())
         material.dispose()
+        val inbound = PairingDirectionalKeyFormat.inboundMaterial(record)
+        assertEquals(installationId, inbound.installationId)
+        assertArrayEquals(ByteArray(32) { 2 }, inbound.receiveKey)
+        inbound.dispose()
     }
 
     @Test
-    fun readsTheShippedKeyOnlyLegacyGenerationNeededForAnAtomicUpgrade() {
-        val installationId = "123e4567-e89b-12d3-a456-426614174000"
+    fun rejectsLegacyOriginlessRecordsToRequireRepairing() {
         val record = ByteArray(65)
         record[0] = 1
         ByteArray(32) { 3 }.copyInto(record, destinationOffset = 1)
         ByteArray(32) { 4 }.copyInto(record, destinationOffset = 33)
 
-        val generation = PairingDirectionalKeyFormat.legacyGeneration(
-            installationId,
-            record,
-        )
-
-        assertEquals(installationId, generation.installationId)
-        assertEquals(3, generation.sendKey[0].toInt())
-        assertEquals(4, generation.receiveKey[0].toInt())
-        generation.dispose()
+        assertThrows(PairingActivationException::class.java) {
+            PairingDirectionalKeyFormat.outboundMaterial(record)
+        }
     }
 
     @Test
@@ -52,10 +51,16 @@ class PairingDirectionalKeyFormatTest {
             "opaque-token",
         )
         assertThrows(PairingDirectionalKeyStorageException::class.java) {
-            PairingDirectionalKeyFormat.copyRecord(credential, ByteArray(31), ByteArray(32))
+            PairingDirectionalKeyFormat.copyRecord(credential, "https://pairing.example.test", ByteArray(31), ByteArray(32))
         }
         assertThrows(PairingDirectionalKeyStorageException::class.java) {
-            PairingDirectionalKeyFormat.copyRecord(credential, ByteArray(32), ByteArray(33))
+            PairingDirectionalKeyFormat.copyRecord(credential, "https://pairing.example.test", ByteArray(32), ByteArray(33))
+        }
+        assertThrows(PairingDirectionalKeyStorageException::class.java) {
+            PairingDirectionalKeyFormat.copyRecord(credential, "http://pairing.example.test", ByteArray(32), ByteArray(32))
+        }
+        assertThrows(PairingDirectionalKeyStorageException::class.java) {
+            PairingDirectionalKeyFormat.copyRecord(credential, "https://pairing.example.test/", ByteArray(32), ByteArray(32))
         }
     }
 }

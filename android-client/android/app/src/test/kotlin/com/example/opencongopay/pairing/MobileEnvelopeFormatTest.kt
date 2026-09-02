@@ -52,6 +52,40 @@ class MobileEnvelopeFormatTest {
     }
 
     @Test
+    fun responseAadBindsDomainInstallationCounterAndHttpStatus() {
+        val installationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000")
+        val aad = MobileEnvelopeFormat.responseAad(installationId, 42L, 201)
+        val domain = "openpaycongo/mobile/response-envelope/v1".toByteArray(StandardCharsets.UTF_8)
+        val expected = ByteBuffer.allocate(2 + domain.size + 16 + 8 + 2)
+            .putShort(domain.size.toShort())
+            .put(domain)
+            .putLong(0x123e4567e89b12d3L)
+            .putLong(0xa456426614174000uL.toLong())
+            .putLong(42L)
+            .putShort(201.toShort())
+            .array()
+
+        assertArrayEquals(expected, aad)
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeFormat.responseAad(installationId, 42L, 404)
+        }
+    }
+
+    @Test
+    fun responseOutcomeRequiresTheStatusAuthenticatedByTheEnvelope() {
+        assertEquals(
+            "recorded",
+            MobileEnvelopeFormat.responseOutcome(201, "{\"outcome\":\"recorded\"}".toByteArray()),
+        )
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeFormat.responseOutcome(200, "{\"outcome\":\"recorded\"}".toByteArray())
+        }
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeFormat.responseOutcome(201, "{\"outcome\":\"recorded\",\"extra\":true}".toByteArray())
+        }
+    }
+
+    @Test
     fun counterPersistsStrictSuccessorAndFailsClosedAfterSignedServerMaximum() {
         assertEquals(2L, MobileEnvelopeCounter.nextAfter(1L))
         assertEquals(0L, MobileEnvelopeCounter.nextAfter(Long.MAX_VALUE))

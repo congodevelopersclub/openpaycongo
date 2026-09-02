@@ -21,6 +21,7 @@ final class PlatformPairingV2Crypto implements PairingV2CryptoPort {
         <String, Object>{
           'intent_id': credential.intentId,
           'server_public_key': credential.serverPublicKey,
+          'canonical_server_base_url': credential.canonicalServerBaseUrl,
           'pairing_secret': pairingSecret,
         },
       );

@@ -15,6 +15,7 @@ void main() {
     final PairingV2QrCredential credential = PairingV2QrCredential(
       intentId: 'AAAAAAAAAAAAAAAAAAAAAA',
       serverPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      canonicalServerBaseUrl: 'https://pairing.example.test',
       pairingSecret: secret,
     );
     final List<MethodCall> calls = <MethodCall>[];
@@ -24,8 +25,9 @@ void main() {
           if (call.method == 'begin') {
             final Map<Object?, Object?> arguments = call.arguments as Map<Object?, Object?>;
             expect(arguments.keys, unorderedEquals(<String>[
-              'intent_id', 'server_public_key', 'pairing_secret',
+              'intent_id', 'server_public_key', 'canonical_server_base_url', 'pairing_secret',
             ]));
+            expect(arguments['canonical_server_base_url'], 'https://pairing.example.test');
             expect(arguments['pairing_secret'], Uint8List.fromList(List<int>.filled(32, 7)));
             return <String, String>{
               'intent_id': 'AAAAAAAAAAAAAAAAAAAAAA',
@@ -58,6 +60,7 @@ void main() {
     final PairingV2QrCredential credential = PairingV2QrCredential(
       intentId: 'AAAAAAAAAAAAAAAAAAAAAA',
       serverPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      canonicalServerBaseUrl: 'https://pairing.example.test',
       pairingSecret: secret,
     );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

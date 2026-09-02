@@ -6,7 +6,7 @@ info:
     Laravel contract. It does not claim every endpoint is implemented.
     Pairing QR issuance, v2 completion to pending_confirmation, verified-administrator confirmation,
     server-side encrypted credential delivery, Android activation consumption, and the Laravel half of
-    encrypted mobile deposit envelopes are current slices. The Android network adapter remains pending.
+    encrypted mobile deposit envelopes, including the Android native-seal and native-response-open adapter, are current slices.
     V1 push accepts exactly one event. Tenant and replica are derived from authenticated claims;
     wallet membership is checked before idempotency. Events are immutable and raw SMS is excluded.
 servers:
