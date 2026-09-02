@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Base64
 import android.view.WindowManager
 import com.congodeveloperclub.opencongopay.sms.CaptureDecision
 import com.congodeveloperclub.opencongopay.sms.DecisionConflictException
@@ -295,6 +296,32 @@ class MainActivity : FlutterFragmentActivity() {
                         ) throw PairingActivationException()
                         val sas = pairingV2Completion.accept(intentId, nonce, ciphertext)
                         mainHandler.post { result.success(sas) }
+                    }
+                    "restoreConfirmed" -> {
+                        if (call.arguments != null) throw PairingActivationException()
+                        val restored = pairingV2Completion.restoreConfirmed()
+                        if (restored == null) {
+                            mainHandler.post { result.success(null) }
+                        } else {
+                            try {
+                                val endpoint = "${restored.canonicalServerBaseUrl}/v1/pairing/complete"
+                                val intentId = Base64.encodeToString(
+                                    restored.intent,
+                                    Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
+                                )
+                                mainHandler.post {
+                                    result.success(
+                                        mapOf(
+                                            "sas" to restored.sas,
+                                            "completion_endpoint" to endpoint,
+                                            "intent_id" to intentId,
+                                        ),
+                                    )
+                                }
+                            } finally {
+                                restored.dispose()
+                            }
+                        }
                     }
                     "cancel" -> {
                         if (call.arguments != null) throw PairingActivationException()

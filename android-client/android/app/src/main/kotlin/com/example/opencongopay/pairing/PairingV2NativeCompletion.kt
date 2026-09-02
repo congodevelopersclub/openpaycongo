@@ -14,6 +14,7 @@ import java.security.MessageDigest
  */
 internal class PairingV2NativeCompletion(private val context: Context) {
     private var pending: PendingExchange? = null
+    private val recoveryVault by lazy { PairingConfirmedExchangeVault(context) }
 
     @Synchronized
     fun begin(
@@ -54,6 +55,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
                 "ciphertext" to encode(material[2]),
             )
             val previous = pending
+            recoveryVault.clear()
             pending = replacement
             replacement = null
             previous?.dispose()
@@ -80,6 +82,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
         var aad = ByteArray(0)
         var plaintext = ByteArray(0)
         var responseKey = ByteArray(0)
+        var confirmedExchange: ConfirmedPairingExchange? = null
         try {
             intent = decodeExact(intentId, INTENT_BYTES)
             nonce = decodeExact(nonceValue, NONCE_BYTES)
@@ -94,10 +97,36 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             val sas = PairingV2CompletionResponse.readSas(plaintext)
             if (current.confirmed) throw PairingActivationException()
             current.confirmed = true
+            current.sas = sas
+            val exchange = ConfirmedPairingExchange(
+                    intent = current.intent.copyOf(),
+                    canonicalServerBaseUrl = current.canonicalServerBaseUrl,
+                    sendKey = current.sendKey.copyOf(),
+                    receiveKey = current.receiveKey.copyOf(),
+                    sas = sas,
+            )
+            confirmedExchange = exchange
+            recoveryVault.save(exchange)
             return sas
         } catch (_: PairingActivationException) {
+            if (current.confirmed) {
+                pending = null
+                try {
+                    recoveryVault.clear()
+                } finally {
+                    current.dispose()
+                }
+            }
             throw PairingActivationException()
         } catch (_: Exception) {
+            if (current.confirmed) {
+                pending = null
+                try {
+                    recoveryVault.clear()
+                } finally {
+                    current.dispose()
+                }
+            }
             throw PairingActivationException()
         } finally {
             intent.fill(0)
@@ -106,6 +135,7 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             aad.fill(0)
             plaintext.fill(0)
             responseKey.fill(0)
+            confirmedExchange?.dispose()
         }
     }
 
@@ -135,6 +165,11 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             plaintext = PairingActivationNative.decrypt(responseKey, nonce, ciphertext, aad)
                 ?: throw PairingActivationException()
             val credential = PairingActivationCredential.parse(plaintext)
+            // The confirmed record must be gone before an active-generation
+            // write. Otherwise a stale recovered exchange could later replace
+            // active directional keys after a failed delete. clear() verifies
+            // both AtomicFile base and backup removal.
+            recoveryVault.clear()
             PairingDirectionalKeyVault(context).save(
                 credential,
                 current.canonicalServerBaseUrl,
@@ -144,8 +179,20 @@ internal class PairingV2NativeCompletion(private val context: Context) {
             pending = null
             promoted = true
         } catch (_: PairingActivationException) {
+            pending = null
+            try {
+                recoveryVault.clear()
+            } finally {
+                current.dispose()
+            }
             throw PairingActivationException()
         } catch (_: Exception) {
+            pending = null
+            try {
+                recoveryVault.clear()
+            } finally {
+                current.dispose()
+            }
             throw PairingActivationException()
         } finally {
             aad.fill(0)
@@ -159,7 +206,43 @@ internal class PairingV2NativeCompletion(private val context: Context) {
     fun cancel() {
         val current = pending
         pending = null
-        current?.dispose()
+        try {
+            recoveryVault.clear()
+        } finally {
+            current?.dispose()
+        }
+    }
+
+    @Synchronized
+    fun restoreConfirmed(): RestoredConfirmedExchange? {
+        val current = pending
+        if (current?.confirmed == true) {
+            return RestoredConfirmedExchange(
+                sas = current.sas ?: throw PairingActivationException(),
+                intent = current.intent.copyOf(),
+                canonicalServerBaseUrl = current.canonicalServerBaseUrl,
+            )
+        }
+        if (current != null) return null
+        val recovered = recoveryVault.restore() ?: return null
+        try {
+            val replacement = PendingExchange(
+                intent = recovered.intent.copyOf(),
+                canonicalServerBaseUrl = recovered.canonicalServerBaseUrl,
+                sendKey = recovered.sendKey.copyOf(),
+                receiveKey = recovered.receiveKey.copyOf(),
+                confirmed = true,
+                sas = recovered.sas,
+            )
+            pending = replacement
+            return RestoredConfirmedExchange(
+                sas = recovered.sas,
+                intent = recovered.intent.copyOf(),
+                canonicalServerBaseUrl = recovered.canonicalServerBaseUrl,
+            )
+        } finally {
+            recovered.dispose()
+        }
     }
 
     private fun decodeExact(value: String, expectedSize: Int): ByteArray {
@@ -195,14 +278,23 @@ internal class PairingV2NativeCompletion(private val context: Context) {
         val canonicalServerBaseUrl: String,
         val sendKey: ByteArray,
         val receiveKey: ByteArray,
+        var confirmed: Boolean = false,
+        var sas: String? = null,
     ) {
-        var confirmed = false
 
         fun dispose() {
             intent.fill(0)
             sendKey.fill(0)
             receiveKey.fill(0)
         }
+    }
+
+    internal data class RestoredConfirmedExchange(
+        val sas: String,
+        val intent: ByteArray,
+        val canonicalServerBaseUrl: String,
+    ) {
+        fun dispose() = intent.fill(0)
     }
 
     private companion object {
