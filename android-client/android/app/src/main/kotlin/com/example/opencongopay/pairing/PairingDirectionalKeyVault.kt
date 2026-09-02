@@ -45,7 +45,6 @@ internal object PairingDirectionalKeyFormat {
         val bearerToken = credential.bearerToken.toByteArray(StandardCharsets.UTF_8)
         try {
             if (bearerToken.size !in 1..8192 ||
-                bearerToken.size != credential.bearerToken.length ||
                 credential.bearerToken.any { it.code <= 0x20 || it.code == 0x7f }
             ) throw PairingDirectionalKeyStorageException()
             val fixedBytes =
