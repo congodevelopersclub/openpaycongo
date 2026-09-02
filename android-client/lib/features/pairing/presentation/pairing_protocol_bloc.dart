@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 /// Pairing crypto owns directional keys behind a platform boundary. BLoC owns
@@ -76,6 +78,13 @@ final class PairingProtocolStarted extends PairingProtocolEvent {
   final PairingProtocolCommand command;
 }
 
+/// App-unlocked startup requests native recovery through normal BLoC flow.
+final class PairingProtocolRecoveryRequested extends PairingProtocolEvent {
+  PairingProtocolRecoveryRequested(this.completion);
+
+  final Completer<void> completion;
+}
+
 /// UI sends only confirmation progression; no credential/key/envelope fields.
 final class PairingActivationRequested extends PairingProtocolEvent {
   const PairingActivationRequested();
@@ -125,6 +134,7 @@ final class PairingProtocolBloc
       recovery = recovery ?? const _UnavailableRecoveryPort(),
       super(const PairingProtocolIdle()) {
     on<PairingProtocolStarted>(_start);
+    on<PairingProtocolRecoveryRequested>(_restore);
     on<PairingActivationRequested>(_activate);
   }
 
@@ -135,8 +145,21 @@ final class PairingProtocolBloc
   var _activationActive = false;
   PairingActivationRequest? _activationRequest;
 
-  Future<void> restore() async {
-    if (_startActive || _activationActive || state is! PairingProtocolIdle) return;
+  Future<void> restore() {
+    if (isClosed) return Future<void>.value();
+    final Completer<void> completion = Completer<void>();
+    add(PairingProtocolRecoveryRequested(completion));
+    return completion.future;
+  }
+
+  Future<void> _restore(
+    PairingProtocolRecoveryRequested event,
+    Emitter<PairingProtocolState> emit,
+  ) async {
+    if (_startActive || _activationActive || state is! PairingProtocolIdle) {
+      event.completion.complete();
+      return;
+    }
     PairingRecoveredMaterial? material;
     try {
       material = await recovery.restore();
@@ -154,6 +177,7 @@ final class PairingProtocolBloc
       emit(const PairingProtocolRecoveryRequired());
     } finally {
       material?.dispose();
+      if (!event.completion.isCompleted) event.completion.complete();
     }
   }
 
