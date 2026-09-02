@@ -27,7 +27,8 @@ internal object PairingDirectionalKeyFormat {
     const val INSTALLATION_ID_BYTES = 16
     private const val CREDENTIAL_LENGTH_BYTES = 2
     private const val RECORD_VERSION: Byte = 3
-    private const val LEGACY_RECORD_VERSION: Byte = 2
+    private const val LEGACY_KEY_ONLY_RECORD_VERSION: Byte = 1
+    private const val LEGACY_IDENTITY_RECORD_VERSION: Byte = 2
 
     fun copyRecord(
         credential: PairingActivationCredential,
@@ -89,23 +90,35 @@ internal object PairingDirectionalKeyFormat {
         )
     }
 
-    fun legacyGeneration(record: ByteArray): PairingDirectionalKeyGeneration {
-        val expectedBytes = 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2)
-        if (record.size != expectedBytes || record[0] != LEGACY_RECORD_VERSION) {
-            throw PairingActivationException()
+    fun legacyGeneration(
+        credentialInstallationId: String,
+        record: ByteArray,
+    ): PairingDirectionalKeyGeneration {
+        return when {
+            record.size == 1 + (KEY_BYTES * 2) && record[0] == LEGACY_KEY_ONLY_RECORD_VERSION ->
+                PairingDirectionalKeyGeneration(
+                    installationId = credentialInstallationId,
+                    sendKey = record.copyOfRange(1, 1 + KEY_BYTES),
+                    receiveKey = record.copyOfRange(1 + KEY_BYTES, 1 + (KEY_BYTES * 2)),
+                )
+            record.size == 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) &&
+                record[0] == LEGACY_IDENTITY_RECORD_VERSION -> {
+                val installation = ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES).run {
+                    UUID(long, long).toString()
+                }
+                if (installation != credentialInstallationId) throw PairingActivationException()
+                val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+                PairingDirectionalKeyGeneration(
+                    installationId = installation,
+                    sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
+                    receiveKey = record.copyOfRange(
+                        sendKeyStart + KEY_BYTES,
+                        sendKeyStart + (KEY_BYTES * 2),
+                    ),
+                )
+            }
+            else -> throw PairingActivationException()
         }
-        val installation = ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES).run {
-            UUID(long, long).toString()
-        }
-        val sendKeyStart = 1 + INSTALLATION_ID_BYTES
-        return PairingDirectionalKeyGeneration(
-            installationId = installation,
-            sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
-            receiveKey = record.copyOfRange(
-                sendKeyStart + KEY_BYTES,
-                sendKeyStart + (KEY_BYTES * 2),
-            ),
-        )
     }
 }
 
@@ -210,8 +223,10 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
     }
 
     /**
-     * Earlier releases wrote two authenticated records. Migrate only when both
-     * are present and their installation IDs agree; otherwise fail closed.
+     * Earlier releases wrote two authenticated records. The shipped v1 key
+     * record has no identity, so it is bound to the separately authenticated
+     * credential. A short-lived v2 identity record is also accepted only when
+     * its embedded identity agrees with that credential.
      */
     private fun migrateLegacyGeneration(): ByteArray {
         val hasLegacyDirections =
@@ -225,9 +240,11 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
         )
         var generation: PairingDirectionalKeyGeneration? = null
         try {
-            generation = PairingDirectionalKeyFormat.legacyGeneration(legacyRecord)
             val credential = legacyCredentialVault.read()
-            if (credential.installationId != generation.installationId) throw PairingActivationException()
+            generation = PairingDirectionalKeyFormat.legacyGeneration(
+                credential.installationId,
+                legacyRecord,
+            )
             writeActiveGeneration(credential, generation.sendKey, generation.receiveKey)
             legacyAtomicFile.delete()
             legacyCredentialVault.delete()
