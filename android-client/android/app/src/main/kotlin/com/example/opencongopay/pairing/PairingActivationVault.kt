@@ -84,7 +84,7 @@ internal class LegacyPairingActivationCredentialVault(context: Context) {
         var ciphertext = ByteArray(0)
         var plaintext = ByteArray(0)
         try {
-            if (payload.size <= 13 || payload[0].toInt() != ENVELOPE_VERSION) {
+            if (payload.size <= 13 || payload[0] != ENVELOPE_VERSION) {
                 throw PairingActivationException()
             }
             nonce = payload.copyOfRange(1, 13)
