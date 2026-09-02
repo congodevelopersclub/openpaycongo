@@ -1,18 +1,14 @@
 package com.congodeveloperclub.opencongopay.pairing
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import org.json.JSONObject
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
-import java.security.SecureRandom
 import java.util.UUID
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
@@ -68,67 +64,74 @@ internal data class PairingActivationCredential(
     }
 }
 
-/** Keystore-only write sink. There is deliberately no credential read API. */
-internal class PairingActivationCredentialVault(context: Context) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "pairing_activation_credential_v2"))
+/**
+ * Read-only support for releases that persisted the credential separately from
+ * the directional keys. The first native envelope read atomically migrates the
+ * two authenticated legacy records into the active-generation vault.
+ */
+internal class LegacyPairingActivationCredentialVault(context: Context) {
+    private val file = AtomicFile(File(context.noBackupFilesDir, RECORD_FILE))
 
-    fun save(credential: PairingActivationCredential) {
-        val plaintext = JSONObject()
-            .put("version", 2)
-            .put("installation_id", credential.installationId)
-            .put("bearer_token", credential.bearerToken)
-            .toString()
-            .toByteArray(StandardCharsets.UTF_8)
-        val nonce = ByteArray(12).also(SecureRandom()::nextBytes)
-        var ciphertext = ByteArray(0)
-        var payload = ByteArray(0)
-        var output: java.io.FileOutputStream? = null
-        try {
-            ciphertext = Cipher.getInstance("AES/GCM/NoPadding").run {
-                init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, nonce))
-                updateAAD(AAD)
-                doFinal(plaintext)
-            }
-            payload = ByteArray(1 + nonce.size + ciphertext.size)
-            payload[0] = 1
-            System.arraycopy(nonce, 0, payload, 1, nonce.size)
-            System.arraycopy(ciphertext, 0, payload, 1 + nonce.size, ciphertext.size)
-            output = file.startWrite()
-            output.write(payload)
-            output.fd.sync()
-            file.finishWrite(output)
-            output = null
+    fun hasRecord(): Boolean = file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()
+
+    fun read(): PairingActivationCredential {
+        val payload = try {
+            file.openRead().use { it.readBytes() }
         } catch (_: Exception) {
-            if (output != null) file.failWrite(output)
+            throw PairingActivationException()
+        }
+        var nonce = ByteArray(0)
+        var ciphertext = ByteArray(0)
+        var plaintext = ByteArray(0)
+        try {
+            if (payload.size <= 13 || payload[0] != ENVELOPE_VERSION) {
+                throw PairingActivationException()
+            }
+            nonce = payload.copyOfRange(1, 13)
+            ciphertext = payload.copyOfRange(13, payload.size)
+            plaintext = Cipher.getInstance("AES/GCM/NoPadding").run {
+                init(Cipher.DECRYPT_MODE, existingKey(), GCMParameterSpec(GCM_TAG_BITS, nonce))
+                updateAAD(AAD)
+                doFinal(ciphertext)
+            }
+            return PairingActivationCredential.parse(plaintext)
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
             throw PairingActivationException()
         } finally {
-            plaintext.fill(0)
+            payload.fill(0)
             nonce.fill(0)
             ciphertext.fill(0)
-            payload.fill(0)
+            plaintext.fill(0)
         }
     }
 
-    private fun key(): SecretKey {
-        val store = try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } } catch (_: Exception) { throw PairingActivationException() }
-        val existing = try { store.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry } catch (_: Exception) { throw PairingActivationException() }
-        if (existing != null) return existing.secretKey
-        if (File(file.baseFile.path).exists() || File(file.baseFile.path + ".bak").exists()) throw PairingActivationException()
+    fun delete() = file.delete()
+
+    private fun existingKey(): SecretKey {
+        val store = try {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        }
         return try {
-            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-                init(KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setRandomizedEncryptionRequired(true)
-                    .setKeySize(256)
-                    .build())
-            }.generateKey()
-        } catch (_: Exception) { throw PairingActivationException() }
+            (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+                ?: throw PairingActivationException()
+        } catch (_: PairingActivationException) {
+            throw PairingActivationException()
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        }
     }
 
     private companion object {
-        const val ALIAS = "openpaycongo.pairing.activation-credential.v2"
-        val AAD = "openpaycongo/pairing/activation-credential/v2".toByteArray(StandardCharsets.US_ASCII)
+        const val RECORD_FILE = "pairing_activation_credential_v2"
+        const val KEY_ALIAS = "openpaycongo.pairing.activation-credential.v2"
+        const val ENVELOPE_VERSION: Byte = 1
+        const val GCM_TAG_BITS = 128
+        val AAD = "openpaycongo/pairing/activation-credential/v2"
+            .toByteArray(StandardCharsets.US_ASCII)
     }
 }
 

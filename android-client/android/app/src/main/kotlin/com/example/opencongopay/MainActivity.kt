@@ -28,9 +28,9 @@ import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustStorageExceptio
 import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustVault
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanGate
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
-import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyStorageException
-import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyVault
 import com.congodeveloperclub.opencongopay.pairing.PairingActivationException
+import com.congodeveloperclub.opencongopay.pairing.MobileEnvelopeVault
+import com.congodeveloperclub.opencongopay.pairing.PairingV2NativeCompletion
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -46,8 +46,9 @@ class MainActivity : FlutterFragmentActivity() {
     private val appLockChannelName = "openpaycongo/app_lock"
     private val pairingQrTrustChannelName = "openpaycongo/pairing_qr_trust"
     private val pairingQrScannerChannelName = "openpaycongo/pairing_qr_scanner"
-    private val pairingDirectionalKeysChannelName = "openpaycongo/pairing_directional_keys"
+    private val pairingCompletionChannelName = "openpaycongo/pairing_completion"
     private val pairingActivationChannelName = "openpaycongo/pairing_activation"
+    private val mobileEnvelopeChannelName = "openpaycongo/mobile_envelope"
     private val permissionRequestCode = 4201
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val accessGuard = SmsAccessGuard()
@@ -55,6 +56,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val appLockTasks = Executors.newSingleThreadExecutor()
     private val pairingQrTrustTasks = Executors.newSingleThreadExecutor()
     private val pairingDirectionalKeyTasks = Executors.newSingleThreadExecutor()
+    private val pairingV2Completion by lazy { PairingV2NativeCompletion(applicationContext) }
     private val pairingQrScanGate = PairingQrScanGate()
     private val smsTasks = GuardedTaskRunner(
         isCurrent = { generation -> smsAccessDenial(generation) == null },
@@ -80,10 +82,12 @@ class MainActivity : FlutterFragmentActivity() {
             .setMethodCallHandler(::handlePairingQrTrustCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingQrScannerChannelName)
             .setMethodCallHandler(::handlePairingQrScannerCall)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingDirectionalKeysChannelName)
-            .setMethodCallHandler(::handlePairingDirectionalKeyCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingCompletionChannelName)
+            .setMethodCallHandler(::handlePairingCompletionCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pairingActivationChannelName)
             .setMethodCallHandler(::handlePairingActivationCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mobileEnvelopeChannelName)
+            .setMethodCallHandler(::handleMobileEnvelopeCall)
     }
 
     override fun onResume() {
@@ -98,6 +102,7 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onDestroy() {
         pairingQrScanGate.fail()
+        pairingV2Completion.cancel()
         appLockTasks.shutdownNow()
         pairingQrTrustTasks.shutdownNow()
         pairingDirectionalKeyTasks.shutdownNow()
@@ -257,37 +262,54 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    private fun handlePairingDirectionalKeyCall(call: MethodCall, result: MethodChannel.Result) {
-        if (call.method != "save") {
-            result.notImplemented()
-            return
-        }
-        val arguments = call.arguments as? Map<*, *>
-        val sendKey = arguments?.get("send_key") as? ByteArray
-        val receiveKey = arguments?.get("receive_key") as? ByteArray
-        if (arguments == null || arguments.keys != setOf("send_key", "receive_key") ||
-            sendKey == null || receiveKey == null || sendKey.size != 32 || receiveKey.size != 32
-        ) {
-            sendKey?.fill(0)
-            receiveKey?.fill(0)
-            result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
-            return
-        }
+    private fun handlePairingCompletionCall(call: MethodCall, result: MethodChannel.Result) {
         pairingDirectionalKeyTasks.execute {
             try {
-                PairingDirectionalKeyVault(applicationContext).save(sendKey, receiveKey)
-                mainHandler.post { result.success(null) }
-            } catch (_: PairingDirectionalKeyStorageException) {
+                when (call.method) {
+                    "begin" -> {
+                        val arguments = call.arguments as? Map<*, *>
+                        val intentId = arguments?.get("intent_id") as? String
+                        val serverPublicKey = arguments?.get("server_public_key") as? String
+                        val pairingSecret = arguments?.get("pairing_secret") as? ByteArray
+                        if (arguments == null || arguments.keys != setOf("intent_id", "server_public_key", "pairing_secret") ||
+                            intentId == null || serverPublicKey == null || pairingSecret == null
+                        ) {
+                            pairingSecret?.fill(0)
+                            throw PairingActivationException()
+                        }
+                        try {
+                            val request = pairingV2Completion.begin(intentId, serverPublicKey, pairingSecret)
+                            mainHandler.post { result.success(request) }
+                        } finally {
+                            pairingSecret.fill(0)
+                        }
+                    }
+                    "accept" -> {
+                        val arguments = call.arguments as? Map<*, *>
+                        val intentId = arguments?.get("intent_id") as? String
+                        val nonce = arguments?.get("nonce") as? String
+                        val ciphertext = arguments?.get("ciphertext") as? String
+                        if (arguments == null || arguments.keys != setOf("intent_id", "nonce", "ciphertext") ||
+                            intentId == null || nonce == null || ciphertext == null
+                        ) throw PairingActivationException()
+                        val sas = pairingV2Completion.accept(intentId, nonce, ciphertext)
+                        mainHandler.post { result.success(sas) }
+                    }
+                    "cancel" -> {
+                        if (call.arguments != null) throw PairingActivationException()
+                        pairingV2Completion.cancel()
+                        mainHandler.post { result.success(null) }
+                    }
+                    else -> mainHandler.post { result.notImplemented() }
+                }
+            } catch (_: PairingActivationException) {
                 mainHandler.post {
-                    result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
+                    result.error("pairing_unavailable", "Pairing completion is unavailable", null)
                 }
             } catch (_: Exception) {
                 mainHandler.post {
-                    result.error("secure_storage_failure", "Pairing key storage is unavailable", null)
+                    result.error("pairing_unavailable", "Pairing completion is unavailable", null)
                 }
-            } finally {
-                sendKey.fill(0)
-                receiveKey.fill(0)
             }
         }
     }
@@ -312,7 +334,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
         pairingDirectionalKeyTasks.execute {
             try {
-                PairingDirectionalKeyVault(applicationContext).consumeActivation(intent, nonce, ciphertext)
+                pairingV2Completion.consumeActivation(intent, nonce, ciphertext)
                 mainHandler.post { result.success("activated") }
             } catch (_: PairingActivationException) {
                 mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }
@@ -324,6 +346,47 @@ class MainActivity : FlutterFragmentActivity() {
                 ciphertext.fill(0)
             }
         }
+    }
+
+    private fun handleMobileEnvelopeCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method != "seal") {
+            result.notImplemented()
+            return
+        }
+        val arguments = call.arguments as? Map<*, *>
+        val operation = arguments?.get("operation") as? String
+        val payload = arguments?.get("payload") as? ByteArray
+        if (arguments == null || arguments.keys != setOf("operation", "payload") || operation != "deposit" || payload == null) {
+            payload?.fill(0)
+            result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
+            return
+        }
+        val generation = requireSmsGatewayAccess(result)
+        if (generation == null) {
+            payload.fill(0)
+            return
+        }
+        smsTasks.submit(
+            generation = generation,
+            operation = {
+                try {
+                    MobileEnvelopeVault(
+                        context = applicationContext,
+                        accessLease = accessGuard.lease(
+                            permissionGranted = {
+                                checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                            },
+                            expectedGeneration = generation,
+                        ),
+                    ).seal(operation, payload)
+                } finally {
+                    payload.fill(0)
+                }
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("envelope_unavailable", "Mobile envelope is unavailable", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
     }
 
     private fun outboxIdentity(call: MethodCall): String =

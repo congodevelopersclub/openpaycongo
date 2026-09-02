@@ -127,4 +127,8 @@ Laravel submits this vector unchanged through `/mobile/envelopes` and decrypts t
 
 ## Compatibility and limits
 
-This endpoint is v1-only and currently accepts only deposits. It deliberately does not turn the legacy bearer-protected `POST /mobile/deposits` endpoint into an encrypted endpoint; that compatibility route remains separately protected. The next mobile slice must connect the Android native vault to this contract without allowing plaintext, directional keys, or the bearer credential into Dart, logs, backups, or telemetry.
+This endpoint is v1-only and currently accepts only deposits. It deliberately does not turn the legacy bearer-protected `POST /mobile/deposits` endpoint into an encrypted endpoint; that compatibility route remains separately protected.
+
+Android #211 implements local native sealing only: a foreground, unlocked bridge accepts a bounded deposit payload from Dart, reserves a Keystore-encrypted no-backup counter, reads the stored send key and installation ID from the same atomically promoted generation natively, and returns only version, installation id, counter, nonce, and ciphertext. It does not implement HTTP delivery, response decryption, acknowledgement, revocation, rotation, or recovery. The deposit payload necessarily originates in Dart before this boundary and must not be logged, persisted, or added to BLoC state.
+
+Pairing v2 owns the directional-key lifecycle in Android native code: it derives the keys with libsodium, holds them only in a process-scoped exchange while authenticating the completion response, then waits for activation to atomically promote the credential, installation identity, and both directions in one Keystore-backed vault record. Flutter receives only public completion request fields and the SAS. The native envelope path neither returns a directional key nor uses a bearer credential.
