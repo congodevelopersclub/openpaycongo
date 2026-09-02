@@ -57,6 +57,37 @@ void main() {
     expect(request.disposed, isTrue);
     expect(bloc.state.toString(), isNot(contains('bearer')));
   });
+
+  test('activation retains its exchange and disposes a replacement QR command', () async {
+    final _ActivationRequest request = _ActivationRequest();
+    final _Protocol protocol = _Protocol(activationRequest: request);
+    final _DeferredActivation activation = _DeferredActivation();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: protocol,
+      activation: activation,
+    );
+    addTearDown(bloc.close);
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+
+    bloc.add(const PairingActivationRequested());
+    await activation.started.future;
+    final _TrackedCommand replacement = _TrackedCommand();
+    bloc.add(PairingProtocolStarted(replacement));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(protocol.calls, 1);
+    expect(replacement.disposed, isTrue);
+    expect(request.disposed, isFalse);
+    final Future<PairingProtocolState> activated = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolActivated,
+    );
+    activation.complete(PairingActivationOutcome.activated);
+    expect(await activated, isA<PairingProtocolActivated>());
+    expect(request.disposed, isTrue);
+  });
 }
 
 final class _Command implements PairingProtocolCommand {
@@ -112,4 +143,17 @@ final class _Activation implements PairingActivationPort {
   final PairingActivationOutcome outcome;
   @override
   Future<PairingActivationOutcome> activate(PairingActivationRequest request) async => outcome;
+}
+
+final class _DeferredActivation implements PairingActivationPort {
+  final Completer<void> started = Completer<void>();
+  final Completer<PairingActivationOutcome> _result = Completer<PairingActivationOutcome>();
+
+  @override
+  Future<PairingActivationOutcome> activate(PairingActivationRequest request) {
+    started.complete();
+    return _result.future;
+  }
+
+  void complete(PairingActivationOutcome outcome) => _result.complete(outcome);
 }

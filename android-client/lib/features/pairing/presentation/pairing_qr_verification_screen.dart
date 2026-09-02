@@ -84,7 +84,8 @@ final class _Scaffold extends StatelessWidget {
                 onPressed:
                     qr is PairingQrScanning ||
                         protocol is PairingProtocolEstablishing ||
-                        protocol is PairingProtocolAwaitingConfirmation
+                        protocol is PairingProtocolAwaitingConfirmation ||
+                        protocol is PairingProtocolActivating
                     ? null
                     : () => context.read<PairingQrBloc>().add(
                         const PairingQrScanRequested(),

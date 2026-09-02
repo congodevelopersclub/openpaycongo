@@ -27,6 +27,7 @@ internal object PairingDirectionalKeyFormat {
     const val INSTALLATION_ID_BYTES = 16
     private const val CREDENTIAL_LENGTH_BYTES = 2
     private const val RECORD_VERSION: Byte = 3
+    private const val LEGACY_RECORD_VERSION: Byte = 2
 
     fun copyRecord(
         credential: PairingActivationCredential,
@@ -47,7 +48,8 @@ internal object PairingDirectionalKeyFormat {
                 bearerToken.size != credential.bearerToken.length ||
                 credential.bearerToken.any { it.code <= 0x20 || it.code == 0x7f }
             ) throw PairingDirectionalKeyStorageException()
-            val fixedBytes = 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
+            val fixedBytes =
+                1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
             return ByteArray(fixedBytes + bearerToken.size).also { record ->
                 record[0] = RECORD_VERSION
                 ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES)
@@ -66,12 +68,15 @@ internal object PairingDirectionalKeyFormat {
     }
 
     fun outboundMaterial(record: ByteArray): PairingOutboundMaterial {
-        val fixedBytes = 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
+        val fixedBytes =
+            1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES
         if (record.size < fixedBytes || record[0] != RECORD_VERSION) {
             throw PairingActivationException()
         }
-        val bearerTokenBytes = ByteBuffer.wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
-            .short.toInt() and 0xffff
+        val bearerTokenBytes = ByteBuffer
+            .wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
+            .short
+            .toInt() and 0xffff
         if (bearerTokenBytes !in 1..8192 || record.size != fixedBytes + bearerTokenBytes) {
             throw PairingActivationException()
         }
@@ -84,6 +89,25 @@ internal object PairingDirectionalKeyFormat {
             sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
         )
     }
+
+    fun legacyGeneration(record: ByteArray): PairingDirectionalKeyGeneration {
+        val expectedBytes = 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2)
+        if (record.size != expectedBytes || record[0] != LEGACY_RECORD_VERSION) {
+            throw PairingActivationException()
+        }
+        val installation = ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES).run {
+            UUID(long, long).toString()
+        }
+        val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+        return PairingDirectionalKeyGeneration(
+            installationId = installation,
+            sendKey = record.copyOfRange(sendKeyStart, sendKeyStart + KEY_BYTES),
+            receiveKey = record.copyOfRange(
+                sendKeyStart + KEY_BYTES,
+                sendKeyStart + (KEY_BYTES * 2),
+            ),
+        )
+    }
 }
 
 internal class PairingOutboundMaterial(
@@ -91,6 +115,17 @@ internal class PairingOutboundMaterial(
     val sendKey: ByteArray,
 ) {
     fun dispose() = sendKey.fill(0)
+}
+
+internal class PairingDirectionalKeyGeneration(
+    val installationId: String,
+    val sendKey: ByteArray,
+    val receiveKey: ByteArray,
+) {
+    fun dispose() {
+        sendKey.fill(0)
+        receiveKey.fill(0)
+    }
 }
 
 /**
@@ -102,21 +137,49 @@ internal class PairingOutboundMaterial(
 internal class PairingDirectionalKeyVault(private val context: Context) {
     private val recordFile = File(context.noBackupFilesDir, RECORD_FILE)
     private val atomicFile = AtomicFile(recordFile)
+    private val legacyRecordFile = File(context.noBackupFilesDir, LEGACY_RECORD_FILE)
+    private val legacyAtomicFile = AtomicFile(legacyRecordFile)
+    private val legacyCredentialVault = LegacyPairingActivationCredentialVault(context)
 
-    @Synchronized
     fun save(
         credential: PairingActivationCredential,
         sendKey: ByteArray,
         receiveKey: ByteArray,
+    ) = synchronized(STORAGE_LOCK) {
+        writeActiveGeneration(credential, sendKey, receiveKey)
+    }
+
+    /** Native-only outbound-envelope read. Never exposed to Flutter. */
+    fun readOutboundMaterial(): PairingOutboundMaterial = synchronized(STORAGE_LOCK) {
+        val record = readActiveRecord()
+        try {
+            PairingDirectionalKeyFormat.outboundMaterial(record)
+        } finally {
+            record.fill(0)
+        }
+    }
+
+    private fun writeActiveGeneration(
+        credential: PairingActivationCredential,
+        sendKey: ByteArray,
+        receiveKey: ByteArray,
     ) {
-        val plaintext = PairingDirectionalKeyFormat.copyRecord(credential, sendKey, receiveKey)
+        val plaintext = PairingDirectionalKeyFormat.copyRecord(
+            credential,
+            sendKey,
+            receiveKey,
+        )
         val nonce = ByteArray(GCM_NONCE_BYTES).also(SecureRandom()::nextBytes)
         var ciphertext = ByteArray(0)
         var payload = ByteArray(0)
         var output: java.io.FileOutputStream? = null
         try {
             ciphertext = Cipher.getInstance("AES/GCM/NoPadding").run {
-                init(Cipher.ENCRYPT_MODE, keyForWrite(), GCMParameterSpec(GCM_TAG_BITS, nonce))
+                init(
+                    Cipher.ENCRYPT_MODE,
+                    keyForWrite(),
+                    GCMParameterSpec(GCM_TAG_BITS, nonce),
+                )
                 updateAAD(AAD)
                 doFinal(plaintext)
             }
@@ -140,19 +203,52 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
         }
     }
 
-    /** Native-only outbound-envelope read. Never exposed to Flutter. */
-    @Synchronized
-    fun readOutboundMaterial(): PairingOutboundMaterial {
-        val record = decryptRecord()
+    private fun readActiveRecord(): ByteArray {
+        if (recordFile.exists() || File(recordFile.path + ".bak").exists()) {
+            return decryptRecord(atomicFile, keyForExisting(KEY_ALIAS), AAD)
+        }
+        return migrateLegacyGeneration()
+    }
+
+    /**
+     * Earlier releases wrote two authenticated records. Migrate only when both
+     * are present and their installation IDs agree; otherwise fail closed.
+     */
+    private fun migrateLegacyGeneration(): ByteArray {
+        val hasLegacyDirections =
+            legacyRecordFile.exists() || File(legacyRecordFile.path + ".bak").exists()
+        val hasLegacyCredential = legacyCredentialVault.hasRecord()
+        if (!hasLegacyDirections || !hasLegacyCredential) throw PairingActivationException()
+        val legacyRecord = decryptRecord(
+            legacyAtomicFile,
+            keyForExisting(LEGACY_KEY_ALIAS),
+            LEGACY_AAD,
+        )
+        var generation: PairingDirectionalKeyGeneration? = null
         try {
-            return PairingDirectionalKeyFormat.outboundMaterial(record)
+            generation = PairingDirectionalKeyFormat.legacyGeneration(legacyRecord)
+            val credential = legacyCredentialVault.read()
+            if (credential.installationId != generation.installationId) throw PairingActivationException()
+            writeActiveGeneration(credential, generation.sendKey, generation.receiveKey)
+            legacyAtomicFile.delete()
+            legacyCredentialVault.delete()
+            return decryptRecord(atomicFile, keyForExisting(KEY_ALIAS), AAD)
         } finally {
-            record.fill(0)
+            legacyRecord.fill(0)
+            generation?.dispose()
         }
     }
 
-    private fun decryptRecord(): ByteArray {
-        val payload = try { atomicFile.openRead().use { it.readBytes() } } catch (_: Exception) { throw PairingActivationException() }
+    private fun decryptRecord(
+        source: AtomicFile,
+        key: SecretKey,
+        aad: ByteArray,
+    ): ByteArray {
+        val payload = try {
+            source.openRead().use { it.readBytes() }
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        }
         var nonce = ByteArray(0)
         var ciphertext = ByteArray(0)
         try {
@@ -160,8 +256,8 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
             nonce = payload.copyOfRange(1, 1 + GCM_NONCE_BYTES)
             ciphertext = payload.copyOfRange(1 + GCM_NONCE_BYTES, payload.size)
             return Cipher.getInstance("AES/GCM/NoPadding").run {
-                init(Cipher.DECRYPT_MODE, keyForRead(), GCMParameterSpec(GCM_TAG_BITS, nonce))
-                updateAAD(AAD)
+                init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, nonce))
+                updateAAD(aad)
                 doFinal(ciphertext)
             }
         } catch (_: PairingActivationException) {
@@ -209,10 +305,14 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
         }
     }
 
-    private fun keyForRead(): SecretKey {
-        val store = try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } } catch (_: Exception) { throw PairingActivationException() }
+    private fun keyForExisting(alias: String): SecretKey {
+        val store = try {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        } catch (_: Exception) {
+            throw PairingActivationException()
+        }
         return try {
-            (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+            (store.getEntry(alias, null) as? KeyStore.SecretKeyEntry)?.secretKey
                 ?: throw PairingActivationException()
         } catch (_: PairingActivationException) {
             throw PairingActivationException()
@@ -222,12 +322,17 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
     }
 
     private companion object {
+        val STORAGE_LOCK = Any()
         const val RECORD_FILE = "pairing_active_generation_v1"
         const val KEY_ALIAS = "openpaycongo.pairing.active-generation.v1"
+        const val LEGACY_RECORD_FILE = "pairing_directional_keys_v1"
+        const val LEGACY_KEY_ALIAS = "openpaycongo.pairing.directional-keys.v1"
         const val ENVELOPE_VERSION: Byte = 1
         const val GCM_NONCE_BYTES = 12
         const val GCM_TAG_BITS = 128
         val AAD = "openpaycongo/pairing/active-generation/v1"
+            .toByteArray(StandardCharsets.US_ASCII)
+        val LEGACY_AAD = "openpaycongo/pairing/directional-keys/v1"
             .toByteArray(StandardCharsets.US_ASCII)
     }
 }

@@ -4,6 +4,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.nio.ByteBuffer
 
 class PairingDirectionalKeyFormatTest {
     @Test
@@ -24,6 +25,26 @@ class PairingDirectionalKeyFormatTest {
         receive.fill(9)
         assertEquals(1, material.sendKey[0].toInt())
         material.dispose()
+    }
+
+    @Test
+    fun readsTheLegacyGenerationNeededForAnAtomicUpgrade() {
+        val installationId = "123e4567-e89b-12d3-a456-426614174000"
+        val uuid = java.util.UUID.fromString(installationId)
+        val record = ByteArray(81)
+        record[0] = 2
+        ByteBuffer.wrap(record, 1, 16)
+            .putLong(uuid.mostSignificantBits)
+            .putLong(uuid.leastSignificantBits)
+        ByteArray(32) { 3 }.copyInto(record, destinationOffset = 17)
+        ByteArray(32) { 4 }.copyInto(record, destinationOffset = 49)
+
+        val generation = PairingDirectionalKeyFormat.legacyGeneration(record)
+
+        assertEquals(installationId, generation.installationId)
+        assertEquals(3, generation.sendKey[0].toInt())
+        assertEquals(4, generation.receiveKey[0].toInt())
+        generation.dispose()
     }
 
     @Test

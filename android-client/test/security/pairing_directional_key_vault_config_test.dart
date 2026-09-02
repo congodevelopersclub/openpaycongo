@@ -14,6 +14,9 @@ void main() {
     final String completion = File(
       'android/app/src/main/kotlin/com/example/opencongopay/pairing/PairingV2NativeCompletion.kt',
     ).readAsStringSync();
+    final String protocol = File(
+      'lib/features/pairing/presentation/pairing_protocol_bloc.dart',
+    ).readAsStringSync();
     final String bridge = File(
       'lib/features/pairing/infrastructure/platform_pairing_v2_crypto.dart',
     ).readAsStringSync();
@@ -29,6 +32,9 @@ void main() {
     expect(vault, contains('INSTALLATION_ID_BYTES = 16'));
     expect(vault, contains('PairingOutboundMaterial'));
     expect(vault, contains('credential.bearerToken'));
+    expect(vault, contains('STORAGE_LOCK'));
+    expect(vault, contains('LEGACY_RECORD_FILE'));
+    expect(vault, contains('LegacyPairingActivationCredentialVault'));
     expect(vault, isNot(contains('fun read(')));
     expect(activity, contains('openpaycongo/pairing_completion'));
     expect(activity, isNot(contains('openpaycongo/pairing_directional_keys')));
@@ -39,7 +45,8 @@ void main() {
     expect(completion, contains('current.sendKey'));
     expect(completion, contains('current.receiveKey'));
     expect(completion, contains('PairingDirectionalKeyVault(context).save('));
-    expect(completion, isNot(contains('PairingActivationCredentialVault')));
+    expect(completion, isNot(contains('PairingActivationCredentialVault(context).save')));
+    expect(protocol, contains('_activationActive ||'));
     expect(completion, isNot(contains('"send_key"')));
     expect(completion, isNot(contains('"receive_key"')));
     expect(bridge, isNot(contains('send_key')));
