@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\PreventPairingIntentCaching;
+use App\Http\Middleware\RequireAcknowledgedMobileActivation;
 use App\Http\Middleware\RequireConfirmedTwoFactorForPasskeys;
 use App\Http\Middleware\RequireVerifiedPairingIntentIssuer;
 use App\Http\Responses\PairingProblem;
@@ -38,6 +39,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'abilities' => CheckAbilities::class,
             'ability' => CheckForAnyAbility::class,
+            'mobile.activation' => RequireAcknowledgedMobileActivation::class,
             'pairing.issuer' => RequireVerifiedPairingIntentIssuer::class,
         ]);
         $middleware->appendToGroup('web', RequireConfirmedTwoFactorForPasskeys::class);

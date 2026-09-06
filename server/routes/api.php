@@ -42,11 +42,11 @@ Route::get('/mobile/identity', static function () {
     $installation = request()->user('mobile');
 
     return response()->json(['organization_id' => $installation->organization_id], 200, ['cache-control' => 'no-store']);
-})->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'throttle:mobile-api'])
+})->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'])
     ->name('mobile.identity');
 
 Route::post('/mobile/deposits', StoreMobileDepositController::class)
-    ->middleware(['auth:mobile', 'abilities:mobile:deposits:write', 'throttle:mobile-api'])
+    ->middleware(['auth:mobile', 'abilities:mobile:deposits:write', 'mobile.activation', 'throttle:mobile-api'])
     ->name('mobile.deposits.store');
 
 Route::post('/mobile/envelopes', StoreMobileEnvelopeController::class)
