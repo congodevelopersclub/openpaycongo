@@ -41,12 +41,11 @@ final class OperatorSmsPatternReviewTest extends TestCase
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                                'provider' => 'ORANGE_MONEY',
-                                'sender' => 'ORANGE',
-                                'template' => 'Paid {amount} {currency} ref {reference}',
-                            ], JSON_THROW_ON_ERROR),
-                    ],
-                    ],
+                            'provider' => 'ORANGE_MONEY',
+                            'sender' => 'ORANGE',
+                            'template' => 'Paid {amount} {currency} ref {reference}',
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
                 ]],
             ]),
         ]);

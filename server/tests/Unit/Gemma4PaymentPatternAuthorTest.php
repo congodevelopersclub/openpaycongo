@@ -24,12 +24,11 @@ final class Gemma4PaymentPatternAuthorTest extends TestCase
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                                'provider' => 'ORANGE_MONEY',
-                                'sender' => 'ORANGE',
-                                'template' => 'Paid {amount} {currency} ref {reference}',
-                            ], JSON_THROW_ON_ERROR),
-                    ],
-                    ],
+                            'provider' => 'ORANGE_MONEY',
+                            'sender' => 'ORANGE',
+                            'template' => 'Paid {amount} {currency} ref {reference}',
+                        ], JSON_THROW_ON_ERROR),
+                    ]],
                 ]],
             ]),
         ]);
@@ -65,8 +64,8 @@ final class Gemma4PaymentPatternAuthorTest extends TestCase
 
         Http::fake([
             '*' => Http::response([
-            'choices' => [[
-                'message' => ['content' => '{"provider":"ORANGE_MONEY"}'],
+                'choices' => [[
+                    'message' => ['content' => '{"provider":"ORANGE_MONEY"}'],
                 ]],
             ]),
         ]);
