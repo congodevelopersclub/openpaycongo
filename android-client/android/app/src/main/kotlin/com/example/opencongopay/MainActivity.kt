@@ -441,7 +441,7 @@ class MainActivity : FlutterFragmentActivity() {
             return
         }
         val generation = requireSmsGatewayAccess(result) ?: return
-        smsTasks.submit(
+        smsTasks.submitWithCommitFence(
             generation = generation,
             operation = { commit ->
                 MobileEnvelopeVault(

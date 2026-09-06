@@ -79,7 +79,7 @@ internal class GuardedTaskRunner(
         onSuccess: (T) -> Unit,
         onFailure: (Throwable) -> Unit,
         onDenied: () -> Unit,
-    ): GuardedSubmitResult = submit(
+    ): GuardedSubmitResult = submitWithCommitFence(
         generation = generation,
         operation = { _: GuardedTaskCommitFence -> operation() },
         onSuccess = onSuccess,
@@ -88,7 +88,7 @@ internal class GuardedTaskRunner(
     )
 
     @Synchronized
-    fun <T> submit(
+    fun <T> submitWithCommitFence(
         generation: Long,
         operation: (GuardedTaskCommitFence) -> T,
         onSuccess: (T) -> Unit,
