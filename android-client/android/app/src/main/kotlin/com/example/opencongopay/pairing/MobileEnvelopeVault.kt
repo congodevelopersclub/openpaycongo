@@ -181,6 +181,15 @@ internal object MobileEnvelopeNative {
     external fun open(receiveKey: ByteArray, nonce: ByteArray, ciphertext: ByteArray, aad: ByteArray): ByteArray?
 }
 
+/** Distinguishes protected acknowledgement sealing from acknowledgement opening. */
+internal class PairingActivationAcknowledgementAccess(
+    private val accessLease: SensitiveOperationLease,
+) {
+    fun <T> seal(action: () -> T): T = accessLease.use(action)
+
+    fun <T> open(action: () -> T): T = accessLease.use(action)
+}
+
 /**
  * Native-only outbound envelope vault. It obtains pairing material locally,
  * persists next counter before sealing, and returns routing-safe ciphertext.
@@ -193,6 +202,7 @@ internal class MobileEnvelopeVault(
 ) {
     private val counterStore = AndroidMobileEnvelopeCounterStore(context)
     private val counterAllocator = MobileEnvelopeCounterAllocator(counterStore)
+    private val acknowledgementAccess = PairingActivationAcknowledgementAccess(accessLease)
 
     @Synchronized
     fun seal(operation: String, payload: ByteArray): Map<String, Any> {
@@ -204,11 +214,13 @@ internal class MobileEnvelopeVault(
     /** This is the sole native path allowed before pairing becomes active. */
     @Synchronized
     fun sealActivationAcknowledgement(): Map<String, Any> =
-        sealWithOutboundMaterial(
-            "activation_acknowledgement",
-            ByteArray(0),
-            activationAcknowledgement = true,
-        )
+        acknowledgementAccess.seal {
+            sealWithOutboundMaterial(
+                "activation_acknowledgement",
+                ByteArray(0),
+                activationAcknowledgement = true,
+            )
+        }
 
     private fun sealWithOutboundMaterial(
         operation: String,
@@ -287,14 +299,16 @@ internal class MobileEnvelopeVault(
         status: Int,
         nonceValue: String,
         ciphertextValue: String,
-    ): String = openWithInboundMaterial(
-        installationValue,
-        counterValue,
-        status,
-        nonceValue,
-        ciphertextValue,
-        activationAcknowledgement = true,
-    )
+    ): String = acknowledgementAccess.open {
+        openWithInboundMaterial(
+            installationValue,
+            counterValue,
+            status,
+            nonceValue,
+            ciphertextValue,
+            activationAcknowledgement = true,
+        )
+    }
 
     private fun openWithInboundMaterial(
         installationValue: String,
@@ -310,42 +324,40 @@ internal class MobileEnvelopeVault(
         var aad = ByteArray(0)
         var plaintext = ByteArray(0)
         try {
-            return accessLease.use {
-                val installationId = try {
-                    UUID.fromString(installationValue)
-                } catch (_: Exception) {
-                    throw MobileEnvelopeException()
-                }
-                if (installationId.toString() != installationValue) throw MobileEnvelopeException()
-                val counter = MobileEnvelopeFormat.canonicalCounter(counterValue)
-                nonce = MobileEnvelopeFormat.decodeCanonicalBase64Url(
-                    nonceValue,
-                    MOBILE_ENVELOPE_NONCE_BYTES,
-                    MOBILE_ENVELOPE_NONCE_BYTES,
-                )
-                ciphertext = MobileEnvelopeFormat.decodeCanonicalBase64Url(
-                    ciphertextValue,
-                    MOBILE_ENVELOPE_TAG_BYTES,
-                    MobileEnvelopeFormat.maximumResponseCiphertextBytes(),
-                )
-                val directionalVault = PairingDirectionalKeyVault(context)
-                inbound = if (activationAcknowledgement) {
-                    directionalVault.readPendingActivationAcknowledgementInboundMaterial()
-                } else {
-                    directionalVault.readInboundMaterial()
-                }
-                if (inbound!!.installationId != installationValue) throw MobileEnvelopeException()
-                aad = MobileEnvelopeFormat.responseAad(installationId, counter, status)
-                plaintext = MobileEnvelopeNative.open(inbound!!.receiveKey, nonce, ciphertext, aad)
-                    ?: throw MobileEnvelopeException()
-                val outcome = if (activationAcknowledgement) {
-                    MobileEnvelopeFormat.activationAcknowledgementOutcome(status, plaintext)
-                } else {
-                    MobileEnvelopeFormat.responseOutcome(status, plaintext)
-                }
-                if (activationAcknowledgement) directionalVault.markActivationAcknowledged()
-                outcome
+            val installationId = try {
+                UUID.fromString(installationValue)
+            } catch (_: Exception) {
+                throw MobileEnvelopeException()
             }
+            if (installationId.toString() != installationValue) throw MobileEnvelopeException()
+            val counter = MobileEnvelopeFormat.canonicalCounter(counterValue)
+            nonce = MobileEnvelopeFormat.decodeCanonicalBase64Url(
+                nonceValue,
+                MOBILE_ENVELOPE_NONCE_BYTES,
+                MOBILE_ENVELOPE_NONCE_BYTES,
+            )
+            ciphertext = MobileEnvelopeFormat.decodeCanonicalBase64Url(
+                ciphertextValue,
+                MOBILE_ENVELOPE_TAG_BYTES,
+                MobileEnvelopeFormat.maximumResponseCiphertextBytes(),
+            )
+            val directionalVault = PairingDirectionalKeyVault(context)
+            inbound = if (activationAcknowledgement) {
+                directionalVault.readPendingActivationAcknowledgementInboundMaterial()
+            } else {
+                directionalVault.readInboundMaterial()
+            }
+            if (inbound!!.installationId != installationValue) throw MobileEnvelopeException()
+            aad = MobileEnvelopeFormat.responseAad(installationId, counter, status)
+            plaintext = MobileEnvelopeNative.open(inbound!!.receiveKey, nonce, ciphertext, aad)
+                ?: throw MobileEnvelopeException()
+            val outcome = if (activationAcknowledgement) {
+                MobileEnvelopeFormat.activationAcknowledgementOutcome(status, plaintext)
+            } else {
+                MobileEnvelopeFormat.responseOutcome(status, plaintext)
+            }
+            if (activationAcknowledgement) directionalVault.markActivationAcknowledged()
+            return outcome
         } catch (_: MobileEnvelopeException) {
             throw MobileEnvelopeException()
         } catch (_: Exception) {

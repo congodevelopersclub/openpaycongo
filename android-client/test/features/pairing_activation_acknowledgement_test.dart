@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -80,4 +81,76 @@ void main() {
       'ciphertext',
     ]);
   });
+
+  test('one deadline bounds acknowledgement exchange and leaves retry recoverable', () async {
+    final _DeferredAcknowledgementPost post = _DeferredAcknowledgementPost();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall call) async {
+          expect(call.method, 'sealAcknowledgement');
+          return _envelope();
+        });
+    final PairingV2ActivationAcknowledgementPort port =
+        PairingV2ActivationAcknowledgementPort(
+      vault: const PlatformPairingActivationAcknowledgementVault(),
+      timeout: const Duration(milliseconds: 10),
+      post: post.call,
+    );
+
+    final PairingActivationAcknowledgementOutcome outcome = await port.acknowledge();
+
+    expect(outcome, PairingActivationAcknowledgementOutcome.retryable);
+    expect(post.calls, 1);
+  });
+
+  test('retry seals a fresh envelope and opens only authenticated acknowledgement', () async {
+    var seals = 0;
+    var opens = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall call) async {
+          return switch (call.method) {
+            'sealAcknowledgement' => _envelope(counter: '${++seals}'),
+            'openAcknowledgement' => opens++ == 0 ? 'unavailable' : 'acknowledged',
+            _ => throw PlatformException(code: 'unexpected'),
+          };
+        });
+    final PairingV2ActivationAcknowledgementPort port =
+        PairingV2ActivationAcknowledgementPort(
+      vault: const PlatformPairingActivationAcknowledgementVault(),
+      post: (_, PairingActivationAcknowledgementEnvelope envelope) async =>
+          PairingActivationAcknowledgementHttpResponse(
+            status: 201,
+            nonce: 'response-nonce-${envelope.counter}',
+            ciphertext: 'response-ciphertext-${envelope.counter}',
+          ),
+    );
+
+    final PairingActivationAcknowledgementOutcome first = await port.acknowledge();
+    final PairingActivationAcknowledgementOutcome second = await port.acknowledge();
+
+    expect(first, PairingActivationAcknowledgementOutcome.retryable);
+    expect(second, PairingActivationAcknowledgementOutcome.acknowledged);
+    expect(seals, 2);
+    expect(opens, 2);
+  });
+}
+
+Map<String, Object> _envelope({String counter = '7'}) => <String, Object>{
+  'version': 1,
+  'server_base_url': 'https://pairing.example.test',
+  'installation_id': '123e4567-e89b-12d3-a456-426614174000',
+  'counter': counter,
+  'nonce': 'outer-request-nonce',
+  'ciphertext': 'outer-request-ciphertext',
+};
+
+final class _DeferredAcknowledgementPost {
+  var calls = 0;
+
+  Future<PairingActivationAcknowledgementHttpResponse?> call(
+    HttpClient client,
+    PairingActivationAcknowledgementEnvelope envelope,
+  ) {
+    calls += 1;
+    return Completer<PairingActivationAcknowledgementHttpResponse?>().future;
+  }
 }

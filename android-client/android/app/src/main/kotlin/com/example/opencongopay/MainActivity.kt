@@ -407,14 +407,24 @@ class MainActivity : FlutterFragmentActivity() {
             result.error("recovery_required", "Pairing activation recovery is required", null)
             return
         }
-        pairingDirectionalKeyTasks.execute {
-            try {
-                val envelope = MobileEnvelopeVault(applicationContext).sealActivationAcknowledgement()
-                mainHandler.post { result.success(envelope) }
-            } catch (_: Exception) {
-                mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }
-            }
-        }
+        val generation = requireSmsGatewayAccess(result) ?: return
+        smsTasks.submit(
+            generation = generation,
+            operation = {
+                MobileEnvelopeVault(
+                    context = applicationContext,
+                    accessLease = accessGuard.lease(
+                        permissionGranted = {
+                            checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                        },
+                        expectedGeneration = generation,
+                    ),
+                ).sealActivationAcknowledgement()
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("recovery_required", "Pairing activation recovery is required", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
     }
 
     private fun openActivationAcknowledgement(call: MethodCall, result: MethodChannel.Result) {
@@ -430,20 +440,30 @@ class MainActivity : FlutterFragmentActivity() {
             result.error("recovery_required", "Pairing activation recovery is required", null)
             return
         }
-        pairingDirectionalKeyTasks.execute {
-            try {
-                val outcome = MobileEnvelopeVault(applicationContext).openActivationAcknowledgement(
+        val generation = requireSmsGatewayAccess(result) ?: return
+        smsTasks.submit(
+            generation = generation,
+            operation = {
+                MobileEnvelopeVault(
+                    context = applicationContext,
+                    accessLease = accessGuard.lease(
+                        permissionGranted = {
+                            checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                        },
+                        expectedGeneration = generation,
+                    ),
+                ).openActivationAcknowledgement(
                     installationId,
                     counter,
                     status,
                     nonce,
                     ciphertext,
                 )
-                mainHandler.post { result.success(outcome) }
-            } catch (_: Exception) {
-                mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }
-            }
-        }
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("recovery_required", "Pairing activation recovery is required", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
     }
 
     private fun handleMobileEnvelopeCall(call: MethodCall, result: MethodChannel.Result) {

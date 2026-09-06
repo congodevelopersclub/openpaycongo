@@ -23,6 +23,25 @@ final class PairingActivationAcknowledgementEnvelope {
   final String ciphertext;
 }
 
+/// The only HTTP result allowed back to the acknowledgement port.
+final class PairingActivationAcknowledgementHttpResponse {
+  const PairingActivationAcknowledgementHttpResponse({
+    required this.status,
+    required this.nonce,
+    required this.ciphertext,
+  });
+
+  final int status;
+  final String nonce;
+  final String ciphertext;
+}
+
+typedef PairingActivationAcknowledgementPost =
+    Future<PairingActivationAcknowledgementHttpResponse?> Function(
+      HttpClient client,
+      PairingActivationAcknowledgementEnvelope envelope,
+    );
+
 /// Native bridge; native code alone can mark the installation active.
 final class PlatformPairingActivationAcknowledgementVault {
   const PlatformPairingActivationAcknowledgementVault()
@@ -116,10 +135,15 @@ final class PairingV2ActivationAcknowledgementPort
   PairingV2ActivationAcknowledgementPort({
     required this.vault,
     this.timeout = const Duration(seconds: 15),
-  });
+    PairingActivationAcknowledgementPost? post,
+    HttpClient Function()? httpClientFactory,
+  }) : _post = post ?? _postEnvelope,
+       _httpClientFactory = httpClientFactory ?? HttpClient.new;
 
   final PlatformPairingActivationAcknowledgementVault vault;
   final Duration timeout;
+  final PairingActivationAcknowledgementPost _post;
+  final HttpClient Function() _httpClientFactory;
   static const int _maximumResponseBytes = 1024;
 
   @override
@@ -133,37 +157,18 @@ final class PairingV2ActivationAcknowledgementPort
     } on Object {
       return PairingActivationAcknowledgementOutcome.recoveryRequired;
     }
-    final HttpClient client = HttpClient()..connectionTimeout = timeout;
+    final HttpClient client = _httpClientFactory();
     try {
-      final Uri endpoint = _endpointFor(envelope.serverBaseUrl);
-      final HttpClientRequest request = await client.postUrl(endpoint).timeout(timeout);
-      request
-        ..followRedirects = false
-        ..maxRedirects = 0
-        ..headers.contentType = ContentType.json
-        ..headers.set(HttpHeaders.acceptHeader, ContentType.json.mimeType)
-        ..write(jsonEncode(<String, Object>{
-          'version': 1,
-          'installation_id': envelope.installationId,
-          'counter': envelope.counter,
-          'nonce': envelope.nonce,
-          'ciphertext': envelope.ciphertext,
-        }));
-      final HttpClientResponse response = await request.close().timeout(timeout);
-      if (response.statusCode != HttpStatus.created || response.contentLength > _maximumResponseBytes) {
+      final PairingActivationAcknowledgementHttpResponse? response =
+          await _post(client, envelope).timeout(timeout);
+      if (response == null) {
         return PairingActivationAcknowledgementOutcome.retryable;
       }
-      final List<int> body = <int>[];
-      await for (final List<int> chunk in response.timeout(timeout)) {
-        body.addAll(chunk);
-        if (body.length > _maximumResponseBytes) return PairingActivationAcknowledgementOutcome.retryable;
-      }
-      final ({String nonce, String ciphertext}) outer = _responseOuter(body);
       return await vault.open(
         request: envelope,
-        status: response.statusCode,
-        nonce: outer.nonce,
-        ciphertext: outer.ciphertext,
+        status: response.status,
+        nonce: response.nonce,
+        ciphertext: response.ciphertext,
       )
           ? PairingActivationAcknowledgementOutcome.acknowledged
           : PairingActivationAcknowledgementOutcome.retryable;
@@ -174,7 +179,43 @@ final class PairingV2ActivationAcknowledgementPort
     }
   }
 
-  Uri _endpointFor(String serverBaseUrl) {
+  static Future<PairingActivationAcknowledgementHttpResponse?> _postEnvelope(
+    HttpClient client,
+    PairingActivationAcknowledgementEnvelope envelope,
+  ) async {
+    final Uri endpoint = _endpointFor(envelope.serverBaseUrl);
+    final HttpClientRequest request = await client.postUrl(endpoint);
+    request
+      ..followRedirects = false
+      ..maxRedirects = 0
+      ..headers.contentType = ContentType.json
+      ..headers.set(HttpHeaders.acceptHeader, ContentType.json.mimeType)
+      ..write(jsonEncode(<String, Object>{
+        'version': 1,
+        'installation_id': envelope.installationId,
+        'counter': envelope.counter,
+        'nonce': envelope.nonce,
+        'ciphertext': envelope.ciphertext,
+      }));
+    final HttpClientResponse response = await request.close();
+    if (response.statusCode != HttpStatus.created ||
+        response.contentLength > _maximumResponseBytes) {
+      return null;
+    }
+    final List<int> body = <int>[];
+    await for (final List<int> chunk in response) {
+      body.addAll(chunk);
+      if (body.length > _maximumResponseBytes) return null;
+    }
+    final ({String nonce, String ciphertext}) outer = _responseOuter(body);
+    return PairingActivationAcknowledgementHttpResponse(
+      status: response.statusCode,
+      nonce: outer.nonce,
+      ciphertext: outer.ciphertext,
+    );
+  }
+
+  static Uri _endpointFor(String serverBaseUrl) {
     final Uri base = Uri.parse(serverBaseUrl);
     if (base.scheme != 'https' ||
         !base.hasAuthority ||
@@ -189,7 +230,7 @@ final class PairingV2ActivationAcknowledgementPort
     return base.replace(path: '/mobile/envelopes', query: null, fragment: null);
   }
 
-  ({String nonce, String ciphertext}) _responseOuter(List<int> body) {
+  static ({String nonce, String ciphertext}) _responseOuter(List<int> body) {
     if (body.length > _maximumResponseBytes) throw const FormatException();
     final Object? decoded = jsonDecode(utf8.decode(body, allowMalformed: false));
     if (decoded is! Map<Object?, Object?> ||
