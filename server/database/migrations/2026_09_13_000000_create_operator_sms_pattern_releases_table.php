@@ -12,7 +12,11 @@ return new class extends Migration
     {
         Schema::create('operator_sms_pattern_releases', function (Blueprint $table): void {
             $table->uuid('id')->primary();
-            $table->foreignUuid('operator_sms_pattern_proposal_id')->constrained()->restrictOnDelete();
+            $table->uuid('operator_sms_pattern_proposal_id');
+            $table->foreign('operator_sms_pattern_proposal_id', 'operator_sms_pattern_release_proposal_fk')
+                ->references('id')
+                ->on('operator_sms_pattern_proposals')
+                ->restrictOnDelete();
             $table->uuid('organization_id')->index();
             $table->string('provider', 32);
             $table->string('sender', 64);
