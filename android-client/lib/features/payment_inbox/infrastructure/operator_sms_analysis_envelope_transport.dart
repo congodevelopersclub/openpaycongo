@@ -124,7 +124,12 @@ final class OperatorSmsAnalysisEvidence {
       'provider': provider,
       'sender': sender,
       'sms_body': body,
-      'received_at': canonicalSecond.toIso8601String(),
+      // The encrypted server contract intentionally accepts only canonical UTC
+      // whole seconds. Dart serializes zero milliseconds as `.000Z`, so strip
+      // that representation rather than widening the server's input surface.
+      'received_at': canonicalSecond
+          .toIso8601String()
+          .replaceFirst(RegExp(r'\.000Z$'), 'Z'),
     };
   }
 }
