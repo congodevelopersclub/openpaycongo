@@ -25,7 +25,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('operator_sms_interpretation_requests', function (Blueprint $table): void {
-            $table->dropForeign('operator_sms_interpretation_proposal_fk');
+            if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+                $table->dropForeign('operator_sms_interpretation_proposal_fk');
+            }
             $table->dropColumn([
                 'provider',
                 'analysis_status',

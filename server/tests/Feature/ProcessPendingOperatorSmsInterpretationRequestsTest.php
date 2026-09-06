@@ -75,7 +75,7 @@ final class ProcessPendingOperatorSmsInterpretationRequestsTest extends TestCase
     /** @param array<string, mixed> $overrides */
     private function request(array $overrides = []): OperatorSmsInterpretationRequest
     {
-        $installation = SourceInstallation::query()->firstOrCreate(['id' => '00000000-0000-4000-8000-000000000431'], [
+        $installation = SourceInstallation::query()->firstOrCreate(['installation_digest' => hash('sha256', 'operator-sms-analysis')], [
             'id' => '00000000-0000-4000-8000-000000000431',
             'organization_id' => '00000000-0000-4000-8000-000000000401',
             'installation_digest' => hash('sha256', 'operator-sms-analysis'),

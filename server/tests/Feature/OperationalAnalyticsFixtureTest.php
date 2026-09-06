@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_14_000000_create_operator_sms_interpretation_requests_table';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_15_000000_add_analysis_lifecycle_to_operator_sms_interpretation_requests_table';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
