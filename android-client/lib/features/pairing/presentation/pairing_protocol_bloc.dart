@@ -203,6 +203,7 @@ final class PairingProtocolBloc
       }
       final PairingActivationAcknowledgementRecovery acknowledgementRecovery =
           await acknowledgement.restore();
+      if (state is! PairingProtocolIdle) return;
       if (acknowledgementRecovery == PairingActivationAcknowledgementRecovery.pending) {
         emit(const PairingProtocolActivationAcknowledgementPending());
         return;

@@ -207,6 +207,27 @@ void main() {
     expect((bloc.state as PairingProtocolAwaitingConfirmation).sas, '482901');
     expect(replacement.disposed, isFalse);
   });
+
+  test('startup acknowledgement recovery cannot overwrite a replacement scan', () async {
+    final _DeferredAcknowledgement acknowledgement = _DeferredAcknowledgement();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      acknowledgement: acknowledgement,
+      recovery: const _Recovery(null),
+    );
+    addTearDown(bloc.close);
+
+    final Future<void> restoring = bloc.restore();
+    await acknowledgement.restoreStarted.future;
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    acknowledgement.completeRestore(PairingActivationAcknowledgementRecovery.active);
+    await restoring;
+
+    expect(bloc.state, isA<PairingProtocolAwaitingConfirmation>());
+  });
 }
 
 final class _Command implements PairingProtocolCommand {
@@ -283,6 +304,26 @@ final class _DeferredActivation implements PairingActivationPort {
   }
 
   void complete(PairingActivationOutcome outcome) => _result.complete(outcome);
+}
+
+final class _DeferredAcknowledgement implements PairingActivationAcknowledgementPort {
+  final Completer<void> restoreStarted = Completer<void>();
+  final Completer<PairingActivationAcknowledgementRecovery> _restoreResult =
+      Completer<PairingActivationAcknowledgementRecovery>();
+
+  @override
+  Future<PairingActivationAcknowledgementOutcome> acknowledge() async =>
+      PairingActivationAcknowledgementOutcome.recoveryRequired;
+
+  @override
+  Future<PairingActivationAcknowledgementRecovery> restore() {
+    restoreStarted.complete();
+    return _restoreResult.future;
+  }
+
+  void completeRestore(PairingActivationAcknowledgementRecovery recovery) {
+    _restoreResult.complete(recovery);
+  }
 }
 
 final class _Acknowledgement implements PairingActivationAcknowledgementPort {
