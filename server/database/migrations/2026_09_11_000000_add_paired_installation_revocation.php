@@ -33,6 +33,7 @@ return new class extends Migration
         Schema::dropIfExists('paired_installation_revocation_audits');
 
         Schema::table('source_installations', function (Blueprint $table): void {
+            $table->dropIndex('source_installations_revoked_at_index');
             $table->dropColumn('revoked_at');
         });
     }

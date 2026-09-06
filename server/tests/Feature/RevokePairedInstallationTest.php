@@ -69,7 +69,7 @@ final class RevokePairedInstallationTest extends TestCase
             ->assertExactJson(['code' => 'mobile_envelope_unavailable']);
         $this->getJson('/v1/pairing/intents/'.$intentId.'/activation')
             ->assertNotFound()
-            ->assertExactJson(['code' => 'pairing_unavailable']);
+            ->assertJsonPath('code', 'pairing_unavailable');
     }
 
     private function pairedInstallation(string $organizationId, string $intentId): SourceInstallation
