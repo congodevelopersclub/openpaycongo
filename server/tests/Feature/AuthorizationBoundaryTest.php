@@ -42,7 +42,6 @@ final class AuthorizationBoundaryTest extends TestCase
         ];
         $authorizedRoutes = [
             'POST v1/pairing/intents' => ['web', 'auth', 'pairing.issuer'],
-            'POST mobile/operator-sms/interpretation-requests' => ['auth:mobile', 'abilities:mobile:sync:write', 'mobile.activation', 'throttle:mobile-api'],
             'GET|HEAD mobile/operator-sms/pattern-releases' => ['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'],
         ];
         // These routes authenticate with a pairing secret or encrypted proof, not framework middleware.
@@ -57,7 +56,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
         self::assertCount(1, $confidentialClientTokenExchangeRoutes);
-        self::assertCount(3, $authorizedRoutes);
+        self::assertCount(2, $authorizedRoutes);
         self::assertCount(3, $cryptographicPossessionRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
@@ -111,7 +110,7 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(53, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        self::assertSame(52, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void
