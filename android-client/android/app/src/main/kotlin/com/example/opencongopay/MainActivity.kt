@@ -486,8 +486,13 @@ class MainActivity : FlutterFragmentActivity() {
         val arguments = call.arguments as? Map<*, *>
         val operation = arguments?.get("operation") as? String
         val payload = arguments?.get("payload") as? ByteArray
+        val sealedOperation = operation ?: run {
+            payload?.fill(0)
+            result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
+            return
+        }
         if (arguments == null || arguments.keys != setOf("operation", "payload") ||
-            operation !in setOf("deposit", "operator_sms_interpretation_request") || payload == null) {
+            sealedOperation !in setOf("deposit", "operator_sms_interpretation_request") || payload == null) {
             payload?.fill(0)
             result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
             return
@@ -509,7 +514,7 @@ class MainActivity : FlutterFragmentActivity() {
                             },
                             expectedGeneration = generation,
                         ),
-                    ).seal(operation, payload)
+                    ).seal(sealedOperation, payload)
                 } finally {
                     payload.fill(0)
                 }
