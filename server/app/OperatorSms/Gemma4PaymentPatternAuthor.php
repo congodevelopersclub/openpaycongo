@@ -98,8 +98,7 @@ final class Gemma4PaymentPatternAuthor
         $parts = parse_url($url);
         if (is_array($parts) === false
             || ! isset($parts['scheme'], $parts['host'])
-            || ! in_array($parts['scheme'], ['http', 'https'], true)
-            || is_string($parts['host']) === false) {
+            || ! in_array($parts['scheme'], ['http', 'https'], true)) {
             return false;
         }
 
