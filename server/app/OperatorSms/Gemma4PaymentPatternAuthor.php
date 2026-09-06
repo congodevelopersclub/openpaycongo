@@ -78,7 +78,7 @@ final class Gemma4PaymentPatternAuthor
             || array_diff(array_keys($candidate), ['provider', 'sender', 'template']) !== []
             || ! is_string($candidate['provider']) || ! is_string($candidate['sender']) || ! is_string($candidate['template'])
             || $candidate['provider'] !== $submission->provider || $candidate['sender'] !== $submission->sender
-            || ! $this->validTemplate($candidate['template'])) {
+            || !$this->validTemplate($candidate['template'])) {
             throw new RuntimeException('gemma_pattern_candidate_invalid');
         }
 
