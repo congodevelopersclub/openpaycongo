@@ -59,7 +59,7 @@ final class ReleaseApprovedOperatorPaymentPattern
                 ->where('provider', $proposal->provider)
                 ->where('sender', $proposal->sender)
                 ->max('pattern_version')) + 1;
-            $approvedAt = CarbonImmutable::instance($proposal->reviewed_at)->utc()->startOfSecond();
+            $approvedAt = CarbonImmutable::parse($proposal->reviewed_at, 'UTC')->startOfSecond();
             if (! $expiresAt->isAfter($approvedAt)) {
                 throw new AuthorizationException;
             }
