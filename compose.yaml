@@ -29,6 +29,12 @@ x-application-environment: &application-environment
   CACHE_STORE: database
   SESSION_DRIVER: database
   QUEUE_CONNECTION: database
+  # Empty is fail-closed: the pattern worker cannot send financial SMS evidence
+  # until the private Gemma profile and both protected secrets are configured.
+  GEMMA_PRIVATE_INFERENCE_URL: ${GEMMA_PRIVATE_INFERENCE_URL:-}
+  GEMMA_PRIVATE_INFERENCE_TOKEN: ${GEMMA_PRIVATE_INFERENCE_TOKEN:-}
+  GEMMA_MODEL: ${GEMMA_MODEL:-gemma-4-26b-a4b-it}
+  GEMMA_TIMEOUT_SECONDS: ${GEMMA_TIMEOUT_SECONDS:-20}
 
 x-application: &application
   image: ${OPENPAY_FPM_IMAGE:-congo-openpay-fpm:local}
