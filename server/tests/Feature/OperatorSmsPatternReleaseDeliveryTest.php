@@ -20,10 +20,10 @@ final class OperatorSmsPatternReleaseDeliveryTest extends TestCase
     public function test_an_acknowledged_installation_receives_only_its_unexpired_signed_pattern_releases_without_sms_evidence(): void
     {
         $installation = $this->installation('00000000-0000-4000-8000-000000000701');
-        $visible = $this->release($installation->organization_id, 'visible-release', now('UTC')->addDay());
-        $this->release($installation->organization_id, 'expired-release', now('UTC')->subSecond());
+        $visible = $this->release($installation->organization_id, 'visible-release', now('UTC')->addDay(), 1);
+        $this->release($installation->organization_id, 'expired-release', now('UTC')->subSecond(), 2);
         $otherOrganization = '00000000-0000-4000-8000-000000000702';
-        $this->release($otherOrganization, 'other-release', now('UTC')->addDay());
+        $this->release($otherOrganization, 'other-release', now('UTC')->addDay(), 1);
 
         Sanctum::actingAs($installation, ['mobile:sync:read'], 'mobile');
 
@@ -55,7 +55,7 @@ final class OperatorSmsPatternReleaseDeliveryTest extends TestCase
         return $installation->refresh();
     }
 
-    private function release(string $organizationId, string $encodedRelease, \DateTimeInterface $expiresAt): OperatorSmsPatternRelease
+    private function release(string $organizationId, string $encodedRelease, \DateTimeInterface $expiresAt, int $version): OperatorSmsPatternRelease
     {
         if (! Organization::query()->whereKey($organizationId)->exists()) {
             (new Organization)->forceFill(['id' => $organizationId])->save();
@@ -77,7 +77,7 @@ final class OperatorSmsPatternReleaseDeliveryTest extends TestCase
             'organization_id' => $organizationId,
             'provider' => 'ORANGE_MONEY',
             'sender' => 'ORANGE',
-            'pattern_version' => 1,
+            'pattern_version' => $version,
             'encoded_release' => $encodedRelease,
             'expires_at' => $expiresAt,
             'issued_by_user_id' => $issuer->id,
