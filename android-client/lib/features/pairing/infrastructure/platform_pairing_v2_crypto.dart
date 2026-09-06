@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/services.dart';
 
+import '../presentation/pairing_protocol_bloc.dart';
+import '../presentation/pairing_v2_completion.dart';
 import '../presentation/pairing_v2_crypto.dart';
 
 /// Android-only pairing crypto bridge. It transfers the one-time QR secret to
@@ -92,6 +95,64 @@ final class PlatformPairingV2Crypto implements PairingV2CryptoPort {
       await _channel.invokeMethod<void>('cancel');
     } on PlatformException {
       // Nothing from the native session reaches Dart; next begin replaces it.
+    }
+  }
+}
+
+/// Restores only native-authenticated, post-confirmation routing material.
+/// Native vault owns both directional keys and the pinned server origin.
+final class PlatformPairingConfirmedExchangeRecovery implements PairingRecoveryPort {
+  const PlatformPairingConfirmedExchangeRecovery()
+    : _channel = const MethodChannel('openpaycongo/pairing_completion');
+
+  final MethodChannel _channel;
+
+  @override
+  Future<PairingRecoveredMaterial?> restore() async {
+    try {
+      final Map<Object?, Object?>? value = await _channel.invokeMapMethod<Object?, Object?>(
+        'restoreConfirmed',
+      );
+      if (value == null) return null;
+      const Set<String> fields = <String>{'sas', 'completion_endpoint', 'intent_id'};
+      if (value.length != fields.length ||
+          value.keys.any((Object? key) => key is! String || !fields.contains(key))) {
+        throw const FormatException();
+      }
+      final String? sas = value['sas'] as String?;
+      final String? endpointValue = value['completion_endpoint'] as String?;
+      final String? intentValue = value['intent_id'] as String?;
+      if (sas == null ||
+          endpointValue == null ||
+          intentValue == null ||
+          !RegExp(r'^[0-9]{6}$').hasMatch(sas)) {
+        throw const FormatException();
+      }
+      final Uri endpoint = Uri.parse(endpointValue);
+      if (endpoint.scheme != 'https' ||
+          !endpoint.hasAuthority ||
+          endpoint.userInfo.isNotEmpty ||
+          endpoint.path != '/v1/pairing/complete' ||
+          endpoint.hasQuery ||
+          endpoint.hasFragment) {
+        throw const FormatException();
+      }
+      final Uint8List intent = Uint8List.fromList(base64Url.decode(base64Url.normalize(intentValue)));
+      try {
+        if (intent.length != 16 || base64UrlEncode(intent).replaceAll('=', '') != intentValue) {
+          throw const FormatException();
+        }
+        return PairingRecoveredMaterial(
+          serverSas: sas,
+          activationRequest: PairingV2ActivationRequest(endpoint, intent),
+        );
+      } finally {
+        intent.fillRange(0, intent.length, 0);
+      }
+    } on PlatformException {
+      throw StateError('Pairing recovery is unavailable');
+    } on FormatException {
+      throw StateError('Pairing recovery is unavailable');
     }
   }
 }

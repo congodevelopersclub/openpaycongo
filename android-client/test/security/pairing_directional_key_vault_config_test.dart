@@ -20,6 +20,12 @@ void main() {
     final String bridge = File(
       'lib/features/pairing/infrastructure/platform_pairing_v2_crypto.dart',
     ).readAsStringSync();
+    final String onDestroy = _kotlinFunctionBody(activity, 'override fun onDestroy()');
+    final String cancel = _kotlinFunctionBody(completion, 'fun cancel()');
+    final String releaseForActivityDestroy = _kotlinFunctionBody(
+      completion,
+      'fun releaseForActivityDestroy()',
+    );
 
     expect(vault, contains('context.noBackupFilesDir'));
     expect(vault, contains('AtomicFile(recordFile)'));
@@ -38,9 +44,16 @@ void main() {
     expect(vault, isNot(contains('fun read(')));
     expect(activity, contains('openpaycongo/pairing_completion'));
     expect(activity, isNot(contains('openpaycongo/pairing_directional_keys')));
+    expect(onDestroy, contains('pairingV2Completion.releaseForActivityDestroy()'));
+    expect(onDestroy, isNot(contains('pairingV2Completion.cancel()')));
     expect(activity, contains('"pairing_secret"'));
     expect(activity, contains('pairingSecret.fill(0)'));
     expect(completion, contains('fun consumeActivation'));
+    expect(completion, contains('fun releaseForActivityDestroy()'));
+    expect(completion, contains('fun cancel()'));
+    expect(releaseForActivityDestroy, isNot(contains('recoveryVault.clear()')));
+    expect(releaseForActivityDestroy, contains('current?.dispose()'));
+    expect(cancel, contains('recoveryVault.clear()'));
     expect(completion, contains('PairingDirectionalKeyVault(context).save('));
     expect(completion, contains('                credential,'));
     expect(completion, contains('current.sendKey'));
@@ -52,4 +65,19 @@ void main() {
     expect(bridge, isNot(contains('send_key')));
     expect(bridge, isNot(contains('receive_key')));
   });
+}
+
+String _kotlinFunctionBody(String source, String signature) {
+  final int signatureStart = source.indexOf(signature);
+  expect(signatureStart, isNot(-1), reason: 'missing $signature');
+  final int bodyStart = source.indexOf('{', signatureStart);
+  expect(bodyStart, isNot(-1), reason: 'missing body for $signature');
+  var depth = 0;
+  for (var index = bodyStart; index < source.length; index += 1) {
+    final String character = source[index];
+    if (character == '{') depth += 1;
+    if (character == '}') depth -= 1;
+    if (depth == 0) return source.substring(bodyStart + 1, index);
+  }
+  fail('unterminated body for $signature');
 }

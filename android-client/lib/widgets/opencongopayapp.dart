@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -138,6 +140,7 @@ final class _UnlockedOpenCongoPayAppState
   @override
   void initState() {
     super.initState();
+    unawaited(widget.pairingProtocol?.restore() ?? Future<void>.value());
     if (widget.paymentLifecycle != null) {
       _paymentLifecycleBloc = PaymentLifecycleBloc(
         lifecycle: widget.paymentLifecycle!,
