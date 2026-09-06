@@ -36,6 +36,7 @@ final class ResolveDeveloperApplication
             throw new AuthenticationException;
         }
 
+        $application->oauthClient()->update(['last_used_at' => now()]);
         $request->attributes->set(DeveloperApplication::class, $application);
 
         return $next($request);

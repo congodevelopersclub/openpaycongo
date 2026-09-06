@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\IssuePairingIntent;
+use App\Filament\Pages\ManageDeveloperApplications;
 use App\Filament\Pages\ReconcileDeposit;
 use App\Http\Middleware\RequireFinancialOperatorMfa;
 use Filament\Panel;
@@ -15,7 +16,7 @@ final class OperationsPanelProvider extends PanelProvider
         return $panel
             ->id('operations')
             ->path('operations')
-            ->pages([ReconcileDeposit::class, IssuePairingIntent::class])
+            ->pages([ReconcileDeposit::class, IssuePairingIntent::class, ManageDeveloperApplications::class])
             ->authMiddleware([RequireFinancialOperatorMfa::class]);
     }
 }
