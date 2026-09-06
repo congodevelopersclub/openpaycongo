@@ -103,7 +103,7 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onDestroy() {
         pairingQrScanGate.fail()
-        pairingV2Completion.cancel()
+        pairingV2Completion.releaseForActivityDestroy()
         appLockTasks.shutdownNow()
         pairingQrTrustTasks.shutdownNow()
         pairingDirectionalKeyTasks.shutdownNow()

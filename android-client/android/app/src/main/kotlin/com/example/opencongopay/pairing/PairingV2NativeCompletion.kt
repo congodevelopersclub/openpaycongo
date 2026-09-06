@@ -214,6 +214,13 @@ internal class PairingV2NativeCompletion(private val context: Context) {
     }
 
     @Synchronized
+    fun releaseForActivityDestroy() {
+        val current = pending
+        pending = null
+        current?.dispose()
+    }
+
+    @Synchronized
     fun restoreConfirmed(): RestoredConfirmedExchange? {
         val current = pending
         if (current?.confirmed == true) {
