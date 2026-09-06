@@ -23,7 +23,7 @@ return new class extends Migration
             $table->timestamp('issued_at', 6);
 
             $table->unique(['organization_id', 'provider', 'sender', 'pattern_version'], 'operator_sms_pattern_release_version_unique');
-            $table->unique('operator_sms_pattern_proposal_id');
+            $table->unique('operator_sms_pattern_proposal_id', 'operator_sms_pattern_release_proposal_unique');
         });
     }
 
