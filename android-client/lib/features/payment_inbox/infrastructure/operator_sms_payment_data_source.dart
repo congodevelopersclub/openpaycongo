@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import '../../payment_outbox/domain/payment_outbox.dart';
 import '../../sms_gateway/domain/sms_gateway.dart';
+import '../domain/approved_operator_pattern.dart';
 import '../domain/operator_sms_payment_data.dart';
 import '../domain/payment_ingestion.dart';
 import 'operator_sms_payment_adapter.dart';
@@ -71,4 +74,80 @@ final class OperatorSmsPaymentDataSource {
     }
     return List<OperatorSmsPaymentData>.unmodifiable(data);
   }
+
+  /// Installs no state and does not acknowledge an SMS. The independently-owned
+  /// release delivery worker calls this with one backend-published release; only
+  /// the verifier can obtain the authority type accepted by reanalysis.
+  Future<PatternReleaseDelivery> reanalyseRelease({
+    required String encodedRelease,
+    required Uint8List pinnedSigningKey,
+    required DateTime now,
+    required OutboxScope scope,
+  }) async {
+    final DeveloperApprovedOperatorPaymentPattern? release =
+        await const DeveloperApprovedOperatorPaymentPatternVerifier().verify(
+      encodedRelease: encodedRelease,
+      pinnedSigningKey: pinnedSigningKey,
+      now: now,
+    );
+    if (release == null) {
+      return const PatternReleaseRejected('invalid_or_expired_release');
+    }
+
+    final SenderIdentity sender =
+        SenderIdentity.fromOsMetadata(release.proposal.sender)!;
+    final TrustedSenderRule senderRule = TrustedSenderRule(sender);
+    final List<PendingOperatorSms> pending = <PendingOperatorSms>[];
+    final List<PendingPatternReview> invalid = <PendingPatternReview>[];
+    for (final NativeSmsRecord record in await gateway.drainInbox()) {
+      final SenderIdentity? recordSender =
+          SenderIdentity.fromOsMetadata(record.sender);
+      if (recordSender == null || !senderRule.allows(recordSender)) continue;
+      final SmsEnvelope? sms = SmsEnvelope.fromOs(
+        sender: recordSender,
+        body: record.body,
+        receivedAt: record.receivedAt,
+        segments: record.segments,
+        now: now,
+      );
+      if (sms == null) {
+        invalid.add(PendingPatternReview(
+          sourceRecordId: record.id,
+          reason: 'invalid_retained_operator_sms',
+        ));
+        continue;
+      }
+      pending.add(PendingOperatorSms(sourceRecordId: record.id, sms: sms));
+    }
+    final PatternBacklogReanalysis reanalysis =
+        const ApprovedOperatorPatternActivation().reanalyse(
+      release: release,
+      pending: pending,
+      scope: scope,
+    );
+
+    return PatternReleaseReanalysed(
+      PatternBacklogReanalysis(
+        pushReady: reanalysis.pushReady,
+        needsReview: <PendingPatternReview>[
+          ...invalid,
+          ...reanalysis.needsReview,
+        ],
+      ),
+    );
+  }
+}
+
+sealed class PatternReleaseDelivery {
+  const PatternReleaseDelivery();
+}
+
+final class PatternReleaseRejected extends PatternReleaseDelivery {
+  const PatternReleaseRejected(this.reason);
+  final String reason;
+}
+
+final class PatternReleaseReanalysed extends PatternReleaseDelivery {
+  const PatternReleaseReanalysed(this.result);
+  final PatternBacklogReanalysis result;
 }
