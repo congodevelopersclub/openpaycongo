@@ -33,7 +33,8 @@ final class DeveloperApplicationCredentialsTest extends TestCase
 
         Artisan::call('passport:keys', ['--force' => true]);
         Filament::setCurrentPanel(Filament::getPanel('operations'));
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
+        {
             public function assertVerified(User $user): void {}
         });
     }

@@ -120,7 +120,7 @@ final class ManageDeveloperApplicationCredentials
     }
 
     /**
-     * @param string[] $scopes
+     * @param  string[]  $scopes
      * @return string[]
      */
     private function validatedScopes(array $scopes): array
