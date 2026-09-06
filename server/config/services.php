@@ -22,6 +22,12 @@ return [
         'key' => env('RESEND_API_KEY'),
     ],
 
+    'gemma' => [
+        'api_key' => env('GEMMA_API_KEY'),
+        'model' => env('GEMMA_MODEL', 'gemma-4-26b-a4b-it'),
+        'timeout_seconds' => (int) env('GEMMA_TIMEOUT_SECONDS', 20),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),
