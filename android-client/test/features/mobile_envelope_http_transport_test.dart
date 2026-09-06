@@ -80,6 +80,19 @@ final class _EnvelopeVault implements MobileEnvelopeSealer {
     expect(ciphertext, 'response-ciphertext');
     return openOutcome;
   }
+
+  @override
+  Future<MobileEnvelopeResponseOutcome> openOperatorSmsInterpretationResponse({
+    required MobileRequestEnvelope request,
+    required int status,
+    required String nonce,
+    required String ciphertext,
+  }) => openDepositResponse(
+    request: request,
+    status: status,
+    nonce: nonce,
+    ciphertext: ciphertext,
+  );
 }
 
 final class _Http implements MobileDepositHttpPort {
@@ -175,7 +188,7 @@ void main() {
     final OperatorSmsAnalysisSubmission result = await OperatorSmsAnalysisEnvelopeTransport(
       vault: vault,
       http: http,
-    ).submit(const OperatorSmsAnalysisEvidence(
+    ).submit(OperatorSmsAnalysisEvidence(
       recordId: 'sms-record-0001',
       provider: 'ORANGE_MONEY',
       sender: 'ORANGEMNY',

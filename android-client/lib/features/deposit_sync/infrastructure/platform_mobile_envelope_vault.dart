@@ -84,4 +84,17 @@ final class PlatformMobileEnvelopeVault implements MobileEnvelopeSealer {
       throw StateError('Mobile envelope unavailable');
     }
   }
+
+  @override
+  Future<MobileEnvelopeResponseOutcome> openOperatorSmsInterpretationResponse({
+    required MobileRequestEnvelope request,
+    required int status,
+    required String nonce,
+    required String ciphertext,
+  }) => openDepositResponse(
+    request: request,
+    status: status,
+    nonce: nonce,
+    ciphertext: ciphertext,
+  );
 }

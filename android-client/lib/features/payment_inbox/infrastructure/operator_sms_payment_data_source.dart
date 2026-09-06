@@ -98,7 +98,7 @@ final class OperatorSmsPaymentDataSource {
       OperatorSmsAnalysisEvidence(
         recordId: record.id,
         provider: profile.provider,
-        sender: sender.value,
+        sender: sender!.value,
         body: envelope.body,
         receivedAt: envelope.receivedAt,
       ),
