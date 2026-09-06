@@ -123,12 +123,19 @@ final readonly class ReceiveMobileEnvelope
         if (($inner['version'] ?? null) !== 1
             || ! is_string($operation)
             || ! in_array($operation, ['activation_acknowledgement', 'deposit'], true)
-            || ! is_array($payload)
-            || array_is_list($payload)) {
+            || ! is_array($payload)) {
             throw new MobileEnvelopeUnavailable;
         }
 
-        if ($operation === 'activation_acknowledgement' && $payload !== []) {
+        if ($operation === 'activation_acknowledgement') {
+            if ($payload !== []) {
+                throw new MobileEnvelopeUnavailable;
+            }
+
+            return [$operation, $payload];
+        }
+
+        if (array_is_list($payload)) {
             throw new MobileEnvelopeUnavailable;
         }
 
