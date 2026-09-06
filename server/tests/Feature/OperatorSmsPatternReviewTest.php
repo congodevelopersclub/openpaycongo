@@ -91,7 +91,7 @@ final class OperatorSmsPatternReviewTest extends TestCase
 
     private function financialOperator(string $organizationId): User
     {
-        Organization::query()->create(['id' => $organizationId]);
+        (new Organization)->forceFill(['id' => $organizationId])->save();
 
         $user = User::factory()->create();
         $user->forceFill([

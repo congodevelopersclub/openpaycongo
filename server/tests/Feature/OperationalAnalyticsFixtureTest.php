@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_11_000000_add_paired_installation_revocation';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_12_000000_create_operator_sms_pattern_proposals_table';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
