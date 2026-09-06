@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_09_08_010000_add_pairing_activation_delivery_to_source_installations';
+    private const CURRENT_MIGRATION_REVISION = '2026_09_09_000000_manage_developer_application_credentials';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {

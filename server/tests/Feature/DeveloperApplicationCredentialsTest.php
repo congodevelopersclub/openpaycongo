@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
 use Livewire\Livewire;
 use ReflectionClass;
 use ReflectionMethod;
@@ -124,6 +125,28 @@ final class DeveloperApplicationCredentialsTest extends TestCase
             ->assertDontSee($rotated->clientSecret);
 
         self::assertEqualsCanonicalizing(['issued', 'rotated'], DeveloperApplicationCredentialAudit::query()->pluck('action')->all());
+    }
+
+    public function test_rotation_rejects_preexisting_reserved_customer_pii_scope_without_disclosing_new_secret(): void
+    {
+        $operator = $this->financialOperator('00000000-0000-4000-8000-000000000209');
+        $client = app(ClientRepository::class)->createClientCredentialsGrantClient('Imported PII connector');
+        $client->forceFill(['scopes' => ['payment-requests:read', 'customers:pii:read']])->save();
+        $application = DeveloperApplication::query()->create([
+            'organization_id' => $operator->organization_id,
+            'name' => 'Imported PII connector',
+            'oauth_client_id' => $client->getKey(),
+        ]);
+
+        try {
+            app(ManageDeveloperApplicationCredentials::class)->rotate($operator, $application);
+            self::fail('Reserved customer PII scopes must require separate authorization before rotation can issue a new secret.');
+        } catch (AuthorizationException) {
+            self::assertSame($client->getKey(), $application->refresh()->oauth_client_id);
+            self::assertFalse((bool) $client->refresh()->revoked);
+            self::assertDatabaseCount('oauth_clients', 1);
+            self::assertDatabaseCount('developer_application_credential_audits', 0);
+        }
     }
 
     public function test_revocation_blocks_existing_tokens_and_other_organizations_cannot_manage_the_application(): void
@@ -242,6 +265,15 @@ final class DeveloperApplicationCredentialsTest extends TestCase
 
         self::assertSame(['revoked', 'rotated', 'issued'], $actions);
         self::assertSame(
+            ['Ordered audit connector', 'Ordered audit connector', 'Ordered audit connector'],
+            Livewire::actingAs($operator)
+                ->test(ManageDeveloperApplications::class)
+                ->instance()
+                ->auditHistory()
+                ->map(fn (DeveloperApplicationCredentialAudit $audit): ?string => $audit->developerApplication?->name)
+                ->all(),
+        );
+        self::assertSame(
             [1, 2, 3],
             DeveloperApplicationCredentialAudit::query()
                 ->orderBy('organization_sequence')
@@ -285,7 +317,7 @@ final class DeveloperApplicationCredentialsTest extends TestCase
 
     private function financialOperator(string $organizationId): User
     {
-        Organization::query()->create(['id' => $organizationId]);
+        Organization::query()->forceCreate(['id' => $organizationId]);
 
         return User::factory()->create([
             'organization_id' => $organizationId,

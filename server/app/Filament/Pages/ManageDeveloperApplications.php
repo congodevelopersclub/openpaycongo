@@ -119,6 +119,7 @@ final class ManageDeveloperApplications extends Page
         $actor = $this->verifiedActor();
 
         return DeveloperApplicationCredentialAudit::query()
+            ->with('developerApplication')
             ->where('organization_id', $actor->organization_id)
             ->orderByDesc('created_at')
             ->orderByDesc('organization_sequence')

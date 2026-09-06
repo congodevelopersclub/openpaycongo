@@ -68,7 +68,12 @@
             <h2 id="developer-credential-audit-heading" class="text-lg font-semibold">Audit history</h2>
             <ul class="mt-4 space-y-2 text-sm">
                 @forelse ($this->auditHistory() as $audit)
-                    <li>{{ $audit->created_at }} - {{ $audit->action }} - {{ implode(', ', $audit->scopes ?? []) }}</li>
+                    <li>
+                        {{ $audit->created_at }} -
+                        {{ $audit->developerApplication?->name ?? $audit->developer_application_id }} -
+                        {{ $audit->action }} -
+                        {{ implode(', ', $audit->scopes ?? []) }}
+                    </li>
                 @empty
                     <li class="text-gray-600 dark:text-gray-400">No credential audit events yet.</li>
                 @endforelse

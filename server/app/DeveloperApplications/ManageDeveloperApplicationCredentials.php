@@ -53,6 +53,7 @@ final class ManageDeveloperApplicationCredentials
 
             $oldClient = $application->oauthClient()->firstOrFail();
             $scopes = $this->clientScopes($oldClient);
+            $this->assertNoReservedScopes($scopes);
             $newClient = $this->issueClient($application->name ?? $oldClient->name, $scopes);
 
             $oldClient->forceFill(['revoked' => true])->save();
@@ -87,7 +88,7 @@ final class ManageDeveloperApplicationCredentials
     public function availableScopes(): array
     {
         return collect(Passport::scopes())
-            ->reject(static fn ($scope): bool => (string) $scope->id === 'customers:pii:read')
+            ->reject(fn ($scope): bool => $this->isReservedScope((string) $scope->id))
             ->mapWithKeys(static fn ($scope): array => [(string) $scope->id => (string) $scope->description])
             ->all();
     }
@@ -133,6 +134,21 @@ final class ManageDeveloperApplicationCredentials
         }
 
         return $selected;
+    }
+
+    /** @param string[] $scopes */
+    private function assertNoReservedScopes(array $scopes): void
+    {
+        foreach ($scopes as $scope) {
+            if ($this->isReservedScope($scope)) {
+                throw new AuthorizationException;
+            }
+        }
+    }
+
+    private function isReservedScope(string $scope): bool
+    {
+        return $scope === 'customers:pii:read';
     }
 
     /** @param string[] $scopes */
