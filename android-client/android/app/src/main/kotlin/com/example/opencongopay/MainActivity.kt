@@ -14,7 +14,6 @@ import com.congodeveloperclub.opencongopay.sms.DecisionConflictException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskBusyException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskRunner
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskTimeoutException
-import com.congodeveloperclub.opencongopay.sms.Gemma4PaymentRuntime
 import com.congodeveloperclub.opencongopay.sms.InvalidDecisionCursorException
 import com.congodeveloperclub.opencongopay.sms.LegacySmsMigrationRequiredException
 import com.congodeveloperclub.opencongopay.sms.OutboxRecoveryRequiredException
@@ -68,12 +67,6 @@ class MainActivity : FlutterFragmentActivity() {
         isCurrent = { generation -> smsAccessDenial(generation) == null },
         deliver = { callback -> mainHandler.post(callback) },
     )
-    private val gemmaTasks = GuardedTaskRunner(
-        operationTimeoutMillis = 15_000,
-        isCurrent = { generation -> smsAccessDenial(generation) == null },
-        deliver = { callback -> mainHandler.post(callback) },
-    )
-    private val gemma4PaymentRuntime = lazy { Gemma4PaymentRuntime(applicationContext) }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,8 +112,6 @@ class MainActivity : FlutterFragmentActivity() {
         pairingQrTrustTasks.shutdownNow()
         pairingDirectionalKeyTasks.shutdownNow()
         smsTasks.close()
-        gemmaTasks.close()
-        if (gemma4PaymentRuntime.isInitialized()) gemma4PaymentRuntime.value.close()
         super.onDestroy()
     }
 
@@ -144,7 +135,6 @@ class MainActivity : FlutterFragmentActivity() {
             "revokeTrustedSender" -> revokeTrustedSender(call, result)
             "upsertOperatorPaymentProfile" -> upsertOperatorPaymentProfile(call, result)
             "listOperatorPaymentProfiles" -> listOperatorPaymentProfiles(result)
-            "proposeGemma4Payment" -> proposeGemma4Payment(call, result)
             "drainInbox" -> drainInbox(result)
             "captureHealth" -> captureHealth(result)
             "probeStorage" -> probeStorage(result)
@@ -719,29 +709,6 @@ class MainActivity : FlutterFragmentActivity() {
         )
     }
 
-    private fun proposeGemma4Payment(call: MethodCall, result: MethodChannel.Result) {
-        val arguments = call.arguments as? Map<*, *>
-        val sender = arguments?.get("sender") as? String
-        val body = arguments?.get("body") as? String
-        val expectedKeys = setOf("sender", "body")
-        if (arguments == null || arguments.keys.toSet() != expectedKeys ||
-            sender == null || body == null || SenderRules.normalize(sender) != sender ||
-            body.toByteArray(Charsets.UTF_8).size > 4096
-        ) {
-            result.error("invalid_gemma4_request", "Gemma 4 payment request is invalid", null)
-            return
-        }
-        runGemmaTask(
-            result,
-            operation = { gemma4PaymentRuntime.value.propose(sender, body) },
-            onSuccess = result::success,
-            onFailure = { error ->
-                val code = if (error.message == "gemma_model_missing") "gemma_model_missing" else "gemma_unavailable"
-                result.error(code, "Gemma 4 payment interpretation is unavailable", null)
-            },
-        )
-    }
-
     private fun operatorPaymentProfileForFlutter(profile: OperatorPaymentProfileRecord): Map<String, Any?> = mapOf(
         "sender" to profile.sender,
         "provider" to profile.provider,
@@ -871,15 +838,6 @@ class MainActivity : FlutterFragmentActivity() {
         onFailure: (Throwable) -> Unit,
     ) {
         runGuardedTask(smsTasks, result, operation, onSuccess, onFailure)
-    }
-
-    private fun <T> runGemmaTask(
-        result: MethodChannel.Result,
-        operation: () -> T,
-        onSuccess: (T) -> Unit,
-        onFailure: (Throwable) -> Unit,
-    ) {
-        runGuardedTask(gemmaTasks, result, operation, onSuccess, onFailure)
     }
 
     private fun <T> runGuardedTask(
