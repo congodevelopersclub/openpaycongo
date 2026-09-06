@@ -8,6 +8,7 @@ use App\Models\OperatorSmsInterpretationRequest;
 use App\Models\SourceInstallation;
 use App\OperatorSms\PurgeExpiredOperatorSmsInterpretationRequests;
 use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -50,12 +51,11 @@ final class PurgeExpiredOperatorSmsInterpretationRequestsTest extends TestCase
         self::assertTrue($event->withoutOverlapping);
     }
 
-    private function request(string $suffix, CarbonImmutable $expiresAt): OperatorSmsInterpretationRequest
+    private function request(string $suffix, DateTimeInterface $expiresAt): OperatorSmsInterpretationRequest
     {
         $installation = SourceInstallation::query()->firstOrCreate(
-            ['id' => '00000000-0000-4000-8000-000000000511'],
+            ['organization_id' => '00000000-0000-4000-8000-000000000501'],
             [
-                'organization_id' => '00000000-0000-4000-8000-000000000501',
                 'installation_digest' => hash('sha256', 'operator-sms-purge'),
             ],
         );
@@ -66,7 +66,7 @@ final class PurgeExpiredOperatorSmsInterpretationRequestsTest extends TestCase
             'sms_record_id' => str_pad($suffix, 8, 'x'),
             'sender' => 'ORANGE',
             'protected_sms_body' => 'test-only evidence '.$suffix,
-            'received_at' => $expiresAt->subMinute(),
+            'received_at' => CarbonImmutable::instance($expiresAt)->subMinute(),
             'expires_at' => $expiresAt,
         ]);
     }

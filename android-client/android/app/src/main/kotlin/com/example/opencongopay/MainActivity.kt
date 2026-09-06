@@ -600,7 +600,12 @@ class MainActivity : FlutterFragmentActivity() {
         }
         getPreferences(MODE_PRIVATE).edit().putBoolean("sms_permission_asked", true).apply()
         pendingPermissionResult = result
-        requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), permissionRequestCode)
+        val permissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            arrayOf(Manifest.permission.RECEIVE_SMS)
+        }
+        requestPermissions(permissions, permissionRequestCode)
     }
 
     override fun onRequestPermissionsResult(
