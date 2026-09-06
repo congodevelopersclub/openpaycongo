@@ -278,8 +278,7 @@ final class MobileEnvelopeGatewayTest extends TestCase
         string $counter,
         array $payload,
         string $operation = 'deposit',
-    ): array
-    {
+    ): array {
         $nonce = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES);
         $plaintext = json_encode(['version' => 1, 'operation' => $operation, 'payload' => $payload], JSON_THROW_ON_ERROR);
         $ciphertext = sodium_crypto_aead_xchacha20poly1305_ietf_encrypt($plaintext, $this->requestAad($installation->id, $counter), $nonce, $installation->mobile_receive_key);
