@@ -40,9 +40,9 @@ COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml
 COPY scripts/ci/ /scripts/ci/
-RUN composer dump-autoload --no-interaction --optimize \
-    && composer run lint \
-    && composer run analyse
+RUN composer dump-autoload --no-interaction --optimize
+RUN composer run lint
+RUN composer run analyse
 
 FROM quality AS test
 
