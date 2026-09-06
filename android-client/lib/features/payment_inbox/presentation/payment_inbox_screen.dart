@@ -68,7 +68,11 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
   bool _useGemma4 = false;
   bool _showSetup = false;
   late final PaymentInboxBloc _inboxBloc =
-      widget.inboxBloc ?? PaymentInboxBloc(gateway: widget.gateway);
+      widget.inboxBloc ?? PaymentInboxBloc(
+        gateway: widget.gateway,
+        submitFailedSmsForAnalysis:
+            widget.submitFailedSmsForAnalysis ?? _submitWithPairedEnvelope,
+      );
   late final bool _ownsInboxBloc = widget.inboxBloc == null;
 
   @override
@@ -94,6 +98,14 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
         listener: (BuildContext context, PaymentInboxState state) {
           if (state.feedback == PaymentInboxFeedback.ruleSaved && _showSetup) {
             setState(() => _showSetup = false);
+          }
+          final String? analysisMessage = _analysisFeedbackMessage(
+            state.feedback,
+          );
+          if (analysisMessage != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(analysisMessage)),
+            );
           }
         },
         builder: (BuildContext context, PaymentInboxState inbox) {
@@ -353,21 +365,7 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
-    try {
-      final Future<OperatorSmsAnalysisSubmission> Function(String recordId)
-      submit = widget.submitFailedSmsForAnalysis ?? _submitWithPairedEnvelope;
-      final OperatorSmsAnalysisSubmission result = await submit(record.id);
-      if (!mounted) return;
-      final String message = result is OperatorSmsAnalysisAlreadySubmitted
-          ? 'This SMS was already sent for developer review. No payment was sent.'
-          : 'SMS sent for developer pattern review. No payment was sent.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Could not submit SMS evidence. It remains encrypted on this device.'),
-      ));
-    }
+    _inboxBloc.add(PaymentInboxAnalysisSubmissionRequested(record.id));
   }
 
   Future<OperatorSmsAnalysisSubmission> _submitWithPairedEnvelope(
@@ -420,6 +418,16 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       'Rule revoke outcome is unknown. Authoritative rules were reloaded.',
     PaymentInboxFeedback.ruleClearReloaded =>
       'Rule clear outcome is unknown. Authoritative rules were reloaded.',
+    _ => null,
+  };
+
+  String? _analysisFeedbackMessage(PaymentInboxFeedback feedback) => switch (feedback) {
+    PaymentInboxFeedback.analysisSubmitted =>
+      'SMS sent for developer pattern review. No payment was sent.',
+    PaymentInboxFeedback.analysisAlreadySubmitted =>
+      'This SMS was already sent for developer review. No payment was sent.',
+    PaymentInboxFeedback.analysisUnavailable =>
+      'Could not submit SMS evidence. It remains encrypted on this device.',
     _ => null,
   };
 }

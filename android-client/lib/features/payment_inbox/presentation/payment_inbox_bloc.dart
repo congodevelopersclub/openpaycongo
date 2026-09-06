@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../sms_gateway/domain/sms_gateway.dart';
 import '../domain/payment_ingestion.dart';
+import '../infrastructure/operator_sms_analysis_envelope_transport.dart';
 
 enum PaymentInboxAuthority { loading, authoritative, unknown }
 
@@ -26,6 +27,9 @@ enum PaymentInboxFeedback {
   ruleRevokeReloadFailed,
   ruleClearReloaded,
   ruleClearReloadFailed,
+  analysisSubmitted,
+  analysisAlreadySubmitted,
+  analysisUnavailable,
 }
 
 final class PaymentInboxState {
@@ -131,15 +135,29 @@ final class PaymentInboxDecisionRequested extends PaymentInboxEvent {
   final NativeCaptureDecision decision;
 }
 
+/// Dispatched only after the protected review UI has received explicit consent.
+/// The BLoC owns the asynchronous submission state and outcome; it never holds
+/// raw SMS content.
+final class PaymentInboxAnalysisSubmissionRequested extends PaymentInboxEvent {
+  const PaymentInboxAnalysisSubmissionRequested(this.recordId);
+
+  final String recordId;
+}
+
 /// Owns native inbox mutation and reconciliation state. It never logs or
 /// serializes captured SMS evidence; widgets render the in-memory result.
 final class PaymentInboxBloc
     extends Bloc<PaymentInboxEvent, PaymentInboxState> {
-  PaymentInboxBloc({required this.gateway}) : super(const PaymentInboxState()) {
+  PaymentInboxBloc({
+    required this.gateway,
+    this.submitFailedSmsForAnalysis,
+  }) : super(const PaymentInboxState()) {
     on<PaymentInboxEvent>(_enqueue);
   }
 
   final SmsGatewayPort gateway;
+  final Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+      submitFailedSmsForAnalysis;
   Future<void> _queue = Future<void>.value();
 
   Future<void> _enqueue(
@@ -165,6 +183,7 @@ final class PaymentInboxBloc
     PaymentInboxTrustedSenderRevoked() => _revokeRule(event, emit),
     PaymentInboxTrustedSendersCleared() => _clearRules(event, emit),
     PaymentInboxDecisionRequested() => _commitDecision(event, emit),
+    PaymentInboxAnalysisSubmissionRequested() => _submitAnalysis(event, emit),
   };
 
   Future<void> _start(
@@ -466,6 +485,53 @@ final class PaymentInboxBloc
         state.copyWith(
           busyRecordIds: <String>{...state.busyRecordIds}
             ..remove(event.recordId),
+        ),
+      );
+    }
+  }
+
+  Future<void> _submitAnalysis(
+    PaymentInboxAnalysisSubmissionRequested event,
+    Emitter<PaymentInboxState> emit,
+  ) async {
+    if (state.busyRecordIds.contains(event.recordId)) return;
+    final Set<String> busy = <String>{
+      ...state.busyRecordIds,
+      event.recordId,
+    };
+    emit(
+      state.copyWith(
+        busyRecordIds: busy,
+        feedback: PaymentInboxFeedback.none,
+      ),
+    );
+    try {
+      final Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+          submit = submitFailedSmsForAnalysis;
+      if (submit == null) {
+        emit(
+          state.copyWith(feedback: PaymentInboxFeedback.analysisUnavailable),
+        );
+        return;
+      }
+      final OperatorSmsAnalysisSubmission outcome = await submit(event.recordId);
+      emit(
+        state.copyWith(
+          feedback: outcome is OperatorSmsAnalysisAlreadySubmitted
+              ? PaymentInboxFeedback.analysisAlreadySubmitted
+              : PaymentInboxFeedback.analysisSubmitted,
+        ),
+      );
+    } on Object {
+      emit(
+        state.copyWith(feedback: PaymentInboxFeedback.analysisUnavailable),
+      );
+    } finally {
+      emit(
+        state.copyWith(
+          busyRecordIds: <String>{...state.busyRecordIds}
+            ..remove(event.recordId),
+          feedback: PaymentInboxFeedback.none,
         ),
       );
     }
