@@ -62,14 +62,9 @@ class AppServiceProvider extends ServiceProvider
 
         config()->set('passkeys', config('openpay.passkeys'));
 
-        Passport::tokensCan([
-            'payment-requests:read' => 'Read payment requests.',
-            'payment-requests:write' => 'Create or update payment requests.',
-            'deposits:read' => 'Read deposits.',
-            'wallets:read' => 'Read customer credit balances.',
-            'customers:read' => 'Read customer references.',
-            'customers:pii:read' => 'Read customer PII when separately authorized.',
-        ]);
+        /** @var array<string, string> $serviceScopes */
+        $serviceScopes = config('openpay.service_scopes');
+        Passport::tokensCan($serviceScopes);
         Passport::tokensExpireIn(now()->addMinutes(15));
         RateLimiter::for('mobile-api', static fn (Request $request): Limit => Limit::perMinute(60)->by((string) $request->user('mobile')?->getAuthIdentifier()));
         RateLimiter::for('mobile-envelope', static function (Request $request): Limit {

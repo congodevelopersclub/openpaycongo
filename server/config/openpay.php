@@ -24,6 +24,17 @@ return [
         'trust_mode' => env('OPENPAY_PAIRING_TRUST_MODE'),
     ],
     'passport_keys_path' => $passportKeysPath,
+    'service_scopes' => [
+        'payment-requests:read' => 'Read payment requests.',
+        'payment-requests:write' => 'Create or update payment requests.',
+        'deposits:read' => 'Read deposits.',
+        'wallets:read' => 'Read customer credit balances.',
+        'customers:read' => 'Read customer references.',
+        'customers:pii:read' => 'Read customer PII when separately authorized.',
+    ],
+    'reserved_service_scopes' => [
+        'customers:pii:read',
+    ],
     'passkeys_configured' => $passkeysConfigured,
     'passkeys' => [
         'relying_party_id' => $relyingPartyId,

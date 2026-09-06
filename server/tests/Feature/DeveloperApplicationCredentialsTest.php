@@ -19,6 +19,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Passport;
 use Livewire\Livewire;
 use ReflectionClass;
 use ReflectionMethod;
@@ -145,6 +146,32 @@ final class DeveloperApplicationCredentialsTest extends TestCase
             self::assertSame($client->getKey(), $application->refresh()->oauth_client_id);
             self::assertFalse((bool) $client->refresh()->revoked);
             self::assertDatabaseCount('oauth_clients', 1);
+            self::assertDatabaseCount('developer_application_credential_audits', 0);
+        }
+    }
+
+    public function test_reserved_scope_enforcement_uses_configuration(): void
+    {
+        $operator = $this->financialOperator('00000000-0000-4000-8000-000000000210');
+        $serviceScopes = [
+            'payment-requests:read' => 'Read payment requests.',
+            'ledger:export' => 'Export ledger evidence.',
+        ];
+
+        config()->set('openpay.service_scopes', $serviceScopes);
+        config()->set('openpay.reserved_service_scopes', ['ledger:export']);
+        Passport::tokensCan($serviceScopes);
+
+        $manager = app(ManageDeveloperApplicationCredentials::class);
+
+        self::assertArrayNotHasKey('ledger:export', $manager->availableScopes());
+
+        try {
+            $manager->issue($operator, 'Reserved export connector', ['ledger:export']);
+            self::fail('Configured reserved scopes must not be granted through ordinary developer credential issuance.');
+        } catch (AuthorizationException) {
+            self::assertDatabaseCount('oauth_clients', 0);
+            self::assertDatabaseCount('developer_applications', 0);
             self::assertDatabaseCount('developer_application_credential_audits', 0);
         }
     }
