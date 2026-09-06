@@ -26,7 +26,7 @@ final readonly class ReceiveMobileEnvelope
 
         return DB::transaction(function () use ($installationId, $counter, $nonce, $ciphertext): MobileEnvelopeResponse {
             $installation = SourceInstallation::query()->lockForUpdate()->find($installationId);
-            if ($installation === null || $counter <= $installation->mobile_replay_counter) {
+            if ($installation === null || $installation->revoked_at !== null || $counter <= $installation->mobile_replay_counter) {
                 throw new MobileEnvelopeUnavailable;
             }
 
@@ -48,7 +48,19 @@ final readonly class ReceiveMobileEnvelope
                 sodium_memzero($plaintext);
             }
 
-            $payload = $this->depositPayload($inner);
+            [$operation, $payload] = $this->command($inner);
+
+            if ($operation === 'activation_acknowledgement') {
+                $this->acknowledgeActivation($installation, $payload);
+                $installation->forceFill(['mobile_replay_counter' => $counter])->save();
+
+                return $this->encryptResponse($installation, $counter, 201, 'acknowledged');
+            }
+
+            if ($installation->pairing_intent_id !== null && $installation->activation_acknowledged_at === null) {
+                throw new MobileEnvelopeUnavailable;
+            }
+
             $result = $this->deposits->submit($installation, MobileDepositInput::validate($payload));
             $installation->forceFill(['mobile_replay_counter' => $counter])->save();
 
@@ -96,21 +108,50 @@ final readonly class ReceiveMobileEnvelope
         return [$outer['installation_id'], $counter, $nonce, $ciphertext];
     }
 
-    /** @param mixed $inner @return array<string, mixed> */
-    private function depositPayload(mixed $inner): array
+    /** @param mixed $inner @return array{0: 'activation_acknowledgement'|'deposit', 1: array<string, mixed>} */
+    private function command(mixed $inner): array
     {
         if (! is_array($inner)
             || array_is_list($inner)
             || count($inner) !== 3
-            || array_diff(array_keys($inner), ['version', 'operation', 'payload']) !== []
-            || ($inner['version'] ?? null) !== 1
-            || ($inner['operation'] ?? null) !== 'deposit'
-            || ! is_array($inner['payload'] ?? null)
-            || array_is_list($inner['payload'])) {
+            || array_diff(array_keys($inner), ['version', 'operation', 'payload']) !== []) {
             throw new MobileEnvelopeUnavailable;
         }
 
-        return $inner['payload'];
+        $operation = $inner['operation'];
+        $payload = $inner['payload'];
+        if (($inner['version'] ?? null) !== 1
+            || ! is_string($operation)
+            || ! in_array($operation, ['activation_acknowledgement', 'deposit'], true)
+            || ! is_array($payload)) {
+            throw new MobileEnvelopeUnavailable;
+        }
+
+        if ($operation === 'activation_acknowledgement') {
+            if ($payload !== []) {
+                throw new MobileEnvelopeUnavailable;
+            }
+
+            return [$operation, $payload];
+        }
+
+        if (array_is_list($payload)) {
+            throw new MobileEnvelopeUnavailable;
+        }
+
+        return [$operation, $payload];
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function acknowledgeActivation(SourceInstallation $installation, array $payload): void
+    {
+        if ($payload !== [] || ! is_string($installation->pairing_intent_id)) {
+            throw new MobileEnvelopeUnavailable;
+        }
+
+        if ($installation->activation_acknowledged_at === null) {
+            $installation->forceFill(['activation_acknowledged_at' => now('UTC')]);
+        }
     }
 
     private function encryptResponse(SourceInstallation $installation, int $counter, int $status, string $outcome): MobileEnvelopeResponse

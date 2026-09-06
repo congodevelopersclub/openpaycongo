@@ -27,6 +27,7 @@ void main() {
     final PairingProtocolBloc bloc = PairingProtocolBloc(
       protocol: _Protocol(),
       activation: const _Activation(PairingActivationOutcome.activated),
+      acknowledgement: _Acknowledgement.acknowledged(),
       recovery: _Recovery(
         PairingRecoveredMaterial(
           serverSas: '482901',
@@ -68,6 +69,7 @@ void main() {
     final PairingProtocolBloc bloc = PairingProtocolBloc(
       protocol: _Protocol(activationRequest: request),
       activation: const _Activation(PairingActivationOutcome.activated),
+      acknowledgement: _Acknowledgement.acknowledged(),
     );
     addTearDown(bloc.close);
     final Future<PairingProtocolState> activated = bloc.stream.firstWhere(
@@ -91,6 +93,7 @@ void main() {
     final PairingProtocolBloc bloc = PairingProtocolBloc(
       protocol: protocol,
       activation: activation,
+      acknowledgement: _Acknowledgement.acknowledged(),
     );
     addTearDown(bloc.close);
     bloc.add(const PairingProtocolStarted(_Command()));
@@ -113,6 +116,160 @@ void main() {
     activation.complete(PairingActivationOutcome.activated);
     expect(await activated, isA<PairingProtocolActivated>());
     expect(request.disposed, isTrue);
+  });
+
+  test('keeps native-installed pairing pending until its encrypted acknowledgement succeeds', () async {
+    final _ActivationRequest request = _ActivationRequest();
+    final _Acknowledgement acknowledgement = _Acknowledgement(<PairingActivationAcknowledgementOutcome>[
+      PairingActivationAcknowledgementOutcome.retryable,
+      PairingActivationAcknowledgementOutcome.acknowledged,
+    ]);
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(activationRequest: request),
+      activation: const _Activation(PairingActivationOutcome.activated),
+      acknowledgement: acknowledgement,
+    );
+    addTearDown(bloc.close);
+
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    bloc.add(const PairingActivationRequested());
+    await bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolActivationAcknowledgementPending,
+    );
+    expect(request.disposed, isTrue);
+
+    bloc.add(const PairingActivationAcknowledgementRequested());
+    await bloc.stream.firstWhere((PairingProtocolState state) => state is PairingProtocolActivated);
+    expect(acknowledgement.calls, 2);
+  });
+
+  test('retryable acknowledgement can be abandoned for a redacted replacement pairing', () async {
+    final _Acknowledgement acknowledgement = _Acknowledgement(<PairingActivationAcknowledgementOutcome>[
+      PairingActivationAcknowledgementOutcome.retryable,
+    ]);
+    final _ActivationRequest request = _ActivationRequest();
+    final _Protocol protocol = _Protocol(activationRequest: request);
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: protocol,
+      activation: const _Activation(PairingActivationOutcome.activated),
+      acknowledgement: acknowledgement,
+    );
+    addTearDown(bloc.close);
+
+    final Future<PairingProtocolState> firstPairing = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await firstPairing;
+    final Future<PairingProtocolState> pending = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolActivationAcknowledgementPending,
+    );
+    bloc.add(const PairingActivationRequested());
+    await pending;
+
+    final _TrackedCommand replacement = _TrackedCommand();
+    final Future<PairingProtocolState> replacing = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolRecoveryRequired,
+    );
+    bloc.add(const PairingActivationAcknowledgementReplacementRequested());
+    await replacing;
+
+    final Future<PairingProtocolState> replacementStarted = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    bloc.add(PairingProtocolStarted(replacement));
+    await replacementStarted;
+
+    expect(protocol.calls, 2);
+    expect(request.disposed, isTrue);
+    expect(replacement.disposed, isTrue);
+    expect(bloc.state.toString(), isNot(contains('ciphertext')));
+  });
+
+  test('startup resumes a durable pending acknowledgement without restoring QR data', () async {
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      acknowledgement: _Acknowledgement(
+        <PairingActivationAcknowledgementOutcome>[
+          PairingActivationAcknowledgementOutcome.acknowledged,
+        ],
+        recovery: PairingActivationAcknowledgementRecovery.pending,
+      ),
+    );
+    addTearDown(bloc.close);
+
+    await bloc.restore();
+    expect(bloc.state, isA<PairingProtocolActivationAcknowledgementPending>());
+
+    bloc.add(const PairingActivationAcknowledgementRequested());
+    await bloc.stream.firstWhere((PairingProtocolState state) => state is PairingProtocolActivated);
+  });
+
+  test('startup publishes active only from native durable acknowledgement state', () async {
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      acknowledgement: _Acknowledgement(
+        <PairingActivationAcknowledgementOutcome>[
+          PairingActivationAcknowledgementOutcome.acknowledged,
+        ],
+        recovery: PairingActivationAcknowledgementRecovery.active,
+      ),
+    );
+    addTearDown(bloc.close);
+
+    await bloc.restore();
+
+    expect(bloc.state, isA<PairingProtocolActivated>());
+  });
+
+  test('startup resumes a confirmed replacement before an older active pairing', () async {
+    final _ActivationRequest replacement = _ActivationRequest();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      acknowledgement: _Acknowledgement(
+        <PairingActivationAcknowledgementOutcome>[
+          PairingActivationAcknowledgementOutcome.acknowledged,
+        ],
+        recovery: PairingActivationAcknowledgementRecovery.active,
+      ),
+      recovery: _Recovery(
+        PairingRecoveredMaterial(
+          serverSas: '482901',
+          activationRequest: replacement,
+        ),
+      ),
+    );
+    addTearDown(bloc.close);
+
+    await bloc.restore();
+
+    expect(bloc.state, isA<PairingProtocolAwaitingConfirmation>());
+    expect((bloc.state as PairingProtocolAwaitingConfirmation).sas, '482901');
+    expect(replacement.disposed, isFalse);
+  });
+
+  test('startup acknowledgement recovery cannot overwrite a replacement scan', () async {
+    final _DeferredAcknowledgement acknowledgement = _DeferredAcknowledgement();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      acknowledgement: acknowledgement,
+      recovery: const _Recovery(null),
+    );
+    addTearDown(bloc.close);
+
+    final Future<void> restoring = bloc.restore();
+    await acknowledgement.restoreStarted.future;
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    acknowledgement.completeRestore(PairingActivationAcknowledgementRecovery.active);
+    await restoring;
+
+    expect(bloc.state, isA<PairingProtocolAwaitingConfirmation>());
   });
 }
 
@@ -190,4 +347,46 @@ final class _DeferredActivation implements PairingActivationPort {
   }
 
   void complete(PairingActivationOutcome outcome) => _result.complete(outcome);
+}
+
+final class _DeferredAcknowledgement implements PairingActivationAcknowledgementPort {
+  final Completer<void> restoreStarted = Completer<void>();
+  final Completer<PairingActivationAcknowledgementRecovery> _restoreResult =
+      Completer<PairingActivationAcknowledgementRecovery>();
+
+  @override
+  Future<PairingActivationAcknowledgementOutcome> acknowledge() async =>
+      PairingActivationAcknowledgementOutcome.recoveryRequired;
+
+  @override
+  Future<PairingActivationAcknowledgementRecovery> restore() {
+    restoreStarted.complete();
+    return _restoreResult.future;
+  }
+
+  void completeRestore(PairingActivationAcknowledgementRecovery recovery) {
+    _restoreResult.complete(recovery);
+  }
+}
+
+final class _Acknowledgement implements PairingActivationAcknowledgementPort {
+  _Acknowledgement(this.outcomes, {this.recovery = PairingActivationAcknowledgementRecovery.none});
+
+  factory _Acknowledgement.acknowledged() => _Acknowledgement(<PairingActivationAcknowledgementOutcome>[
+    PairingActivationAcknowledgementOutcome.acknowledged,
+  ]);
+
+  final List<PairingActivationAcknowledgementOutcome> outcomes;
+  final PairingActivationAcknowledgementRecovery recovery;
+  var calls = 0;
+
+  @override
+  Future<PairingActivationAcknowledgementOutcome> acknowledge() async {
+    final int index = calls < outcomes.length ? calls : outcomes.length - 1;
+    calls += 1;
+    return outcomes[index];
+  }
+
+  @override
+  Future<PairingActivationAcknowledgementRecovery> restore() async => recovery;
 }

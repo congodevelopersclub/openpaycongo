@@ -17,6 +17,7 @@ final class RetrievePairingActivation
 
         $installation = SourceInstallation::query()
             ->where('pairing_intent_id', $intentId)
+            ->whereNull('revoked_at')
             ->first();
         if (! $installation instanceof SourceInstallation) {
             return null;

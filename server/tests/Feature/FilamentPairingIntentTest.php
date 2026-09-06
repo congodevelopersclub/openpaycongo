@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\Filament\Pages\IssuePairingIntent;
 use App\Models\Organization;
 use App\Models\PairingIntent;
+use App\Models\SourceInstallation;
 use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
 use Filament\Facades\Filament;
@@ -61,6 +62,38 @@ final class FilamentPairingIntentTest extends TestCase
             ->assertHasFormErrors(['lifetime_seconds']);
 
         self::assertDatabaseCount('pairing_intents', 0);
+    }
+
+    public function test_verified_operator_can_revoke_a_paired_installation_without_exposing_mobile_material(): void
+    {
+        $operator = $this->financialOperator();
+        $installation = SourceInstallation::query()->create([
+            'organization_id' => $operator->organization_id,
+            'installation_digest' => hash('sha256', 'filament-paired-installation'),
+            'installation_lookup_id' => (string) str()->uuid(),
+            'installation_key_version' => 'pairing-v2',
+            'mobile_receive_key' => random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES),
+            'mobile_send_key' => random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES),
+        ]);
+        $installation->forceFill([
+            'pairing_intent_id' => rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '='),
+            'activation_nonce' => random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES),
+            'activation_ciphertext' => random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_ABYTES),
+        ])->save();
+        $installation->createToken('paired-mobile-installation', ['mobile:sync:read']);
+
+        Livewire::actingAs($operator)
+            ->test(IssuePairingIntent::class)
+            ->callAction('revokePairedInstallation', data: ['installation_id' => $installation->getKey()])
+            ->assertHasNoFormErrors()
+            ->assertDontSee('mobile_receive_key')
+            ->assertDontSee('mobile_send_key');
+
+        $revoked = $installation->fresh();
+        self::assertNotNull($revoked->revoked_at);
+        self::assertNull($revoked->mobile_receive_key);
+        self::assertNull($revoked->mobile_send_key);
+        self::assertSame(0, $revoked->tokens()->count());
     }
 
     public function test_the_pairing_action_applies_the_same_five_per_minute_issuance_limit_as_the_operator_api(): void

@@ -10,6 +10,16 @@
             </div>
         </section>
 
+        <section aria-labelledby="pairing-revocation-heading" class="max-w-xl rounded-xl border p-4">
+            <h2 id="pairing-revocation-heading" class="text-lg font-semibold">Revoke a paired mobile device</h2>
+            <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                Revocation immediately disables the selected paired device and permanently removes its mobile credentials from the server.
+            </p>
+            <div class="mt-4">
+                {{ $this->revokePairedInstallationAction }}
+            </div>
+        </section>
+
         @if ($qrSvg !== null)
             <section aria-labelledby="pairing-qr-heading" class="max-w-xl rounded-xl border p-4">
                 <h2 id="pairing-qr-heading" class="text-lg font-semibold">Pairing QR code</h2>

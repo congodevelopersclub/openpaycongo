@@ -28,7 +28,10 @@ internal object PairingDirectionalKeyFormat {
     const val INSTALLATION_ID_BYTES = 16
     private const val CREDENTIAL_LENGTH_BYTES = 2
     private const val SERVER_BASE_URL_LENGTH_BYTES = 2
-    private const val RECORD_VERSION: Byte = 4
+    private const val RECORD_VERSION: Byte = 5
+    private const val ACKNOWLEDGEMENT_PENDING: Byte = 0
+    private const val ACKNOWLEDGEMENT_CONFIRMED: Byte = 1
+    private const val V4_RECORD_VERSION: Byte = 4
     private const val LEGACY_KEY_ONLY_RECORD_VERSION: Byte = 1
     private const val LEGACY_IDENTITY_RECORD_VERSION: Byte = 2
 
@@ -54,14 +57,14 @@ internal object PairingDirectionalKeyFormat {
                 credential.bearerToken.any { it.code <= 0x20 || it.code == 0x7f } ||
                 serverBaseUrl.size !in 1..512
             ) throw PairingDirectionalKeyStorageException()
-            val fixedBytes =
-                1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES + SERVER_BASE_URL_LENGTH_BYTES
+            val fixedBytes = fixedBytes()
             return ByteArray(fixedBytes + bearerToken.size + serverBaseUrl.size).also { record ->
                 record[0] = RECORD_VERSION
-                ByteBuffer.wrap(record, 1, INSTALLATION_ID_BYTES)
+                record[1] = ACKNOWLEDGEMENT_PENDING
+                ByteBuffer.wrap(record, installationIdOffset(), INSTALLATION_ID_BYTES)
                     .putLong(installation.mostSignificantBits)
                     .putLong(installation.leastSignificantBits)
-                val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+                val sendKeyStart = sendKeyOffset()
                 System.arraycopy(sendKey, 0, record, sendKeyStart, KEY_BYTES)
                 System.arraycopy(receiveKey, 0, record, sendKeyStart + KEY_BYTES, KEY_BYTES)
                 ByteBuffer.wrap(record, sendKeyStart + (KEY_BYTES * 2), CREDENTIAL_LENGTH_BYTES)
@@ -79,7 +82,8 @@ internal object PairingDirectionalKeyFormat {
 
     fun outboundMaterial(record: ByteArray): PairingOutboundMaterial {
         val metadata = activeMetadata(record)
-        val sendKeyStart = 1 + INSTALLATION_ID_BYTES
+        if (!metadata.activationAcknowledged) throw PairingActivationException()
+        val sendKeyStart = sendKeyOffset()
         return PairingOutboundMaterial(
             installationId = metadata.installationId,
             canonicalServerBaseUrl = metadata.canonicalServerBaseUrl,
@@ -89,19 +93,90 @@ internal object PairingDirectionalKeyFormat {
 
     fun inboundMaterial(record: ByteArray): PairingInboundMaterial {
         val metadata = activeMetadata(record)
-        val receiveKeyStart = 1 + INSTALLATION_ID_BYTES + KEY_BYTES
+        if (!metadata.activationAcknowledged) throw PairingActivationException()
+        val receiveKeyStart = receiveKeyOffset()
         return PairingInboundMaterial(
             installationId = metadata.installationId,
             receiveKey = record.copyOfRange(receiveKeyStart, receiveKeyStart + KEY_BYTES),
         )
     }
 
+    fun pendingActivationAcknowledgementOutboundMaterial(record: ByteArray): PairingOutboundMaterial {
+        val metadata = activeMetadata(record)
+        if (metadata.activationAcknowledged) throw PairingActivationException()
+        return PairingOutboundMaterial(
+            installationId = metadata.installationId,
+            canonicalServerBaseUrl = metadata.canonicalServerBaseUrl,
+            sendKey = record.copyOfRange(sendKeyOffset(), sendKeyOffset() + KEY_BYTES),
+        )
+    }
+
+    fun pendingActivationAcknowledgementInboundMaterial(record: ByteArray): PairingInboundMaterial {
+        val metadata = activeMetadata(record)
+        if (metadata.activationAcknowledged) throw PairingActivationException()
+        return PairingInboundMaterial(
+            installationId = metadata.installationId,
+            receiveKey = record.copyOfRange(receiveKeyOffset(), receiveKeyOffset() + KEY_BYTES),
+        )
+    }
+
+    fun activationAcknowledgementPending(record: ByteArray): Boolean =
+        !activeMetadata(record).activationAcknowledged
+
+    fun markActivationAcknowledged(record: ByteArray) {
+        val metadata = activeMetadata(record)
+        if (!metadata.activationAcknowledged) record[1] = ACKNOWLEDGEMENT_CONFIRMED
+    }
+
+    fun isV4Record(record: ByteArray): Boolean = record.firstOrNull() == V4_RECORD_VERSION
+
+    /**
+     * V4 already protected the complete credential, origin, and directional
+     * keys in the same authenticated Keystore record. Preserve that material,
+     * but require the encrypted server acknowledgement before normal traffic.
+     */
+    fun migrateV4ToV5(record: ByteArray): ByteArray {
+        v4Metadata(record)
+        return ByteArray(record.size + 1).also { migrated ->
+            migrated[0] = RECORD_VERSION
+            migrated[1] = ACKNOWLEDGEMENT_PENDING
+            System.arraycopy(record, 1, migrated, installationIdOffset(), record.size - 1)
+            activeMetadata(migrated)
+        }
+    }
+
     private fun activeMetadata(record: ByteArray): PairingActiveRecordMetadata {
-        val fixedBytes =
-            1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES + SERVER_BASE_URL_LENGTH_BYTES
-        if (record.size < fixedBytes || record[0] != RECORD_VERSION) {
+        val fixedBytes = fixedBytes()
+        if (record.size < fixedBytes || record[0] != RECORD_VERSION ||
+            record[1] !in setOf(ACKNOWLEDGEMENT_PENDING, ACKNOWLEDGEMENT_CONFIRMED)
+        ) {
             throw PairingActivationException()
         }
+        val bearerTokenBytes = ByteBuffer
+            .wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES - SERVER_BASE_URL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
+            .short
+            .toInt() and 0xffff
+        val serverBaseUrlBytes = ByteBuffer
+            .wrap(record, fixedBytes - SERVER_BASE_URL_LENGTH_BYTES, SERVER_BASE_URL_LENGTH_BYTES)
+            .short
+            .toInt() and 0xffff
+        if (bearerTokenBytes !in 1..8192 || serverBaseUrlBytes !in 1..512 ||
+            record.size != fixedBytes + bearerTokenBytes + serverBaseUrlBytes
+        ) throw PairingActivationException()
+        val installation = ByteBuffer.wrap(record, installationIdOffset(), INSTALLATION_ID_BYTES).run {
+            UUID(long, long).toString()
+        }
+        val serverBaseUrl = String(record, fixedBytes + bearerTokenBytes, serverBaseUrlBytes, StandardCharsets.UTF_8)
+        return PairingActiveRecordMetadata(
+            installation,
+            PairingServerAuthority.canonicalize(serverBaseUrl),
+            record[1] == ACKNOWLEDGEMENT_CONFIRMED,
+        )
+    }
+
+    private fun v4Metadata(record: ByteArray): PairingActiveRecordMetadata {
+        val fixedBytes = v4FixedBytes()
+        if (record.size < fixedBytes || record[0] != V4_RECORD_VERSION) throw PairingActivationException()
         val bearerTokenBytes = ByteBuffer
             .wrap(record, fixedBytes - CREDENTIAL_LENGTH_BYTES - SERVER_BASE_URL_LENGTH_BYTES, CREDENTIAL_LENGTH_BYTES)
             .short
@@ -117,8 +192,24 @@ internal object PairingDirectionalKeyFormat {
             UUID(long, long).toString()
         }
         val serverBaseUrl = String(record, fixedBytes + bearerTokenBytes, serverBaseUrlBytes, StandardCharsets.UTF_8)
-        return PairingActiveRecordMetadata(installation, PairingServerAuthority.canonicalize(serverBaseUrl))
+        return PairingActiveRecordMetadata(
+            installation,
+            PairingServerAuthority.canonicalize(serverBaseUrl),
+            false,
+        )
     }
+
+    private fun fixedBytes(): Int =
+        1 + 1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES + SERVER_BASE_URL_LENGTH_BYTES
+
+    private fun v4FixedBytes(): Int =
+        1 + INSTALLATION_ID_BYTES + (KEY_BYTES * 2) + CREDENTIAL_LENGTH_BYTES + SERVER_BASE_URL_LENGTH_BYTES
+
+    private fun installationIdOffset(): Int = 2
+
+    private fun sendKeyOffset(): Int = installationIdOffset() + INSTALLATION_ID_BYTES
+
+    private fun receiveKeyOffset(): Int = sendKeyOffset() + KEY_BYTES
 
     fun legacyGeneration(
         credentialInstallationId: String,
@@ -170,6 +261,7 @@ internal class PairingInboundMaterial(
 private class PairingActiveRecordMetadata(
     val installationId: String,
     val canonicalServerBaseUrl: String,
+    val activationAcknowledged: Boolean,
 )
 
 /** The signed QR owns this public route; active pairing storage pins its exact origin. */
@@ -248,6 +340,48 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
         }
     }
 
+    /** Only the encrypted activation acknowledgement may use pending material. */
+    fun readPendingActivationAcknowledgementOutboundMaterial(): PairingOutboundMaterial = synchronized(STORAGE_LOCK) {
+        val record = readActiveRecord()
+        try {
+            PairingDirectionalKeyFormat.pendingActivationAcknowledgementOutboundMaterial(record)
+        } finally {
+            record.fill(0)
+        }
+    }
+
+    /** Only the encrypted activation acknowledgement response may use this key. */
+    fun readPendingActivationAcknowledgementInboundMaterial(): PairingInboundMaterial = synchronized(STORAGE_LOCK) {
+        val record = readActiveRecord()
+        try {
+            PairingDirectionalKeyFormat.pendingActivationAcknowledgementInboundMaterial(record)
+        } finally {
+            record.fill(0)
+        }
+    }
+
+    /** `null` means no active generation; `false` means durable pending acknowledgement. */
+    fun activationAcknowledgementState(): Boolean? = synchronized(STORAGE_LOCK) {
+        if (!recordFile.exists() && !File(recordFile.path + ".bak").exists()) return@synchronized null
+        val record = readActiveRecord()
+        try {
+            !PairingDirectionalKeyFormat.activationAcknowledgementPending(record)
+        } finally {
+            record.fill(0)
+        }
+    }
+
+    /** Mark active only after native authentication of the encrypted response. */
+    fun markActivationAcknowledged() = synchronized(STORAGE_LOCK) {
+        val record = readActiveRecord()
+        try {
+            PairingDirectionalKeyFormat.markActivationAcknowledged(record)
+            writeEncryptedRecord(record)
+        } finally {
+            record.fill(0)
+        }
+    }
+
     private fun writeActiveGeneration(
         credential: PairingActivationCredential,
         canonicalServerBaseUrl: String,
@@ -260,6 +394,14 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
             sendKey,
             receiveKey,
         )
+        try {
+            writeEncryptedRecord(plaintext)
+        } finally {
+            plaintext.fill(0)
+        }
+    }
+
+    private fun writeEncryptedRecord(plaintext: ByteArray) {
         val nonce = ByteArray(GCM_NONCE_BYTES).also(SecureRandom()::nextBytes)
         var ciphertext = ByteArray(0)
         var payload = ByteArray(0)
@@ -287,7 +429,6 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
             if (output != null) atomicFile.failWrite(output)
             throw PairingDirectionalKeyStorageException()
         } finally {
-            plaintext.fill(0)
             nonce.fill(0)
             ciphertext.fill(0)
             payload.fill(0)
@@ -296,7 +437,20 @@ internal class PairingDirectionalKeyVault(private val context: Context) {
 
     private fun readActiveRecord(): ByteArray {
         if (recordFile.exists() || File(recordFile.path + ".bak").exists()) {
-            return decryptRecord(atomicFile, keyForExisting(KEY_ALIAS), AAD)
+            val record = decryptRecord(atomicFile, keyForExisting(KEY_ALIAS), AAD)
+            if (!PairingDirectionalKeyFormat.isV4Record(record)) return record
+            try {
+                val migrated = PairingDirectionalKeyFormat.migrateV4ToV5(record)
+                try {
+                    writeEncryptedRecord(migrated)
+                    return migrated
+                } catch (_: Exception) {
+                    migrated.fill(0)
+                    throw PairingActivationException()
+                }
+            } finally {
+                record.fill(0)
+            }
         }
         return migrateLegacyGeneration()
     }

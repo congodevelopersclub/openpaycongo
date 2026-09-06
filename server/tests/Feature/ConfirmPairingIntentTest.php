@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Organization;
+use App\Models\PairedInstallationRevocationAudit;
 use App\Models\PairingIntent;
 use App\Models\SourceInstallation;
 use App\Models\User;
@@ -145,6 +146,62 @@ final class ConfirmPairingIntentTest extends TestCase
         self::assertTrue(hash_equals($installation->tokens()->sole()->token, hash('sha256', $tokenValue)));
     }
 
+    public function test_second_confirmed_qr_rotates_paired_installations_without_touching_unpaired_provider_installations(): void
+    {
+        [$operator, $firstIntent] = $this->pendingConfirmation();
+        $this->asVerified($operator)
+            ->postJson('/v1/pairing/intents/'.$firstIntent->intent_id.'/confirmation', [
+                'request_id' => $this->base64Url(random_bytes(16)),
+                'decision' => 'codes_match',
+                'reason' => 'codes_compared_match',
+            ])
+            ->assertOk()
+            ->assertExactJson(['status' => 'active']);
+
+        $oldPaired = SourceInstallation::query()->sole();
+        $oldReceiveKey = $oldPaired->mobile_receive_key;
+        $oldSendKey = $oldPaired->mobile_send_key;
+        $unpaired = SourceInstallation::query()->create([
+            'organization_id' => $operator->organization_id,
+            'installation_digest' => hash('sha256', 'unpaired-provider-installation'),
+            'installation_lookup_id' => (string) str()->uuid(),
+            'installation_key_version' => 'provider-v1',
+            'mobile_receive_key' => random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES),
+            'mobile_send_key' => random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES),
+        ]);
+        $unpairedReceiveKey = $unpaired->mobile_receive_key;
+        $unpairedSendKey = $unpaired->mobile_send_key;
+        $unpaired->createToken('provider-installation', ['mobile:sync:read']);
+
+        $secondIntent = $this->pendingConfirmationFor($operator);
+        $this->asVerified($operator)
+            ->postJson('/v1/pairing/intents/'.$secondIntent->intent_id.'/confirmation', [
+                'request_id' => $this->base64Url(random_bytes(16)),
+                'decision' => 'codes_match',
+                'reason' => 'codes_compared_match',
+            ])
+            ->assertOk()
+            ->assertExactJson(['status' => 'active']);
+
+        $revoked = $oldPaired->fresh();
+        self::assertNotNull($revoked->revoked_at);
+        self::assertNull($revoked->mobile_receive_key);
+        self::assertNull($revoked->mobile_send_key);
+        self::assertNull($revoked->activation_nonce);
+        self::assertNull($revoked->activation_ciphertext);
+        self::assertSame(0, $revoked->tokens()->count());
+        self::assertNotSame($oldReceiveKey, $revoked->mobile_receive_key);
+        self::assertNotSame($oldSendKey, $revoked->mobile_send_key);
+
+        $unpaired = $unpaired->fresh();
+        self::assertNull($unpaired->revoked_at);
+        self::assertSame($unpairedReceiveKey, $unpaired->mobile_receive_key);
+        self::assertSame($unpairedSendKey, $unpaired->mobile_send_key);
+        self::assertSame(1, $unpaired->tokens()->count());
+        self::assertDatabaseCount('source_installations', 3);
+        self::assertSame('rotated', PairedInstallationRevocationAudit::query()->sole()->action);
+    }
+
     public function test_activation_retrieval_is_limited_without_revealing_which_intent_exists(): void
     {
         $limitKey = 'pairing.activation:'.hash('sha256', '127.0.0.1');
@@ -213,10 +270,16 @@ final class ConfirmPairingIntentTest extends TestCase
             'two_factor_confirmed_at' => now(),
             'recovery_codes_confirmed_at' => now(),
         ]);
+
+        return [$operator, $this->pendingConfirmationFor($operator, $expiresAt)];
+    }
+
+    private function pendingConfirmationFor(User $operator, ?\DateTimeInterface $expiresAt = null): PairingIntent
+    {
         $intentBytes = random_bytes(16);
 
-        return [$operator, PairingIntent::query()->create([
-            'organization_id' => $organization->getKey(),
+        return PairingIntent::query()->create([
+            'organization_id' => $operator->organization_id,
             'intent_id' => $this->base64Url($intentBytes),
             'intent_id_bytes' => $intentBytes,
             'state' => 'pending_confirmation',
@@ -225,7 +288,7 @@ final class ConfirmPairingIntentTest extends TestCase
             'server_receive_key' => random_bytes(32),
             'server_send_key' => random_bytes(32),
             'short_authentication_code' => str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT),
-        ])];
+        ]);
     }
 
     private function base64Url(string $value): string
