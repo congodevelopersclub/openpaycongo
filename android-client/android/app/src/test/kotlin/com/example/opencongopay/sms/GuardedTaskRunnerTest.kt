@@ -163,7 +163,7 @@ class GuardedTaskRunnerTest {
                 }
             }
             try {
-                commit { activated.incrementAndGet() }
+                commit.commit { activated.incrementAndGet() }
             } finally {
                 finished.countDown()
             }
