@@ -149,7 +149,7 @@ final class ManageDeveloperApplicationCredentials
     {
         $scopes = $client->scopes;
 
-        return is_array($scopes) ? array_values(array_map('strval', $scopes)) : [];
+        return array_values(array_map('strval', $scopes));
     }
 
     /** @param string[] $scopes */
