@@ -10,16 +10,14 @@ import 'platform_gemma4_proposal_port.dart';
 /// immutable push-ready data when possible, and never acknowledges an SMS.
 final class OperatorSmsPaymentDataSource {
   OperatorSmsPaymentDataSource({
-    required SmsGatewayPort gateway,
-    OperatorSmsPaymentAdapter adapter = const OperatorSmsPaymentAdapter(),
-    Gemma4PaymentDataFactory? gemmaFactory,
-  }) : _gateway = gateway,
-       _adapter = adapter,
-       _gemmaFactory = gemmaFactory;
+    required this.gateway,
+    this.adapter = const OperatorSmsPaymentAdapter(),
+    this.gemmaFactory,
+  });
 
-  final SmsGatewayPort _gateway;
-  final OperatorSmsPaymentAdapter _adapter;
-  final Gemma4PaymentDataFactory? _gemmaFactory;
+  final SmsGatewayPort gateway;
+  final OperatorSmsPaymentAdapter adapter;
+  final Gemma4PaymentDataFactory? gemmaFactory;
 
   /// Production composition for Android: Gemma stays completely on-device.
   factory OperatorSmsPaymentDataSource.onDeviceGemma({
@@ -38,15 +36,16 @@ final class OperatorSmsPaymentDataSource {
 
   Future<List<OperatorSmsPaymentData>> read(OutboxScope scope) async {
     final List<NativeOperatorPaymentProfile> profiles =
-        await _gateway.listOperatorPaymentProfiles();
+        await gateway.listOperatorPaymentProfiles();
     final Map<String, NativeOperatorPaymentProfile> bySender =
         <String, NativeOperatorPaymentProfile>{};
     for (final NativeOperatorPaymentProfile profile in profiles) {
-      if (bySender.putIfAbsent(profile.sender, () => profile) != null) {
+      if (bySender.containsKey(profile.sender)) {
         throw const FormatException('duplicate_operator_payment_profile');
       }
+      bySender[profile.sender] = profile;
     }
-    final List<NativeSmsRecord> records = await _gateway.drainInbox();
+    final List<NativeSmsRecord> records = await gateway.drainInbox();
     final List<OperatorSmsPaymentData> data = <OperatorSmsPaymentData>[];
     for (final NativeSmsRecord record in records) {
       final NativeOperatorPaymentProfile? profile = bySender[record.sender];
@@ -55,18 +54,18 @@ final class OperatorSmsPaymentDataSource {
         continue;
       }
       if (profile.structure == NativeOperatorPaymentStructure.manual) {
-        data.add(_adapter.interpret(record: record, profile: profile, scope: scope));
+        data.add(adapter.interpret(record: record, profile: profile, scope: scope));
         continue;
       }
-      final Gemma4PaymentDataFactory? gemmaFactory = _gemmaFactory;
+      final Gemma4PaymentDataFactory? configuredGemmaFactory = gemmaFactory;
       data.add(
-        gemmaFactory == null
+        configuredGemmaFactory == null
             ? const PaymentDataNeedsReview('gemma4_runtime_not_configured')
-            : await _adapter.interpretWithGemma(
+            : await adapter.interpretWithGemma(
                 record: record,
                 profile: profile,
                 scope: scope,
-                factory: gemmaFactory,
+                factory: configuredGemmaFactory,
               ),
       );
     }

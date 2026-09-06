@@ -50,7 +50,9 @@ final class DeveloperApprovedOperatorPaymentPatternVerifier {
     required Uint8List pinnedSigningKey,
     required DateTime now,
   }) async {
-    if (encodedRelease.length > 8192 || pinnedSigningKey.length != 32) return null;
+    if (encodedRelease.length > 8192 || pinnedSigningKey.length != 32) {
+      return null;
+    }
     final Map<String, Object?>? fields = _fields(encodedRelease);
     if (fields == null) return null;
     final String schema = fields['schema_version']! as String;
@@ -78,7 +80,9 @@ final class DeveloperApprovedOperatorPaymentPatternVerifier {
     } on Object {
       return null;
     }
-    if (!valid) return null;
+    if (!valid) {
+      return null;
+    }
     return DeveloperApprovedOperatorPaymentPattern._(
       proposal: ProposedOperatorPaymentPattern(provider: provider, sender: sender, template: template, version: version),
       approvedAt: approvedAt, expiresAt: expiresAt,

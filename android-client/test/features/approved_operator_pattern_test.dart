@@ -8,6 +8,10 @@ import 'package:opencongopay/features/payment_inbox/domain/operator_sms_payment_
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
 import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
 
+const String _provider = 'ORANGE_MONEY';
+const String _sender = 'ORANGE';
+const String _template = 'Paid {amount} {currency} ref {reference}';
+
 void main() {
   const OutboxScope scope = OutboxScope(
     tenantId: 'tenant-001',
@@ -154,7 +158,7 @@ void main() {
 
 SmsEnvelope _sms(String body, DateTime now) {
   return SmsEnvelope.fromOs(
-    sender: SenderIdentity.fromOsMetadata(sender)!,
+    sender: SenderIdentity.fromOsMetadata(_sender)!,
     body: body,
     receivedAt: now,
     segments: 1,
@@ -173,9 +177,9 @@ Future<DeveloperApprovedOperatorPaymentPattern> _verifiedRelease(
   final Signature signature = await algorithm.sign(
     DeveloperApprovedOperatorPaymentPatternVerifier.canonicalPayload(
       schema: '1',
-      provider: provider,
-      sender: sender,
-      template: template,
+      provider: _provider,
+      sender: _sender,
+      template: _template,
       version: 1,
       approvedAt: approvedAt,
       expiresAt: expiresAt,
@@ -186,9 +190,9 @@ Future<DeveloperApprovedOperatorPaymentPattern> _verifiedRelease(
       await const DeveloperApprovedOperatorPaymentPatternVerifier().verify(
         encodedRelease: jsonEncode(<String, Object>{
           'schema_version': '1',
-          'provider': provider,
-          'sender': sender,
-          'template': template,
+          'provider': _provider,
+          'sender': _sender,
+          'template': _template,
           'pattern_version': 1,
           'approved_at': approvedAt,
           'expires_at': expiresAt,
