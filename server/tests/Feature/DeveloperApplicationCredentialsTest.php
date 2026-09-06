@@ -33,8 +33,7 @@ final class DeveloperApplicationCredentialsTest extends TestCase
 
         Artisan::call('passport:keys', ['--force' => true]);
         Filament::setCurrentPanel(Filament::getPanel('operations'));
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
-        {
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
             public function assertVerified(User $user): void {}
         });
     }
@@ -262,7 +261,7 @@ final class DeveloperApplicationCredentialsTest extends TestCase
             'dev_app_cred_audits_org_seq_unique',
         ] as $name) {
             self::assertLessThanOrEqual(64, strlen($name));
-            self::assertStringContainsString("'" . $name . "'", $migration);
+            self::assertStringContainsString("'".$name."'", $migration);
         }
 
         self::assertStringNotContainsString("->unique(['organization_id', 'organization_sequence']);", $migration);

@@ -174,8 +174,8 @@ final class ManageDeveloperApplicationCredentials
             ->lockForUpdate()
             ->firstOrFail();
 
-        return ((int) $this->auditSequenceQuery($organizationId)
-            ->value('organization_sequence')) + 1;
+        return (int) $this->auditSequenceQuery($organizationId)
+            ->value('organization_sequence') + 1;
     }
 
     /** @return Builder<DeveloperApplicationCredentialAudit> */
