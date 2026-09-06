@@ -28,7 +28,7 @@ final class Gemma4PaymentPatternAuthorTest extends TestCase
                             'sender' => 'ORANGE',
                             'template' => 'Paid {amount} {currency} ref {reference}',
                         ], JSON_THROW_ON_ERROR),
-                    ]],
+                    ],
                 ]],
             ]),
         ]);

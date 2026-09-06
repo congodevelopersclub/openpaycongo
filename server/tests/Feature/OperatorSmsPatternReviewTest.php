@@ -45,7 +45,7 @@ final class OperatorSmsPatternReviewTest extends TestCase
                             'sender' => 'ORANGE',
                             'template' => 'Paid {amount} {currency} ref {reference}',
                         ], JSON_THROW_ON_ERROR),
-                    ]],
+                    ],
                 ]],
             ]),
         ]);
