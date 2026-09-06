@@ -18,7 +18,7 @@ final readonly class OperatorPaymentPatternSubmission
         public string $body,
         public string $provider,
     ) {
-        if (! preg_match('/^[A-Z0-9._-]{3,32}$/', $provider)
+        if (preg_match('/^[A-Z0-9._-]{3,32}$/', $provider) !== 1
             || trim($sender) === '' || mb_strlen($sender) > 64
             || trim($body) === '' || mb_strlen($body) > 4096) {
             throw new InvalidArgumentException('operator_payment_pattern_submission_invalid');
