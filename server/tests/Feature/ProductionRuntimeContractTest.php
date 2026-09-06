@@ -50,6 +50,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/node_modules', $dockerignore);
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
         self::assertStringContainsString('OPENPAY_APP_URL: ${OPENPAY_APP_URL:?Set OPENPAY_APP_URL outside the repository}', $compose);
+        self::assertStringContainsString('COPY compose.yaml compose.gemma.yaml /', $dockerfile);
         self::assertStringContainsString('OPENPAY_PASSKEY_RP_ID: ${OPENPAY_PASSKEY_RP_ID:?Set OPENPAY_PASSKEY_RP_ID outside the repository}', $compose);
         self::assertStringContainsString('OPENPAY_PASSKEY_ALLOWED_ORIGINS: ${OPENPAY_PASSKEY_ALLOWED_ORIGINS:?Set OPENPAY_PASSKEY_ALLOWED_ORIGINS outside the repository}', $compose);
         self::assertStringContainsString('OPENPAY_PASSKEY_USER_HANDLE_SECRET: ${OPENPAY_PASSKEY_USER_HANDLE_SECRET:?Set OPENPAY_PASSKEY_USER_HANDLE_SECRET outside the repository}', $compose);
