@@ -197,7 +197,8 @@ final class ApprovedOperatorPatternActivation {
     final List<PendingPatternReview> review = <PendingPatternReview>[];
     final Set<String> seen = <String>{};
     for (final PendingOperatorSms item in pending) {
-      if (!seen.add(item.sourceRecordId) || item.sms.sender != sender) {
+      if (!seen.add(item.sourceRecordId) ||
+          !TrustedSenderRule(sender).allows(item.sms.sender)) {
         continue;
       }
       switch (const OperatorSmsPaymentDataFactory().interpret(

@@ -23,6 +23,26 @@ void main() {
   final DateTime now = DateTime.utc(2026, 9, 6, 0, 2);
 
   test('an unsigned Gemma candidate never becomes an approved release', () async {
+    final Ed25519 algorithm = Ed25519();
+    final SimpleKeyPair pair = await algorithm.newKeyPair();
+    final SimplePublicKey publicKey = await pair.extractPublicKey();
+    const String approvedAt = '2026-09-06T00:00:00Z';
+    const String expiresAt = '2026-10-06T00:00:00Z';
+    final Signature signed = await algorithm.sign(
+      DeveloperApprovedOperatorPaymentPatternVerifier.canonicalPayload(
+        schema: '1',
+        provider: provider,
+        sender: sender,
+        template: template,
+        version: 1,
+        approvedAt: approvedAt,
+        expiresAt: expiresAt,
+      ),
+      keyPair: pair,
+    );
+    final Uint8List alteredSignature = Uint8List.fromList(signed.bytes);
+    alteredSignature[0] ^= 1;
+
     final DeveloperApprovedOperatorPaymentPattern? release =
         await const DeveloperApprovedOperatorPaymentPatternVerifier().verify(
           encodedRelease: jsonEncode(<String, Object>{
@@ -31,11 +51,11 @@ void main() {
             'sender': sender,
             'template': template,
             'pattern_version': 1,
-            'approved_at': '2026-09-06T00:00:00Z',
-            'expires_at': '2026-10-06T00:00:00Z',
-            'signature': base64UrlEncode(Uint8List(64)).replaceAll('=', ''),
+            'approved_at': approvedAt,
+            'expires_at': expiresAt,
+            'signature': base64UrlEncode(alteredSignature).replaceAll('=', ''),
           }),
-          pinnedSigningKey: Uint8List(32),
+          pinnedSigningKey: Uint8List.fromList(publicKey.bytes),
           now: now,
         );
 
