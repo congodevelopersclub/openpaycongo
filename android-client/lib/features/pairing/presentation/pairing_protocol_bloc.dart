@@ -22,6 +22,17 @@ abstract interface class PairingActivationPort {
 
 enum PairingActivationOutcome { activated, recoveryRequired }
 
+/// Native-owned acknowledgement bridge. It exposes only redacted state.
+abstract interface class PairingActivationAcknowledgementPort {
+  Future<PairingActivationAcknowledgementOutcome> acknowledge();
+
+  Future<PairingActivationAcknowledgementRecovery> restore();
+}
+
+enum PairingActivationAcknowledgementOutcome { acknowledged, retryable, recoveryRequired }
+
+enum PairingActivationAcknowledgementRecovery { none, pending, active, recoveryRequired }
+
 abstract interface class PairingActivationRequest {
   void dispose();
 }
@@ -90,6 +101,11 @@ final class PairingActivationRequested extends PairingProtocolEvent {
   const PairingActivationRequested();
 }
 
+/// Retries only the encrypted final acknowledgement; no QR or key data returns.
+final class PairingActivationAcknowledgementRequested extends PairingProtocolEvent {
+  const PairingActivationAcknowledgementRequested();
+}
+
 sealed class PairingProtocolState {
   const PairingProtocolState();
 }
@@ -119,6 +135,11 @@ final class PairingProtocolActivated extends PairingProtocolState {
   const PairingProtocolActivated();
 }
 
+/// Activation envelope is durable, but the server has not yet authenticated its receipt.
+final class PairingProtocolActivationAcknowledgementPending extends PairingProtocolState {
+  const PairingProtocolActivationAcknowledgementPending();
+}
+
 final class PairingProtocolRecoveryRequired extends PairingProtocolState {
   const PairingProtocolRecoveryRequired();
 }
@@ -128,18 +149,22 @@ final class PairingProtocolBloc
   PairingProtocolBloc({
     required this.protocol,
     PairingActivationPort? activation,
+    PairingActivationAcknowledgementPort? acknowledgement,
     PairingRecoveryPort? recovery,
   })
     : activation = activation ?? const _UnavailableActivationPort(),
+      acknowledgement = acknowledgement ?? const _UnavailableAcknowledgementPort(),
       recovery = recovery ?? const _UnavailableRecoveryPort(),
       super(const PairingProtocolIdle()) {
     on<PairingProtocolStarted>(_start);
     on<PairingProtocolRecoveryRequested>(_restore);
     on<PairingActivationRequested>(_activate);
+    on<PairingActivationAcknowledgementRequested>(_acknowledge);
   }
 
   final PairingProtocolPort protocol;
   final PairingActivationPort activation;
+  final PairingActivationAcknowledgementPort acknowledgement;
   final PairingRecoveryPort recovery;
   var _startActive = false;
   var _activationActive = false;
@@ -162,6 +187,20 @@ final class PairingProtocolBloc
     }
     PairingRecoveredMaterial? material;
     try {
+      final PairingActivationAcknowledgementRecovery acknowledgementRecovery =
+          await acknowledgement.restore();
+      if (acknowledgementRecovery == PairingActivationAcknowledgementRecovery.pending) {
+        emit(const PairingProtocolActivationAcknowledgementPending());
+        return;
+      }
+      if (acknowledgementRecovery == PairingActivationAcknowledgementRecovery.active) {
+        emit(const PairingProtocolActivated());
+        return;
+      }
+      if (acknowledgementRecovery == PairingActivationAcknowledgementRecovery.recoveryRequired) {
+        emit(const PairingProtocolRecoveryRequired());
+        return;
+      }
       material = await recovery.restore();
       if (material == null || state is! PairingProtocolIdle) return;
       final PairingActivationRequest? request = material.activationRequest;
@@ -188,7 +227,8 @@ final class PairingProtocolBloc
     if (_startActive ||
         _activationActive ||
         state is PairingProtocolAwaitingConfirmation ||
-        state is PairingProtocolActivating) {
+        state is PairingProtocolActivating ||
+        state is PairingProtocolActivationAcknowledgementPending) {
       event.command.dispose();
       return;
     }
@@ -222,7 +262,7 @@ final class PairingProtocolBloc
     try {
       final PairingActivationOutcome outcome = await activation.activate(request);
       if (outcome == PairingActivationOutcome.activated) {
-        emit(const PairingProtocolActivated());
+        await _finishAcknowledgement(emit);
       } else {
         emit(const PairingProtocolRecoveryRequired());
       }
@@ -231,6 +271,32 @@ final class PairingProtocolBloc
     } finally {
       request.dispose();
       _activationActive = false;
+    }
+  }
+
+  Future<void> _acknowledge(
+    PairingActivationAcknowledgementRequested event,
+    Emitter<PairingProtocolState> emit,
+  ) async {
+    if (_activationActive || state is! PairingProtocolActivationAcknowledgementPending) return;
+    _activationActive = true;
+    emit(const PairingProtocolActivating());
+    try {
+      await _finishAcknowledgement(emit);
+    } finally {
+      _activationActive = false;
+    }
+  }
+
+  Future<void> _finishAcknowledgement(Emitter<PairingProtocolState> emit) async {
+    final PairingActivationAcknowledgementOutcome outcome = await acknowledgement.acknowledge();
+    switch (outcome) {
+      case PairingActivationAcknowledgementOutcome.acknowledged:
+        emit(const PairingProtocolActivated());
+      case PairingActivationAcknowledgementOutcome.retryable:
+        emit(const PairingProtocolActivationAcknowledgementPending());
+      case PairingActivationAcknowledgementOutcome.recoveryRequired:
+        emit(const PairingProtocolRecoveryRequired());
     }
   }
 
@@ -255,4 +321,16 @@ final class _UnavailableRecoveryPort implements PairingRecoveryPort {
 
   @override
   Future<PairingRecoveredMaterial?> restore() async => null;
+}
+
+final class _UnavailableAcknowledgementPort implements PairingActivationAcknowledgementPort {
+  const _UnavailableAcknowledgementPort();
+
+  @override
+  Future<PairingActivationAcknowledgementOutcome> acknowledge() async =>
+      PairingActivationAcknowledgementOutcome.recoveryRequired;
+
+  @override
+  Future<PairingActivationAcknowledgementRecovery> restore() async =>
+      PairingActivationAcknowledgementRecovery.none;
 }

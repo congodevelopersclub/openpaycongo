@@ -16,9 +16,12 @@ class PairingDirectionalKeyFormatTest {
 
         val record = PairingDirectionalKeyFormat.copyRecord(credential, authority, send, receive)
 
-        assertEquals(85 + "opaque-token".length + authority.length, record.size)
-        assertEquals(4, record[0].toInt())
-        val material = PairingDirectionalKeyFormat.outboundMaterial(record)
+        assertEquals(86 + "opaque-token".length + authority.length, record.size)
+        assertEquals(5, record[0].toInt())
+        assertThrows(PairingActivationException::class.java) {
+            PairingDirectionalKeyFormat.outboundMaterial(record)
+        }
+        val material = PairingDirectionalKeyFormat.pendingActivationAcknowledgementOutboundMaterial(record)
         assertEquals(installationId, material.installationId)
         assertEquals(authority, material.canonicalServerBaseUrl)
         assertArrayEquals(send, material.sendKey)
@@ -26,10 +29,18 @@ class PairingDirectionalKeyFormatTest {
         receive.fill(9)
         assertEquals(1, material.sendKey[0].toInt())
         material.dispose()
-        val inbound = PairingDirectionalKeyFormat.inboundMaterial(record)
+        val inbound = PairingDirectionalKeyFormat.pendingActivationAcknowledgementInboundMaterial(record)
         assertEquals(installationId, inbound.installationId)
         assertArrayEquals(ByteArray(32) { 2 }, inbound.receiveKey)
         inbound.dispose()
+
+        PairingDirectionalKeyFormat.markActivationAcknowledged(record)
+        val activated = PairingDirectionalKeyFormat.outboundMaterial(record)
+        assertEquals(installationId, activated.installationId)
+        activated.dispose()
+        assertThrows(PairingActivationException::class.java) {
+            PairingDirectionalKeyFormat.pendingActivationAcknowledgementOutboundMaterial(record)
+        }
     }
 
     @Test
@@ -42,6 +53,37 @@ class PairingDirectionalKeyFormatTest {
         assertThrows(PairingActivationException::class.java) {
             PairingDirectionalKeyFormat.outboundMaterial(record)
         }
+    }
+
+    @Test
+    fun migratesV4ToPendingAcknowledgementWithoutChangingProtectedMaterial() {
+        val credential = PairingActivationCredential(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "opaque-token",
+        )
+        val v5 = PairingDirectionalKeyFormat.copyRecord(
+            credential,
+            "https://pairing.example.test",
+            ByteArray(32) { 3 },
+            ByteArray(32) { 4 },
+        )
+        val v4 = ByteArray(v5.size - 1).also { record ->
+            record[0] = 4
+            System.arraycopy(v5, 2, record, 1, record.size - 1)
+        }
+
+        val migrated = PairingDirectionalKeyFormat.migrateV4ToV5(v4)
+
+        assertEquals(5, migrated[0].toInt())
+        assertEquals(0, migrated[1].toInt())
+        assertThrows(PairingActivationException::class.java) {
+            PairingDirectionalKeyFormat.outboundMaterial(migrated)
+        }
+        val pending = PairingDirectionalKeyFormat.pendingActivationAcknowledgementOutboundMaterial(migrated)
+        assertEquals("123e4567-e89b-12d3-a456-426614174000", pending.installationId)
+        assertEquals("https://pairing.example.test", pending.canonicalServerBaseUrl)
+        assertArrayEquals(ByteArray(32) { 3 }, pending.sendKey)
+        pending.dispose()
     }
 
     @Test

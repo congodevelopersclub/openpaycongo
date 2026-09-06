@@ -1,4 +1,5 @@
 import '../infrastructure/platform_pairing_activation_vault.dart';
+import '../infrastructure/pairing_activation_acknowledgement.dart';
 import '../infrastructure/pairing_activation_retrieval.dart';
 import '../infrastructure/platform_pairing_qr_scanner.dart';
 import '../infrastructure/platform_pairing_qr_trust_store.dart';
@@ -26,6 +27,9 @@ final class PairingRuntime {
           transport: DartIoPairingActivationRetrievalTransport(),
           vault: const PlatformPairingActivationVault(),
         ),
+      ),
+      acknowledgement: PairingV2ActivationAcknowledgementPort(
+        vault: const PlatformPairingActivationAcknowledgementVault(),
       ),
       recovery: const PlatformPairingConfirmedExchangeRecovery(),
     );

@@ -85,7 +85,8 @@ final class _Scaffold extends StatelessWidget {
                     qr is PairingQrScanning ||
                         protocol is PairingProtocolEstablishing ||
                         protocol is PairingProtocolAwaitingConfirmation ||
-                        protocol is PairingProtocolActivating
+                        protocol is PairingProtocolActivating ||
+                        protocol is PairingProtocolActivationAcknowledgementPending
                     ? null
                     : () => context.read<PairingQrBloc>().add(
                         const PairingQrScanRequested(),
@@ -144,6 +145,24 @@ final class _VerificationStatus extends StatelessWidget {
       return _StatusCard(
         color: Theme.of(context).colorScheme.primaryContainer,
         message: 'Pairing activated.',
+      );
+    }
+    if (protocol is PairingProtocolActivationAcknowledgementPending) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _StatusCard(
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            message: 'Pairing installation is protected locally. Final server confirmation is pending; the device is not active.',
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => context.read<PairingProtocolBloc>().add(
+              const PairingActivationAcknowledgementRequested(),
+            ),
+            child: const Text('Retry final pairing confirmation'),
+          ),
+        ],
       );
     }
     if (protocol is PairingProtocolRecoveryRequired) {

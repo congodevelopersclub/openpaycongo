@@ -93,6 +93,7 @@ void main() {
     final PairingProtocolBloc protocol = PairingProtocolBloc(
       protocol: _PendingProtocol(_ActivationRequest()),
       activation: const _Activation(),
+      acknowledgement: const _Acknowledgement(),
     );
     addTearDown(qr.close);
     addTearDown(protocol.close);
@@ -165,4 +166,16 @@ final class _Activation implements PairingActivationPort {
   @override
   Future<PairingActivationOutcome> activate(PairingActivationRequest request) async =>
       PairingActivationOutcome.activated;
+}
+
+final class _Acknowledgement implements PairingActivationAcknowledgementPort {
+  const _Acknowledgement();
+
+  @override
+  Future<PairingActivationAcknowledgementOutcome> acknowledge() async =>
+      PairingActivationAcknowledgementOutcome.acknowledged;
+
+  @override
+  Future<PairingActivationAcknowledgementRecovery> restore() async =>
+      PairingActivationAcknowledgementRecovery.none;
 }
