@@ -180,7 +180,7 @@ void main() {
       provider: 'ORANGE_MONEY',
       sender: 'ORANGEMNY',
       body: 'Paid 12.50 USD ref SECRET-1234',
-      receivedAt: DateTime.utc(2026, 9, 1, 1),
+      receivedAt: DateTime.utc(2026, 9, 1, 1, 0, 0, 123),
     ));
 
     expect(result, isA<OperatorSmsAnalysisSubmitted>());

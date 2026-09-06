@@ -109,13 +109,24 @@ final class OperatorSmsAnalysisEvidence {
   final String sender;
   final String body;
   final DateTime receivedAt;
-  Map<String, Object> json() => <String, Object>{
-    'record_id': recordId,
-    'provider': provider,
-    'sender': sender,
-    'sms_body': body,
-    'received_at': receivedAt.toUtc().toIso8601String().replaceFirst('.000Z', 'Z'),
-  };
+  Map<String, Object> json() {
+    final DateTime utc = receivedAt.toUtc();
+    final DateTime canonicalSecond = DateTime.utc(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
+    return <String, Object>{
+      'record_id': recordId,
+      'provider': provider,
+      'sender': sender,
+      'sms_body': body,
+      'received_at': canonicalSecond.toIso8601String(),
+    };
+  }
 }
 
 sealed class OperatorSmsAnalysisSubmission {
