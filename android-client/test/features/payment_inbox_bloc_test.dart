@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_bloc.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_analysis_envelope_transport.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
 
 void main() {
@@ -145,6 +146,29 @@ void main() {
     );
     expect(state.operatorProfiles.single.provider, 'TEST_MONEY');
     expect(state.operatorProfiles.single.sender, 'TEST');
+  });
+
+  test('consented SMS analysis submission is owned by the inbox BLoC', () async {
+    String? submittedRecordId;
+    final PaymentInboxBloc bloc = PaymentInboxBloc(
+      gateway: _Gateway(failCommit: false, failReload: false),
+      submitFailedSmsForAnalysis: (String recordId) async {
+        submittedRecordId = recordId;
+        return const OperatorSmsAnalysisSubmitted();
+      },
+    );
+    addTearDown(bloc.close);
+    bloc.add(const PaymentInboxStarted());
+    await bloc.stream.firstWhere((PaymentInboxState state) => state.ready);
+
+    bloc.add(const PaymentInboxAnalysisSubmissionRequested('synthetic-record'));
+
+    final PaymentInboxState state = await bloc.stream.firstWhere(
+      (PaymentInboxState state) =>
+          state.feedback == PaymentInboxFeedback.analysisSubmitted,
+    );
+    expect(submittedRecordId, 'synthetic-record');
+    expect(state.busyRecordIds, isEmpty);
   });
 }
 
