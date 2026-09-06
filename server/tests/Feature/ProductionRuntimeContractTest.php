@@ -130,6 +130,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringNotContainsString('production-security-contract', $workflow);
         self::assertStringNotContainsString('chown -R nginx:nginx /var/cache/nginx /var/www/html/public', $nginxDockerfile);
         self::assertStringContainsString('expat=2.8.4-r0', $nginxDockerfile);
+        self::assertStringContainsString('libuuid=2.42.3-r1', $nginxDockerfile);
         self::assertStringContainsString('chown -R nginx:nginx /var/cache/nginx', $nginxDockerfile);
         self::assertStringContainsString('FROM production AS production-contract', $nginxDockerfile);
         self::assertStringContainsString('test ! -w /var/www/html/public/index.php', $nginxDockerfile);
