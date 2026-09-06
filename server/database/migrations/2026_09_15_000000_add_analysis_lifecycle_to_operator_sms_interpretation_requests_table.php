@@ -28,6 +28,7 @@ return new class extends Migration
             if (Schema::getConnection()->getDriverName() !== 'sqlite') {
                 $table->dropForeign('operator_sms_interpretation_proposal_fk');
             }
+            $table->dropIndex(['analysis_status']);
             $table->dropColumn([
                 'provider',
                 'analysis_status',
