@@ -33,19 +33,19 @@ final class OperatorSmsPatternReviewTest extends TestCase
     public function test_gemma_proposal_is_durable_without_retaining_the_raw_sms_and_requires_review_before_activation(): void
     {
         $operator = $this->financialOperator('00000000-0000-4000-8000-000000000401');
-        config()->set('services.gemma.api_key', 'test-key');
+        config()->set('services.gemma.private_inference_url', 'http://gemma-inference.internal/v1/chat/completions');
+        config()->set('services.gemma.auth_token', 'test-token');
 
         Http::fake([
             '*' => Http::response([
-                'candidates' => [[
-                    'content' => [
-                        'parts' => [[
-                            'text' => json_encode([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
                                 'provider' => 'ORANGE_MONEY',
                                 'sender' => 'ORANGE',
                                 'template' => 'Paid {amount} {currency} ref {reference}',
                             ], JSON_THROW_ON_ERROR),
-                        ]],
+                    ],
                     ],
                 ]],
             ]),
