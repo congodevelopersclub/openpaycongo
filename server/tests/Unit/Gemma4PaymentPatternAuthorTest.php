@@ -62,7 +62,7 @@ final class Gemma4PaymentPatternAuthorTest extends TestCase
         Http::fake([
             '*' => Http::response([
                 'candidates' => [[
-                    'content' => ['parts' => [['text' => '{"provider":"ORANGE_MONEY"}']],
+                    'content' => ['parts' => [['text' => '{"provider":"ORANGE_MONEY"}']]],
                 ]],
             ]),
         ]);

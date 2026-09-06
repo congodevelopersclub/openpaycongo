@@ -24,9 +24,9 @@ final class Gemma4PaymentPatternAuthor
         $model = config('services.gemma.model');
         $timeout = config('services.gemma.timeout_seconds');
 
-        if (! is_string($apiKey) || trim($apiKey) === ''
-            || ! is_string($model) || ! preg_match('/^gemma-4-[a-z0-9-]+$/', $model)
-            || ! is_int($timeout) || $timeout < 1 || $timeout > 60) {
+        if (!is_string($apiKey) || trim($apiKey) === ''
+            || !is_string($model) || !preg_match('/^gemma-4-[a-z0-9-]+$/', $model)
+            || !is_int($timeout) || $timeout < 1 || $timeout > 60) {
             throw new RuntimeException('gemma_pattern_author_unavailable');
         }
 
@@ -64,7 +64,7 @@ final class Gemma4PaymentPatternAuthor
         }
 
         $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
-        if (! is_string($text) || strlen($text) > 4096) {
+        if (!is_string($text) || strlen($text) > 4096) {
             throw new RuntimeException('gemma_pattern_candidate_invalid');
         }
 
@@ -74,11 +74,11 @@ final class Gemma4PaymentPatternAuthor
             throw new RuntimeException('gemma_pattern_candidate_invalid');
         }
 
-        if (! is_array($candidate) || count($candidate) !== 3
+        if (!is_array($candidate) || count($candidate) !== 3
             || array_diff(array_keys($candidate), ['provider', 'sender', 'template']) !== []
-            || ! is_string($candidate['provider']) || ! is_string($candidate['sender']) || ! is_string($candidate['template'])
+            || !is_string($candidate['provider']) || !is_string($candidate['sender']) || !is_string($candidate['template'])
             || $candidate['provider'] !== $submission->provider || $candidate['sender'] !== $submission->sender
-            || ! $this->validTemplate($candidate['template'])) {
+            || !$this->validTemplate($candidate['template'])) {
             throw new RuntimeException('gemma_pattern_candidate_invalid');
         }
 

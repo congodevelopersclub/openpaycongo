@@ -14,8 +14,7 @@ final readonly class OperatorPaymentPatternCandidate
         public string $provider,
         public string $sender,
         public string $template,
-    ) {
-    }
+    ) {}
 
     public function isApproved(): bool
     {
