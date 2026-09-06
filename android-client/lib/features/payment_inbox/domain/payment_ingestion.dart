@@ -498,8 +498,8 @@ final class BoundedProposalRunner {
   BoundedProposalRunner({
     required this.port,
     required this.clock,
-    this.requestTimeout = const Duration(seconds: 3),
-    this.hardTimeout = const Duration(seconds: 4),
+    this.requestTimeout = const Duration(seconds: 12),
+    this.hardTimeout = const Duration(seconds: 17),
     this.failureLimit = 3,
     this.cooldown = const Duration(minutes: 5),
   }) : assert(failureLimit > 0),

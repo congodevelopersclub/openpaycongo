@@ -182,6 +182,66 @@ cannot make it pass. It places no customer data in logs or fixtures:
 docker compose exec -T queue php artisan openpay:queue-probe --timeout=30
 ```
 
+## Private Gemma 4 pattern proposals
+
+Gemma sees an operator SMS only after the person has explicitly submitted that
+failed SMS from the protected mobile review screen. It produces an untrusted
+candidate pattern; it cannot approve, release, activate, or push a payment.
+The server validates the exact candidate schema and a financial operator with
+MFA must approve it before a signed release is available to mobile devices.
+
+Use the optional private-inference Compose profile only on a reviewed
+GPU-equipped host. It has no published port and assigns the runtime the
+internal-only alias `gemma.internal`; do not substitute the Gemini API or any
+public hosted-model endpoint because this flow carries user-consented financial
+SMS evidence. Google recommends Gemma 4's 26B A4B instruction model as a
+starting point for server use and lists vLLM as a production serving option.
+
+Capacity is a release prerequisite, not a best-effort setting. Google estimates
+the 26B A4B base weights at about 57.7 GB in BF16, before runtime and KV-cache
+overhead. Provision a reviewed GPU with at least 80 GB of VRAM for this profile;
+the checked-in configuration limits context to 4,096 tokens and caps vLLM at 85%
+of GPU memory because a payment SMS proposal does not need Gemma's 256K-token
+maximum. Do not replace this with a 24 GB or 48 GB GPU and hope the 4B active
+parameter count will fit: all 26B parameters are loaded for routing. Reassess
+the model and capacity if a supported server-format QAT variant is selected.
+
+Before startup, accept the model terms using the organization account, place a
+reviewed immutable vLLM image digest and the Hugging Face access token in the
+deployment secret manager, and generate a distinct random API token for the
+application-to-runtime hop. None belongs in `.env`, shell history, CI output,
+or the repository.
+
+```bash
+export OPENPAY_GEMMA_VLLM_IMAGE='vllm/vllm-openai@sha256:reviewed-image-digest'
+export OPENPAY_GEMMA_HF_TOKEN='secret-manager-injected-read-token'
+export GEMMA_PRIVATE_INFERENCE_TOKEN='secret-manager-injected-random-token'
+export GEMMA_MODEL='gemma-4-26b-a4b-it'
+export GEMMA_TIMEOUT_SECONDS='20'
+docker compose -f compose.yaml -f compose.gemma.yaml --profile gemma-private up -d
+docker compose -f compose.yaml -f compose.gemma.yaml --profile gemma-private ps
+```
+
+Before allowing the scheduler to process consented evidence, verify all of the
+following on that private host: the `gemma` health check is healthy, `php`,
+`queue`, and `scheduler` are running with `GEMMA_PRIVATE_INFERENCE_URL` set to
+`http://gemma.internal:8000/v1/chat/completions`, and no host port is published
+for `gemma`. Submit only the non-production integration fixture through the
+review workflow and confirm it creates an unapproved candidate; do not use a
+real customer's SMS as a deployment smoke test.
+
+The first start downloads model weights to the runtime's disposable image/cache
+layer. Pin and scan both the serving image and the approved model revision
+before a production rollout. Keep the model service on an isolated GPU host
+with egress restricted to the approved model registry during bootstrap, then
+remove registry egress. Do not mount the PostgreSQL volume, Passport keys,
+application storage, or any developer credentials into the Gemma container.
+Rotate `GEMMA_PRIVATE_INFERENCE_TOKEN` by updating the protected runtime and
+application environments together, then restart the `queue` and `scheduler`.
+If inference is unavailable, the worker records a safe failure and no parser is
+activated; developers can retry the consented evidence after restoring the
+private runtime.
+
 ## Backup, restore, and upgrades
 
 Back up PostgreSQL before upgrades and store the dump outside the repository in

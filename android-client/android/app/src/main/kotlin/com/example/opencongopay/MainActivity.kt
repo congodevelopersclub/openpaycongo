@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.util.Base64
 import android.view.WindowManager
 import com.congodeveloperclub.opencongopay.sms.CaptureDecision
+import com.congodeveloperclub.opencongopay.sms.ApprovedOperatorPatternActivation
 import com.congodeveloperclub.opencongopay.sms.DecisionConflictException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskBusyException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskRunner
@@ -18,11 +19,14 @@ import com.congodeveloperclub.opencongopay.sms.InvalidDecisionCursorException
 import com.congodeveloperclub.opencongopay.sms.LegacySmsMigrationRequiredException
 import com.congodeveloperclub.opencongopay.sms.OutboxRecoveryRequiredException
 import com.congodeveloperclub.opencongopay.sms.OutboxStorageException
+import com.congodeveloperclub.opencongopay.sms.OperatorPaymentProfileRecord
+import com.congodeveloperclub.opencongopay.sms.OperatorPaymentStructure
 import com.congodeveloperclub.opencongopay.sms.PaymentOutboxVaultProvider
 import com.congodeveloperclub.opencongopay.sms.RecoveryRequiredException
 import com.congodeveloperclub.opencongopay.sms.SmsAccessDenial
 import com.congodeveloperclub.opencongopay.sms.SmsAccessGuard
 import com.congodeveloperclub.opencongopay.sms.SmsVaultProvider
+import com.congodeveloperclub.opencongopay.sms.SenderRules
 import com.congodeveloperclub.opencongopay.lock.AppLockRecoveryRequiredException
 import com.congodeveloperclub.opencongopay.lock.AppLockVault
 import com.congodeveloperclub.opencongopay.pairing.PairingQrTrustStorageException
@@ -130,6 +134,9 @@ class MainActivity : FlutterFragmentActivity() {
             "listTrustedSenders" -> listTrustedSenders(result)
             "clearTrustedSenders" -> clearTrustedSenders(result)
             "revokeTrustedSender" -> revokeTrustedSender(call, result)
+            "upsertOperatorPaymentProfile" -> upsertOperatorPaymentProfile(call, result)
+            "activateDeveloperApprovedOperatorPaymentProfile" -> activateDeveloperApprovedOperatorPaymentProfile(call, result)
+            "listOperatorPaymentProfiles" -> listOperatorPaymentProfiles(result)
             "drainInbox" -> drainInbox(result)
             "captureHealth" -> captureHealth(result)
             "probeStorage" -> probeStorage(result)
@@ -479,7 +486,13 @@ class MainActivity : FlutterFragmentActivity() {
         val arguments = call.arguments as? Map<*, *>
         val operation = arguments?.get("operation") as? String
         val payload = arguments?.get("payload") as? ByteArray
-        if (arguments == null || arguments.keys != setOf("operation", "payload") || operation != "deposit" || payload == null) {
+        val sealedOperation = operation ?: run {
+            payload?.fill(0)
+            result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
+            return
+        }
+        if (arguments == null || arguments.keys != setOf("operation", "payload") ||
+            sealedOperation !in setOf("deposit", "operator_sms_interpretation_request") || payload == null) {
             payload?.fill(0)
             result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
             return
@@ -501,7 +514,7 @@ class MainActivity : FlutterFragmentActivity() {
                             },
                             expectedGeneration = generation,
                         ),
-                    ).seal(operation, payload)
+                    ).seal(sealedOperation, payload)
                 } finally {
                     payload.fill(0)
                 }
@@ -585,7 +598,12 @@ class MainActivity : FlutterFragmentActivity() {
         }
         getPreferences(MODE_PRIVATE).edit().putBoolean("sms_permission_asked", true).apply()
         pendingPermissionResult = result
-        requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), permissionRequestCode)
+        val permissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            arrayOf(Manifest.permission.RECEIVE_SMS)
+        }
+        requestPermissions(permissions, permissionRequestCode)
     }
 
     override fun onRequestPermissionsResult(
@@ -658,6 +676,86 @@ class MainActivity : FlutterFragmentActivity() {
             onFailure = { result.error("secure_storage_failure", "Trusted sender revoke outcome is unknown; reload", null) },
         )
     }
+
+    private fun upsertOperatorPaymentProfile(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+        val expectedKeys = setOf("sender", "provider", "structure", "template")
+        val sender = arguments?.get("sender") as? String
+        val provider = arguments?.get("provider") as? String
+        val structure = when (arguments?.get("structure") as? String) {
+            "manual" -> OperatorPaymentStructure.manual
+            "gemma4" -> OperatorPaymentStructure.gemma4
+            else -> null
+        }
+        val template = arguments?.get("template") as? String
+        if (arguments == null || arguments.keys.toSet() != expectedKeys || sender == null || provider == null || structure == null ||
+            (arguments.containsKey("template") && arguments["template"] != null && template == null)
+        ) {
+            result.error("invalid_operator_profile", "Operator payment profile is invalid", null)
+            return
+        }
+        runSmsTask(
+            result,
+            operation = {
+                SmsVaultProvider.get(applicationContext).upsertOperatorPaymentProfile(
+                    OperatorPaymentProfileRecord(sender, provider, structure, template),
+                ).map(::operatorPaymentProfileForFlutter)
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("secure_storage_failure", "Operator payment profile outcome is unknown; reload", null) },
+        )
+    }
+
+    private fun listOperatorPaymentProfiles(result: MethodChannel.Result) {
+        runSmsTask(
+            result,
+            operation = {
+                SmsVaultProvider.get(applicationContext).operatorPaymentProfiles().map(::operatorPaymentProfileForFlutter)
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("secure_storage_failure", "Operator payment profiles could not be read", null) },
+        )
+    }
+
+    private fun activateDeveloperApprovedOperatorPaymentProfile(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+        val sender = arguments?.get("sender") as? String
+        val provider = arguments?.get("provider") as? String
+        val template = arguments?.get("template") as? String
+        val version = (arguments?.get("pattern_version") as? Number)?.toInt()
+        if (arguments == null || arguments.keys.toSet() != setOf("sender", "provider", "template", "pattern_version") ||
+            sender == null || provider == null || template == null || version == null || version < 1
+        ) {
+            result.error("invalid_operator_profile", "Developer-approved operator pattern is invalid", null)
+            return
+        }
+        runSmsTask(
+            result,
+            operation = {
+                val activation = SmsVaultProvider.get(applicationContext).activateDeveloperApprovedOperatorPaymentProfile(
+                    OperatorPaymentProfileRecord(sender, provider, OperatorPaymentStructure.manual, template, version),
+                )
+                mapOf(
+                    "activation" to when (activation.activation) {
+                        ApprovedOperatorPatternActivation.installed -> "installed"
+                        ApprovedOperatorPatternActivation.alreadyCurrent -> "already_current"
+                        ApprovedOperatorPatternActivation.stale -> "stale"
+                    },
+                    "profile" to operatorPaymentProfileForFlutter(activation.profile),
+                )
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("secure_storage_failure", "Developer-approved pattern outcome is unknown; reload", null) },
+        )
+    }
+
+    private fun operatorPaymentProfileForFlutter(profile: OperatorPaymentProfileRecord): Map<String, Any?> = mapOf(
+        "sender" to profile.sender,
+        "provider" to profile.provider,
+        "structure" to profile.structure.name,
+        "template" to profile.template,
+        "developer_approved_pattern_version" to profile.developerApprovedPatternVersion,
+    )
 
     private fun drainInbox(result: MethodChannel.Result) {
         runSmsTask(
@@ -780,8 +878,18 @@ class MainActivity : FlutterFragmentActivity() {
         onSuccess: (T) -> Unit,
         onFailure: (Throwable) -> Unit,
     ) {
+        runGuardedTask(smsTasks, result, operation, onSuccess, onFailure)
+    }
+
+    private fun <T> runGuardedTask(
+        tasks: GuardedTaskRunner,
+        result: MethodChannel.Result,
+        operation: () -> T,
+        onSuccess: (T) -> Unit,
+        onFailure: (Throwable) -> Unit,
+    ) {
         val generation = requireSmsGatewayAccess(result) ?: return
-        smsTasks.submit(
+        tasks.submit(
             generation = generation,
             operation = operation,
             onSuccess = onSuccess,

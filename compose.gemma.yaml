@@ -1,0 +1,65 @@
+# Optional private inference profile. It deliberately has no host port: raw SMS
+# evidence can travel only from the application network to gemma.internal.
+# Start with: docker compose -f compose.yaml -f compose.gemma.yaml --profile gemma-private up -d
+services:
+  gemma:
+    profiles: [gemma-private]
+    image: ${OPENPAY_GEMMA_VLLM_IMAGE:?Set a reviewed digest for OPENPAY_GEMMA_VLLM_IMAGE}
+    command:
+      - --model
+      - google/gemma-4-26B-A4B-it
+      - --served-model-name
+      - gemma-4-26b-a4b-it
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      # SMS pattern proposals are deliberately small. Do not expose Gemma's
+      # full 256K context window to untrusted message content.
+      - --max-model-len
+      - "4096"
+      - --gpu-memory-utilization
+      - "0.85"
+      - --api-key
+      - ${GEMMA_PRIVATE_INFERENCE_TOKEN:?Set GEMMA_PRIVATE_INFERENCE_TOKEN outside the repository}
+    environment:
+      HF_TOKEN: ${OPENPAY_GEMMA_HF_TOKEN:?Set OPENPAY_GEMMA_HF_TOKEN outside the repository}
+    networks:
+      default:
+        aliases:
+          - gemma.internal
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 5m
+    restart: unless-stopped
+
+  php:
+    environment:
+      GEMMA_PRIVATE_INFERENCE_URL: http://gemma.internal:8000/v1/chat/completions
+    depends_on:
+      gemma:
+        condition: service_healthy
+
+  queue:
+    environment:
+      GEMMA_PRIVATE_INFERENCE_URL: http://gemma.internal:8000/v1/chat/completions
+    depends_on:
+      gemma:
+        condition: service_healthy
+
+  scheduler:
+    environment:
+      GEMMA_PRIVATE_INFERENCE_URL: http://gemma.internal:8000/v1/chat/completions
+    depends_on:
+      gemma:
+        condition: service_healthy

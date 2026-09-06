@@ -69,7 +69,7 @@ internal class GuardedTaskRunner(
     init {
         require(threads == 1)
         require(queueCapacity in 1..32)
-        require(operationTimeoutMillis in 1..5_000)
+        require(operationTimeoutMillis in 1..30_000)
     }
 
     @Synchronized

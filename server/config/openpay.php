@@ -23,6 +23,10 @@ return [
         'enrollment_signing_secret' => env('OPENPAY_PAIRING_ENROLLMENT_SIGNING_SECRET'),
         'trust_mode' => env('OPENPAY_PAIRING_TRUST_MODE'),
     ],
+    'operator_sms_patterns' => [
+        'signing_secret' => env('OPENPAY_OPERATOR_SMS_PATTERN_SIGNING_SECRET'),
+        'interpretation_retention_days' => (int) env('OPENPAY_OPERATOR_SMS_INTERPRETATION_RETENTION_DAYS', 30),
+    ],
     'passport_keys_path' => $passportKeysPath,
     'service_scopes' => [
         'payment-requests:read' => 'Read payment requests.',

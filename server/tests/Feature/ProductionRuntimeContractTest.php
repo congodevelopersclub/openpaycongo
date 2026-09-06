@@ -50,6 +50,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('server/node_modules', $dockerignore);
         self::assertStringContainsString('${OPENPAY_APP_KEY:?Set OPENPAY_APP_KEY outside the repository}', $compose);
         self::assertStringContainsString('OPENPAY_APP_URL: ${OPENPAY_APP_URL:?Set OPENPAY_APP_URL outside the repository}', $compose);
+        self::assertStringContainsString('COPY compose.yaml compose.gemma.yaml /', $dockerfile);
         self::assertStringContainsString('OPENPAY_PASSKEY_RP_ID: ${OPENPAY_PASSKEY_RP_ID:?Set OPENPAY_PASSKEY_RP_ID outside the repository}', $compose);
         self::assertStringContainsString('OPENPAY_PASSKEY_ALLOWED_ORIGINS: ${OPENPAY_PASSKEY_ALLOWED_ORIGINS:?Set OPENPAY_PASSKEY_ALLOWED_ORIGINS outside the repository}', $compose);
         self::assertStringContainsString('OPENPAY_PASSKEY_USER_HANDLE_SECRET: ${OPENPAY_PASSKEY_USER_HANDLE_SECRET:?Set OPENPAY_PASSKEY_USER_HANDLE_SECRET outside the repository}', $compose);
@@ -159,5 +160,28 @@ final class ProductionRuntimeContractTest extends TestCase
             strpos($operations, 'docker compose up --build -d'),
             strpos($operations, 'docker build --target production --tag congo-openpay-fpm:local -f server/Dockerfile .'),
         );
+    }
+
+    public function test_private_gemma_profile_remains_internal_and_capacity_bounded_for_sms_review(): void
+    {
+        $profile = file_get_contents(file_exists('/compose.gemma.yaml') ? '/compose.gemma.yaml' : dirname(base_path()).'/compose.gemma.yaml');
+        $operations = file_get_contents('/docs/operations.md');
+
+        self::assertIsString($profile);
+        self::assertIsString($operations);
+        self::assertStringContainsString('profiles: [gemma-private]', $profile);
+        self::assertStringContainsString('google/gemma-4-26B-A4B-it', $profile);
+        self::assertStringContainsString('--max-model-len', $profile);
+        self::assertStringContainsString('- "4096"', $profile);
+        self::assertStringContainsString('--gpu-memory-utilization', $profile);
+        self::assertStringContainsString('- "0.85"', $profile);
+        self::assertStringContainsString('${OPENPAY_GEMMA_VLLM_IMAGE:?Set a reviewed digest for OPENPAY_GEMMA_VLLM_IMAGE}', $profile);
+        self::assertStringContainsString('${OPENPAY_GEMMA_HF_TOKEN:?Set OPENPAY_GEMMA_HF_TOKEN outside the repository}', $profile);
+        self::assertStringContainsString('${GEMMA_PRIVATE_INFERENCE_TOKEN:?Set GEMMA_PRIVATE_INFERENCE_TOKEN outside the repository}', $profile);
+        self::assertStringNotContainsString("\n    ports:", $profile);
+        self::assertStringContainsString('gemma.internal', $profile);
+        self::assertStringContainsString('condition: service_healthy', $profile);
+        self::assertStringContainsString('at least 80 GB of VRAM', $operations);
+        self::assertStringContainsString('limits context to 4,096 tokens', $operations);
     }
 }

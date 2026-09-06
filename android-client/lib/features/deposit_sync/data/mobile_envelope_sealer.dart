@@ -26,10 +26,29 @@ enum MobileEnvelopeResponseOutcome { recorded, replayed, conflict }
 abstract interface class MobileEnvelopeSealer {
   Future<MobileRequestEnvelope> sealDeposit(Uint8List payload);
 
+  /// Seals evidence only after the protected review screen has obtained the
+  /// user's explicit consent. Implementations that predate this protocol
+  /// operation fail closed rather than silently falling back to plain HTTP.
+  Future<MobileRequestEnvelope> sealOperatorSmsInterpretationRequest(
+    Uint8List payload,
+  ) => throw UnsupportedError('operator_sms_interpretation_request_unavailable');
+
   Future<MobileEnvelopeResponseOutcome> openDepositResponse({
     required MobileRequestEnvelope request,
     required int status,
     required String nonce,
     required String ciphertext,
   });
+
+  Future<MobileEnvelopeResponseOutcome> openOperatorSmsInterpretationResponse({
+    required MobileRequestEnvelope request,
+    required int status,
+    required String nonce,
+    required String ciphertext,
+  }) => openDepositResponse(
+    request: request,
+    status: status,
+    nonce: nonce,
+    ciphertext: ciphertext,
+  );
 }

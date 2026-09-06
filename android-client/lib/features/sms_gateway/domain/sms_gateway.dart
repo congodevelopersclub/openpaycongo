@@ -61,6 +61,48 @@ final class NativeSmsRecord {
   final String body;
 }
 
+enum NativeOperatorPaymentStructure { manual, gemma4 }
+
+final class NativeOperatorPaymentProfile {
+  const NativeOperatorPaymentProfile({
+    required this.sender,
+    required this.provider,
+    required this.structure,
+    this.template,
+    this.developerApprovedPatternVersion,
+  });
+  final String sender;
+  final String provider;
+  final NativeOperatorPaymentStructure structure;
+  final String? template;
+  /// Present only for a signed backend pattern that native storage accepted.
+  final int? developerApprovedPatternVersion;
+}
+
+final class DeveloperApprovedOperatorPaymentProfile {
+  const DeveloperApprovedOperatorPaymentProfile({
+    required this.sender,
+    required this.provider,
+    required this.template,
+    required this.patternVersion,
+  });
+  final String sender;
+  final String provider;
+  final String template;
+  final int patternVersion;
+}
+
+enum DeveloperApprovedPatternActivation { installed, alreadyCurrent, stale }
+
+final class DeveloperApprovedPatternActivationResult {
+  const DeveloperApprovedPatternActivationResult({
+    required this.activation,
+    required this.profile,
+  });
+  final DeveloperApprovedPatternActivation activation;
+  final NativeOperatorPaymentProfile profile;
+}
+
 abstract interface class SmsGatewayPort {
   Future<SmsAccessState> permissionState();
   Future<SmsAccessState> requestPermission();
@@ -71,6 +113,14 @@ abstract interface class SmsGatewayPort {
   Future<List<String>> listTrustedSenders();
   Future<List<String>> clearTrustedSenders();
   Future<List<String>> revokeTrustedSender(String sender);
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  );
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles();
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) => throw UnimplementedError();
   Future<NativeCaptureHealth> captureHealth();
   Future<bool> probeStorage();
   Future<NativeDecisionPage> exportDecisions({int limit = 100, String? cursor});

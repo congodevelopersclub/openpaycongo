@@ -62,7 +62,9 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             ) || Thread.currentThread().isInterrupted
         ) return
         val provisional = TrustedSmsRecord("", sender, receivedAt, messages.size, body)
-        vault.persistIfAbsent(provisional.copy(id = vault.digest(provisional)))
+        if (vault.persistIfAbsent(provisional.copy(id = vault.digest(provisional))) == PersistResult.stored) {
+            OperatorSmsReviewNotification.show(context)
+        }
     }
 }
 

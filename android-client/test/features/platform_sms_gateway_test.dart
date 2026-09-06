@@ -31,6 +31,34 @@ void main() {
             'addTrustedSender' => <String>['ORANGE'],
             'clearTrustedSenders' => <String>[],
             'revokeTrustedSender' => <String>[],
+            'listOperatorPaymentProfiles' => <Map<String, Object?>>[
+              <String, Object?>{
+                'sender': 'ORANGE',
+                'provider': 'ORANGE_MONEY',
+                'structure': 'manual',
+                'template': 'Paid {amount} {currency} ref {reference}',
+                'developer_approved_pattern_version': null,
+              },
+            ],
+            'upsertOperatorPaymentProfile' => <Map<String, Object?>>[
+              <String, Object?>{
+                'sender': 'ORANGE',
+                'provider': 'ORANGE_MONEY',
+                'structure': 'gemma4',
+                'template': null,
+                'developer_approved_pattern_version': null,
+              },
+            ],
+            'activateDeveloperApprovedOperatorPaymentProfile' => <String, Object?>{
+              'activation': 'installed',
+              'profile': <String, Object?>{
+                'sender': 'ORANGE',
+                'provider': 'ORANGE_MONEY',
+                'structure': 'manual',
+                'template': 'Paid {amount} {currency} ref {reference}',
+                'developer_approved_pattern_version': 2,
+              },
+            },
             'exportDecisions' => <String, Object?>{
               'records': <Map<String, Object>>[
                 <String, Object>{
@@ -69,6 +97,31 @@ void main() {
       await gateway.setUnlocked(true, generation: generation);
       expect(await gateway.addTrustedSender('ORANGE'), <String>['ORANGE']);
       expect(await gateway.listTrustedSenders(), <String>['ORANGE']);
+      expect(
+        (await gateway.listOperatorPaymentProfiles()).single.structure,
+        NativeOperatorPaymentStructure.manual,
+      );
+      expect(
+        (await gateway.upsertOperatorPaymentProfile(
+          const NativeOperatorPaymentProfile(
+            sender: 'ORANGE',
+            provider: 'ORANGE_MONEY',
+            structure: NativeOperatorPaymentStructure.gemma4,
+          ),
+        )).single.template,
+        isNull,
+      );
+      expect(
+        (await gateway.activateDeveloperApprovedOperatorPaymentProfile(
+          const DeveloperApprovedOperatorPaymentProfile(
+            sender: 'ORANGE',
+            provider: 'ORANGE_MONEY',
+            template: 'Paid {amount} {currency} ref {reference}',
+            patternVersion: 2,
+          ),
+        )).activation,
+        DeveloperApprovedPatternActivation.installed,
+      );
       final List<NativeSmsRecord> records = await gateway.drainInbox();
       expect(records.single.sender, 'ORANGE');
       final NativeCaptureHealth health = await gateway.captureHealth();
@@ -88,6 +141,9 @@ void main() {
         'setUnlocked',
         'addTrustedSender',
         'listTrustedSenders',
+        'listOperatorPaymentProfiles',
+        'upsertOperatorPaymentProfile',
+        'activateDeveloperApprovedOperatorPaymentProfile',
         'drainInbox',
         'captureHealth',
         'probeStorage',
@@ -134,6 +190,19 @@ void main() {
   test('rejects non-E164 zero country code before syncing rule', () async {
     expect(
       () => gateway.addTrustedSender('+0234990001111'),
+      throwsFormatException,
+    );
+  });
+
+  test('refuses malformed operator profile before native persistence', () {
+    expect(
+      () => gateway.upsertOperatorPaymentProfile(
+        const NativeOperatorPaymentProfile(
+          sender: 'ORANGE',
+          provider: 'orange',
+          structure: NativeOperatorPaymentStructure.gemma4,
+        ),
+      ),
       throwsFormatException,
     );
   });

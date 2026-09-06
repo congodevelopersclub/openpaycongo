@@ -21,6 +21,7 @@ server/node_modules
 !.github/ISSUE_TEMPLATE/*
 !.github/ISSUE_TEMPLATE/bug_report.md
 !compose.yaml
+!compose.gemma.yaml
 !scripts/
 !scripts/upgrade-quiescent.sh
 !scripts/ci/

@@ -1,0 +1,296 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:cryptography/cryptography.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:opencongopay/features/payment_inbox/domain/approved_operator_pattern.dart';
+import 'package:opencongopay/features/payment_inbox/domain/operator_sms_payment_data.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_payment_data_source.dart';
+import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
+import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
+
+void main() {
+  const OutboxScope scope = OutboxScope(
+    tenantId: 'tenant-001',
+    deviceId: 'device-001',
+  );
+
+  test('joins guarded records to manual profiles without acknowledging the inbox',
+      () async {
+    final _Gateway gateway = _Gateway(
+      records: <NativeSmsRecord>[
+        NativeSmsRecord(
+          id: 'a' * 43,
+          sender: 'ORANGE',
+          receivedAt: DateTime.utc(2026, 9, 6),
+          segments: 1,
+          body: 'Paid 12.50 USD ref REF-1234',
+        ),
+      ],
+      profiles: const <NativeOperatorPaymentProfile>[
+        NativeOperatorPaymentProfile(
+          sender: 'ORANGE',
+          provider: 'ORANGE_MONEY',
+          structure: NativeOperatorPaymentStructure.manual,
+          template: 'Paid {amount} {currency} ref {reference}',
+        ),
+      ],
+    );
+
+    final List<OperatorSmsPaymentData> results =
+        await OperatorSmsPaymentDataSource(gateway: gateway).read(scope);
+
+    expect(results.single, isA<PaymentDataReadyForPush>());
+    expect(
+      (results.single as PaymentDataReadyForPush).data.envelope.providerReference,
+      'REF-1234',
+    );
+    expect(gateway.commitCalls, 0);
+  });
+
+  test('missing profiles remain reviewable and never become pushable', () async {
+    final List<OperatorSmsPaymentData> results =
+        await OperatorSmsPaymentDataSource(
+          gateway: _Gateway(
+            records: <NativeSmsRecord>[
+              NativeSmsRecord(
+                id: 'b' * 43,
+                sender: 'ORANGE',
+                receivedAt: DateTime.utc(2026, 9, 6),
+                segments: 1,
+                body: 'Unknown format',
+              ),
+            ],
+          ),
+        ).read(scope);
+
+    expect(results.single, isA<PaymentDataNeedsReview>());
+    expect(
+      (results.single as PaymentDataNeedsReview).reason,
+      'operator_payment_profile_missing',
+    );
+  });
+
+  test('legacy Gemma profiles remain review-only until a signed backend release arrives',
+      () async {
+    final _Gateway gateway = _Gateway(
+      records: <NativeSmsRecord>[
+        NativeSmsRecord(
+          id: 'g' * 43,
+          sender: 'ORANGE',
+          receivedAt: DateTime.utc(2026, 9, 6),
+          segments: 1,
+          body: 'Provider notification format changed',
+        ),
+      ],
+      profiles: const <NativeOperatorPaymentProfile>[
+        NativeOperatorPaymentProfile(
+          sender: 'ORANGE',
+          provider: 'ORANGE_MONEY',
+          structure: NativeOperatorPaymentStructure.gemma4,
+        ),
+      ],
+    );
+
+    final List<OperatorSmsPaymentData> results =
+        await OperatorSmsPaymentDataSource(gateway: gateway).read(scope);
+
+    expect(results.single, isA<PaymentDataNeedsReview>());
+    expect(
+      (results.single as PaymentDataNeedsReview).reason,
+      'gemma4_proposal_required',
+    );
+    expect(gateway.commitCalls, 0);
+  });
+
+  test('a verified release reanalyses retained records without acknowledging them',
+      () async {
+    final Ed25519 algorithm = Ed25519();
+    final SimpleKeyPair pair = await algorithm.newKeyPair();
+    final SimplePublicKey publicKey = await pair.extractPublicKey();
+    const String approvedAt = '2026-09-06T00:00:00Z';
+    const String expiresAt = '2026-10-06T00:00:00Z';
+    final Signature signature = await algorithm.sign(
+      DeveloperApprovedOperatorPaymentPatternVerifier.canonicalPayload(
+        schema: '1',
+        provider: 'ORANGE_MONEY',
+        sender: 'ORANGE',
+        template: 'Paid {amount} {currency} ref {reference}',
+        version: 1,
+        approvedAt: approvedAt,
+        expiresAt: expiresAt,
+      ),
+      keyPair: pair,
+    );
+    final _Gateway gateway = _Gateway(records: <NativeSmsRecord>[
+      NativeSmsRecord(
+        id: 'c' * 43,
+        sender: 'ORANGE',
+        receivedAt: DateTime.utc(2026, 9, 6),
+        segments: 1,
+        body: 'Paid 12.50 USD ref REF-1234',
+      ),
+    ]);
+
+    final PatternReleaseDelivery result =
+        await OperatorSmsPaymentDataSource(gateway: gateway).reanalyseRelease(
+      encodedRelease: jsonEncode(<String, Object>{
+        'schema_version': '1',
+        'provider': 'ORANGE_MONEY',
+        'sender': 'ORANGE',
+        'template': 'Paid {amount} {currency} ref {reference}',
+        'pattern_version': 1,
+        'approved_at': approvedAt,
+        'expires_at': expiresAt,
+        'signature': base64UrlEncode(signature.bytes).replaceAll('=', ''),
+      }),
+      pinnedSigningKey: Uint8List.fromList(publicKey.bytes),
+      now: DateTime.utc(2026, 9, 6, 0, 1),
+      scope: scope,
+    );
+
+    expect(result, isA<PatternReleaseReanalysed>());
+    expect(
+      (result as PatternReleaseReanalysed).result.pushReady.single.sourceRecordId,
+      'c' * 43,
+    );
+    expect(gateway.commitCalls, 0);
+  });
+
+  test('a verified release persists its parser for later guarded inbox reads',
+      () async {
+    final Ed25519 algorithm = Ed25519();
+    final SimpleKeyPair pair = await algorithm.newKeyPair();
+    final SimplePublicKey publicKey = await pair.extractPublicKey();
+    const String approvedAt = '2026-09-06T00:00:00Z';
+    const String expiresAt = '2026-10-06T00:00:00Z';
+    final Signature signature = await algorithm.sign(
+      DeveloperApprovedOperatorPaymentPatternVerifier.canonicalPayload(
+        schema: '1',
+        provider: 'ORANGE_MONEY',
+        sender: 'ORANGE',
+        template: 'Paid {amount} {currency} ref {reference}',
+        version: 1,
+        approvedAt: approvedAt,
+        expiresAt: expiresAt,
+      ),
+      keyPair: pair,
+    );
+    final _Gateway gateway = _Gateway(records: <NativeSmsRecord>[
+      NativeSmsRecord(
+        id: 'd' * 43,
+        sender: 'ORANGE',
+        receivedAt: DateTime.utc(2026, 9, 6),
+        segments: 1,
+        body: 'Paid 12.50 USD ref REF-5678',
+      ),
+    ]);
+    final OperatorSmsPaymentDataSource source =
+        OperatorSmsPaymentDataSource(gateway: gateway);
+
+    await source.reanalyseRelease(
+      encodedRelease: jsonEncode(<String, Object>{
+        'schema_version': '1',
+        'provider': 'ORANGE_MONEY',
+        'sender': 'ORANGE',
+        'template': 'Paid {amount} {currency} ref {reference}',
+        'pattern_version': 1,
+        'approved_at': approvedAt,
+        'expires_at': expiresAt,
+        'signature': base64UrlEncode(signature.bytes).replaceAll('=', ''),
+      }),
+      pinnedSigningKey: Uint8List.fromList(publicKey.bytes),
+      now: DateTime.utc(2026, 9, 6, 0, 1),
+      scope: scope,
+    );
+
+    expect(gateway.profiles, hasLength(1));
+    final List<OperatorSmsPaymentData> laterRead = await source.read(scope);
+    expect(laterRead.single, isA<PaymentDataReadyForPush>());
+    expect(
+      (laterRead.single as PaymentDataReadyForPush).data.envelope.providerReference,
+      'REF-5678',
+    );
+    expect(
+      (laterRead.single as PaymentDataReadyForPush).data.provenance.kind,
+      PaymentParserKind.developerApprovedPattern,
+    );
+    expect(gateway.commitCalls, 0);
+  });
+}
+
+final class _Gateway implements SmsGatewayPort {
+  _Gateway({
+    required this.records,
+    this.profiles = const <NativeOperatorPaymentProfile>[],
+  });
+
+  final List<NativeSmsRecord> records;
+  List<NativeOperatorPaymentProfile> profiles;
+  int commitCalls = 0;
+
+  @override
+  Future<List<NativeSmsRecord>> drainInbox() async => records;
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async =>
+      profiles;
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async {
+    profiles = <NativeOperatorPaymentProfile>[
+      ...profiles.where(
+        (NativeOperatorPaymentProfile existing) => existing.sender != profile.sender,
+      ),
+      profile,
+    ]..sort(
+        (NativeOperatorPaymentProfile left, NativeOperatorPaymentProfile right) =>
+            left.sender.compareTo(right.sender),
+      );
+    return profiles;
+  }
+
+  @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async {
+    final NativeOperatorPaymentProfile next = NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    );
+    final List<NativeOperatorPaymentProfile> matching = profiles
+        .where((NativeOperatorPaymentProfile value) => value.sender == profile.sender)
+        .toList(growable: false);
+    final NativeOperatorPaymentProfile? current =
+        matching.isEmpty ? null : matching.single;
+    if (current?.developerApprovedPatternVersion != null &&
+        current!.developerApprovedPatternVersion! > profile.patternVersion) {
+      return DeveloperApprovedPatternActivationResult(
+        activation: DeveloperApprovedPatternActivation.stale,
+        profile: current,
+      );
+    }
+    await upsertOperatorPaymentProfile(next);
+    return DeveloperApprovedPatternActivationResult(
+      activation: DeveloperApprovedPatternActivation.installed,
+      profile: next,
+    );
+  }
+
+  @override
+  Future<void> commitInboxDecision(
+    String id,
+    NativeCaptureDecision decision,
+  ) async {
+    commitCalls += 1;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}

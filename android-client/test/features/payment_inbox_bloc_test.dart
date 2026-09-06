@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_bloc.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_analysis_envelope_transport.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
 
 void main() {
@@ -121,6 +122,54 @@ void main() {
       expect(state.records, isEmpty);
     },
   );
+
+  test('operator profile saves the canonical provider with its exact sender',
+      () async {
+    final _Gateway gateway = _Gateway(failCommit: false, failReload: false);
+    final PaymentInboxBloc bloc = PaymentInboxBloc(gateway: gateway);
+    addTearDown(bloc.close);
+    bloc.add(const PaymentInboxStarted());
+    await bloc.stream.firstWhere((PaymentInboxState state) => state.ready);
+
+    bloc.add(
+      const PaymentInboxOperatorProfileSaveRequested(
+        sender: 'TEST',
+        provider: 'TEST_MONEY',
+        structure: NativeOperatorPaymentStructure.manual,
+        template: 'Paid {amount} {currency} ref {reference}',
+      ),
+    );
+
+    final PaymentInboxState state = await bloc.stream.firstWhere(
+      (PaymentInboxState state) =>
+          state.feedback == PaymentInboxFeedback.ruleSaved,
+    );
+    expect(state.operatorProfiles.single.provider, 'TEST_MONEY');
+    expect(state.operatorProfiles.single.sender, 'TEST');
+  });
+
+  test('consented SMS analysis submission is owned by the inbox BLoC', () async {
+    String? submittedRecordId;
+    final PaymentInboxBloc bloc = PaymentInboxBloc(
+      gateway: _Gateway(failCommit: false, failReload: false),
+      submitFailedSmsForAnalysis: (String recordId) async {
+        submittedRecordId = recordId;
+        return const OperatorSmsAnalysisSubmitted();
+      },
+    );
+    addTearDown(bloc.close);
+    bloc.add(const PaymentInboxStarted());
+    await bloc.stream.firstWhere((PaymentInboxState state) => state.ready);
+
+    bloc.add(const PaymentInboxAnalysisSubmissionRequested('synthetic-record'));
+
+    final PaymentInboxState state = await bloc.stream.firstWhere(
+      (PaymentInboxState state) =>
+          state.feedback == PaymentInboxFeedback.analysisSubmitted,
+    );
+    expect(submittedRecordId, 'synthetic-record');
+    expect(state.busyRecordIds, isEmpty);
+  });
 }
 
 final class _Gateway implements SmsGatewayPort {
@@ -140,6 +189,9 @@ final class _Gateway implements SmsGatewayPort {
   int _listCalls = 0;
   int addCalls = 0;
   int clearCalls = 0;
+  List<String> trustedSenders = <String>[];
+  List<NativeOperatorPaymentProfile> operatorProfiles =
+      <NativeOperatorPaymentProfile>[];
 
   @override
   Future<NativeCaptureHealth> captureHealth() async =>
@@ -163,7 +215,7 @@ final class _Gateway implements SmsGatewayPort {
         (failReload && _listCalls > 1)) {
       throw StateError('unavailable');
     }
-    return const <String>[];
+    return List<String>.of(trustedSenders);
   }
 
   @override
@@ -208,6 +260,31 @@ final class _Gateway implements SmsGatewayPort {
   @override
   Future<List<String>> revokeTrustedSender(String sender) async =>
       const <String>[];
+  @override
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async =>
+      List<NativeOperatorPaymentProfile>.of(operatorProfiles);
+  @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async {
+    trustedSenders = <String>[profile.sender];
+    operatorProfiles = <NativeOperatorPaymentProfile>[profile];
+    return List<NativeOperatorPaymentProfile>.of(operatorProfiles);
+  }
+  @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async => DeveloperApprovedPatternActivationResult(
+    activation: DeveloperApprovedPatternActivation.installed,
+    profile: NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    ),
+  );
   @override
   Future<int> accessGeneration() async => 1;
   @override

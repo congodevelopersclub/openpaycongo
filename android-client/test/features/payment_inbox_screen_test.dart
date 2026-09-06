@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/app_lock/presentation/app_lock_bloc.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_analysis_envelope_transport.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_enrollment_bloc.dart';
@@ -76,6 +77,8 @@ void main() {
     PairingEnrollmentBloc? pairingEnrollment,
     PairingSessionBloc? pairingSession,
     SyncCursorBloc? syncCursor,
+    Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+    submitFailedSmsForAnalysis,
   }) => MaterialApp(
     home: PaymentInboxScreen(
       gateway: gateway ?? _FakeGateway(),
@@ -84,6 +87,7 @@ void main() {
       pairingEnrollment: pairingEnrollment,
       pairingSession: pairingSession,
       syncCursor: syncCursor,
+      submitFailedSmsForAnalysis: submitFailedSmsForAnalysis,
     ),
   );
 
@@ -482,7 +486,7 @@ void main() {
     },
   );
 
-  testWidgets('exact trusted rule is stored through secure gateway callback', (
+  testWidgets('operator payment profile is stored through secure gateway callback', (
     WidgetTester tester,
   ) async {
     final _FakeGateway gateway = _FakeGateway();
@@ -494,10 +498,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsNWidgets(2));
+    expect(find.byType(TextField), findsNWidgets(3));
     await tester.enterText(find.byType(TextField).at(0), 'ORANGE');
+    await tester.enterText(find.byType(TextField).at(1), 'ORANGE_MONEY');
     await tester.enterText(
-      find.byType(TextField).at(1),
+      find.byType(TextField).at(2),
       'Paid {amount} {currency} ref {reference}',
     );
     await tester.drag(find.byType(ListView), const Offset(0, -420));
@@ -505,6 +510,7 @@ void main() {
     await tester.tap(find.text('Store trusted rule securely'));
     await tester.pump();
     expect(gateway.trustedSenders, <String>['ORANGE']);
+    expect(gateway.operatorProfiles.single.provider, 'ORANGE_MONEY');
   });
 
   testWidgets('rule add never claims reload when reconciliation fails', (
@@ -521,8 +527,9 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), 'ORANGE');
+    await tester.enterText(find.byType(TextField).at(1), 'ORANGE_MONEY');
     await tester.enterText(
-      find.byType(TextField).at(1),
+      find.byType(TextField).at(2),
       'Paid {amount} {currency} ref {reference}',
     );
     await tester.tap(find.text('Store trusted rule securely'));
@@ -646,6 +653,41 @@ void main() {
     );
     expect(find.textContaining('can never create a payment'), findsOneWidget);
   });
+
+  testWidgets(
+    'explicit consent submits evidence for review without a payment decision',
+    (WidgetTester tester) async {
+      final _FakeGateway gateway = _FakeGateway(records: <NativeSmsRecord>[
+        NativeSmsRecord(
+          id: 'a' * 43,
+          sender: 'ORANGE',
+          receivedAt: DateTime.utc(2026, 8, 10),
+          segments: 1,
+          body: 'Paid 10 USD ref ABCD-1234',
+        ),
+      ]);
+      String? submitted;
+      await tester.pumpWidget(app(
+        gateway: gateway,
+        submitFailedSmsForAnalysis: (String recordId) async {
+          submitted = recordId;
+          return const OperatorSmsAnalysisSubmitted();
+        },
+      ));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Send for pattern review'), 300);
+      await tester.tap(find.text('Send for pattern review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Send for pattern analysis?'), findsOneWidget);
+      expect(find.textContaining('does not send a payment'), findsOneWidget);
+      await tester.tap(find.text('Send for review'));
+      await tester.pumpAndSettle();
+
+      expect(submitted, 'a' * 43);
+      expect(gateway.decisions, isEmpty);
+      expect(find.textContaining('No payment was sent.'), findsOneWidget);
+    },
+  );
 }
 
 Future<void> _unlockApp(WidgetTester tester) async {
@@ -684,6 +726,8 @@ final class _FakeGateway implements SmsGatewayPort {
   final List<NativeCaptureDecision> decisions = <NativeCaptureDecision>[];
   int probeCount = 0;
   List<String> trustedSenders;
+  List<NativeOperatorPaymentProfile> operatorProfiles =
+      <NativeOperatorPaymentProfile>[];
 
   @override
   Future<NativeCaptureHealth> captureHealth() async {
@@ -768,6 +812,38 @@ final class _FakeGateway implements SmsGatewayPort {
         .toList();
     return List<String>.of(trustedSenders);
   }
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async =>
+      List<NativeOperatorPaymentProfile>.of(operatorProfiles);
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async {
+    if (failAdd) {
+      mutationFailed = true;
+      throw StateError('add timeout');
+    }
+    trustedSenders = (<String>{...trustedSenders, profile.sender}.toList()..sort());
+    operatorProfiles = <NativeOperatorPaymentProfile>[profile];
+    return List<NativeOperatorPaymentProfile>.of(operatorProfiles);
+  }
+
+  @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async => DeveloperApprovedPatternActivationResult(
+    activation: DeveloperApprovedPatternActivation.installed,
+    profile: NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    ),
+  );
 
   @override
   Future<SmsAccessState> permissionState() async => SmsAccessState.granted;

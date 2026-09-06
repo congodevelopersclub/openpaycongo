@@ -7,6 +7,7 @@ import 'package:opencongopay/features/deposit_sync/data/mobile_deposit_http_tran
 import 'package:opencongopay/features/deposit_sync/data/mobile_envelope_http_transport.dart';
 import 'package:opencongopay/features/deposit_sync/data/mobile_envelope_sealer.dart';
 import 'package:opencongopay/features/deposit_sync/presentation/deposit_submission_bloc.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_analysis_envelope_transport.dart';
 
 const ProviderDeposit deposit = ProviderDeposit(
   customerLookupIdentifier: 'customer-private-001',
@@ -45,6 +46,27 @@ final class _EnvelopeVault implements MobileEnvelopeSealer {
   }
 
   @override
+  Future<MobileRequestEnvelope> sealOperatorSmsInterpretationRequest(
+    Uint8List payload,
+  ) async {
+    expect(jsonDecode(utf8.decode(payload)), <String, Object>{
+      'record_id': 'sms-record-0001',
+      'provider': 'ORANGE_MONEY',
+      'sender': 'ORANGEMNY',
+      'sms_body': 'Paid 12.50 USD ref SECRET-1234',
+      'received_at': '2026-09-01T01:00:00Z',
+    });
+    return const MobileRequestEnvelope(
+      version: 1,
+      serverBaseUrl: 'https://pairing.example.test',
+      installationId: '123e4567-e89b-12d3-a456-426614174000',
+      counter: '1',
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      ciphertext: 'request-ciphertext',
+    );
+  }
+
+  @override
   Future<MobileEnvelopeResponseOutcome> openDepositResponse({
     required MobileRequestEnvelope request,
     required int status,
@@ -58,6 +80,19 @@ final class _EnvelopeVault implements MobileEnvelopeSealer {
     expect(ciphertext, 'response-ciphertext');
     return openOutcome;
   }
+
+  @override
+  Future<MobileEnvelopeResponseOutcome> openOperatorSmsInterpretationResponse({
+    required MobileRequestEnvelope request,
+    required int status,
+    required String nonce,
+    required String ciphertext,
+  }) => openDepositResponse(
+    request: request,
+    status: status,
+    nonce: nonce,
+    ciphertext: ciphertext,
+  );
 }
 
 final class _Http implements MobileDepositHttpPort {
@@ -144,6 +179,27 @@ void main() {
       'nonce': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       'ciphertext': 'request-ciphertext',
     });
+  });
+
+  test('sends consented operator SMS analysis only in a native-sealed envelope', () async {
+    final _EnvelopeVault vault = _EnvelopeVault();
+    final _Http http = _Http();
+
+    final OperatorSmsAnalysisSubmission result = await OperatorSmsAnalysisEnvelopeTransport(
+      vault: vault,
+      http: http,
+    ).submit(OperatorSmsAnalysisEvidence(
+      recordId: 'sms-record-0001',
+      provider: 'ORANGE_MONEY',
+      sender: 'ORANGEMNY',
+      body: 'Paid 12.50 USD ref SECRET-1234',
+      receivedAt: DateTime.utc(2026, 9, 1, 1, 0, 0, 123),
+    ));
+
+    expect(result, isA<OperatorSmsAnalysisSubmitted>());
+    final MobileDepositHttpRequest request = http.requests.single;
+    expect(request.uri.toString(), 'https://pairing.example.test/mobile/envelopes');
+    expect(utf8.decode(request.body), isNot(contains('SECRET-1234')));
   });
 
   test('rejects malformed outer responses before native decryption', () async {

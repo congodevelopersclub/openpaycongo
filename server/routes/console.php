@@ -11,3 +11,5 @@ Artisan::command('inspire', function () {
 Schedule::command('payment-requests:recover-credit')->everyMinute()->withoutOverlapping();
 Schedule::command('payment-requests:recover-allocation-deliveries')->everyMinute()->withoutOverlapping();
 Schedule::command('pairing:expire-intents')->everyMinute()->withoutOverlapping();
+Schedule::command('operator-sms:purge-expired-interpretation-requests')->everyMinute()->withoutOverlapping();
+Schedule::command('operator-sms:propose-pending-patterns')->everyMinute()->withoutOverlapping();

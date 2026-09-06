@@ -8,7 +8,9 @@ use App\Deposits\MobileDepositInput;
 use App\Deposits\RecordResult;
 use App\Deposits\SubmitMobileDeposit;
 use App\Models\SourceInstallation;
+use App\OperatorSms\RecordOperatorSmsInterpretationRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use JsonException;
 
 final readonly class ReceiveMobileEnvelope
@@ -17,7 +19,10 @@ final readonly class ReceiveMobileEnvelope
 
     private const string ResponseDomain = 'openpaycongo/mobile/response-envelope/v1';
 
-    public function __construct(private SubmitMobileDeposit $deposits) {}
+    public function __construct(
+        private SubmitMobileDeposit $deposits,
+        private RecordOperatorSmsInterpretationRequest $interpretationRequests,
+    ) {}
 
     /** @param array<string, mixed> $outer */
     public function receive(array $outer): MobileEnvelopeResponse
@@ -59,6 +64,21 @@ final readonly class ReceiveMobileEnvelope
 
             if ($installation->pairing_intent_id !== null && $installation->activation_acknowledged_at === null) {
                 throw new MobileEnvelopeUnavailable;
+            }
+
+            if ($operation === 'operator_sms_interpretation_request') {
+                $result = $this->interpretationRequests->record(
+                    $installation,
+                    $this->interpretationRequestInput($payload),
+                );
+                $installation->forceFill(['mobile_replay_counter' => $counter])->save();
+
+                return $this->encryptResponse(
+                    $installation,
+                    $counter,
+                    $result->recorded ? 201 : 200,
+                    $result->recorded ? 'recorded' : 'replayed',
+                );
             }
 
             $result = $this->deposits->submit($installation, MobileDepositInput::validate($payload));
@@ -108,7 +128,7 @@ final readonly class ReceiveMobileEnvelope
         return [$outer['installation_id'], $counter, $nonce, $ciphertext];
     }
 
-    /** @param mixed $inner @return array{0: 'activation_acknowledgement'|'deposit', 1: array<string, mixed>} */
+    /** @param mixed $inner @return array{0: 'activation_acknowledgement'|'deposit'|'operator_sms_interpretation_request', 1: array<string, mixed>} */
     private function command(mixed $inner): array
     {
         if (! is_array($inner)
@@ -122,7 +142,7 @@ final readonly class ReceiveMobileEnvelope
         $payload = $inner['payload'];
         if (($inner['version'] ?? null) !== 1
             || ! is_string($operation)
-            || ! in_array($operation, ['activation_acknowledgement', 'deposit'], true)
+            || ! in_array($operation, ['activation_acknowledgement', 'deposit', 'operator_sms_interpretation_request'], true)
             || ! is_array($payload)) {
             throw new MobileEnvelopeUnavailable;
         }
@@ -152,6 +172,34 @@ final readonly class ReceiveMobileEnvelope
         if ($installation->activation_acknowledged_at === null) {
             $installation->forceFill(['activation_acknowledged_at' => now('UTC')]);
         }
+    }
+
+    /** @param array<string, mixed> $payload @return array{record_id: string, provider: string, sender: string, sms_body: string, received_at: string} */
+    private function interpretationRequestInput(array $payload): array
+    {
+        $validator = Validator::make($payload, [
+            'record_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{8,64}$/'],
+            'provider' => ['required', 'string', 'regex:/^[A-Z0-9._-]{3,32}$/'],
+            'sender' => ['required', 'string', 'regex:/^(?:\\+[1-9][0-9]{7,14}|[A-Z0-9]{3,11})$/'],
+            'sms_body' => ['required', 'string', 'min:1', 'max:4096'],
+            'received_at' => ['required', 'date_format:Y-m-d\\TH:i:s\\Z'],
+        ]);
+        if ($validator->fails()) {
+            throw new MobileEnvelopeUnavailable;
+        }
+
+        /** @var array{record_id: string, provider: string, sender: string, sms_body: string, received_at: string} $input */
+        $input = $validator->validated();
+        try {
+            $receivedAt = new \DateTimeImmutable($input['received_at']);
+        } catch (\Throwable) {
+            throw new MobileEnvelopeUnavailable;
+        }
+        if ($receivedAt->format('Y-m-d\\TH:i:s\\Z') !== $input['received_at']) {
+            throw new MobileEnvelopeUnavailable;
+        }
+
+        return $input;
     }
 
     private function encryptResponse(SourceInstallation $installation, int $counter, int $status, string $outcome): MobileEnvelopeResponse

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../sms_gateway/domain/sms_gateway.dart';
 import '../domain/payment_ingestion.dart';
+import '../infrastructure/operator_sms_analysis_envelope_transport.dart';
 
 enum PaymentInboxAuthority { loading, authoritative, unknown }
 
@@ -10,6 +11,8 @@ enum PaymentInboxFeedback {
   none,
   invalidSender,
   invalidTemplate,
+  invalidProvider,
+  invalidOperatorProfile,
   ruleSaved,
   inboxUnavailable,
   legacyRecoveryRequired,
@@ -24,6 +27,9 @@ enum PaymentInboxFeedback {
   ruleRevokeReloadFailed,
   ruleClearReloaded,
   ruleClearReloadFailed,
+  analysisSubmitted,
+  analysisAlreadySubmitted,
+  analysisUnavailable,
 }
 
 final class PaymentInboxState {
@@ -31,6 +37,7 @@ final class PaymentInboxState {
     this.ready = false,
     this.authority = PaymentInboxAuthority.loading,
     this.trustedSenders = const <SenderIdentity>[],
+    this.operatorProfiles = const <NativeOperatorPaymentProfile>[],
     this.records = const <NativeSmsRecord>[],
     this.health,
     this.busyRecordIds = const <String>{},
@@ -40,6 +47,7 @@ final class PaymentInboxState {
   final bool ready;
   final PaymentInboxAuthority authority;
   final List<SenderIdentity> trustedSenders;
+  final List<NativeOperatorPaymentProfile> operatorProfiles;
   final List<NativeSmsRecord> records;
   final NativeCaptureHealth? health;
   final Set<String> busyRecordIds;
@@ -49,6 +57,7 @@ final class PaymentInboxState {
     bool? ready,
     PaymentInboxAuthority? authority,
     List<SenderIdentity>? trustedSenders,
+    List<NativeOperatorPaymentProfile>? operatorProfiles,
     List<NativeSmsRecord>? records,
     NativeCaptureHealth? health,
     bool clearHealth = false,
@@ -58,6 +67,7 @@ final class PaymentInboxState {
     ready: ready ?? this.ready,
     authority: authority ?? this.authority,
     trustedSenders: trustedSenders ?? this.trustedSenders,
+    operatorProfiles: operatorProfiles ?? this.operatorProfiles,
     records: records ?? this.records,
     health: clearHealth ? null : health ?? this.health,
     busyRecordIds: busyRecordIds ?? this.busyRecordIds,
@@ -91,6 +101,20 @@ final class PaymentInboxTrustedSenderSaveRequested extends PaymentInboxEvent {
   final String template;
 }
 
+final class PaymentInboxOperatorProfileSaveRequested extends PaymentInboxEvent {
+  const PaymentInboxOperatorProfileSaveRequested({
+    required this.sender,
+    required this.provider,
+    required this.structure,
+    this.template,
+  });
+
+  final String sender;
+  final String provider;
+  final NativeOperatorPaymentStructure structure;
+  final String? template;
+}
+
 final class PaymentInboxTrustedSenderRevoked extends PaymentInboxEvent {
   const PaymentInboxTrustedSenderRevoked(this.sender);
 
@@ -111,15 +135,29 @@ final class PaymentInboxDecisionRequested extends PaymentInboxEvent {
   final NativeCaptureDecision decision;
 }
 
+/// Dispatched only after the protected review UI has received explicit consent.
+/// The BLoC owns the asynchronous submission state and outcome; it never holds
+/// raw SMS content.
+final class PaymentInboxAnalysisSubmissionRequested extends PaymentInboxEvent {
+  const PaymentInboxAnalysisSubmissionRequested(this.recordId);
+
+  final String recordId;
+}
+
 /// Owns native inbox mutation and reconciliation state. It never logs or
 /// serializes captured SMS evidence; widgets render the in-memory result.
 final class PaymentInboxBloc
     extends Bloc<PaymentInboxEvent, PaymentInboxState> {
-  PaymentInboxBloc({required this.gateway}) : super(const PaymentInboxState()) {
+  PaymentInboxBloc({
+    required this.gateway,
+    this.submitFailedSmsForAnalysis,
+  }) : super(const PaymentInboxState()) {
     on<PaymentInboxEvent>(_enqueue);
   }
 
   final SmsGatewayPort gateway;
+  final Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+      submitFailedSmsForAnalysis;
   Future<void> _queue = Future<void>.value();
 
   Future<void> _enqueue(
@@ -141,9 +179,11 @@ final class PaymentInboxBloc
     PaymentInboxReloadRequested() => _reloadRequested(event, emit),
     PaymentInboxStorageProbeRequested() => _probeStorage(event, emit),
     PaymentInboxTrustedSenderSaveRequested() => _saveRule(event, emit),
+    PaymentInboxOperatorProfileSaveRequested() => _saveOperatorProfile(event, emit),
     PaymentInboxTrustedSenderRevoked() => _revokeRule(event, emit),
     PaymentInboxTrustedSendersCleared() => _clearRules(event, emit),
     PaymentInboxDecisionRequested() => _commitDecision(event, emit),
+    PaymentInboxAnalysisSubmissionRequested() => _submitAnalysis(event, emit),
   };
 
   Future<void> _start(
@@ -171,6 +211,15 @@ final class PaymentInboxBloc
       final List<SenderIdentity> trustedSenders = _decodeTrustedSenders(
         storedSenders,
       );
+      final List<NativeOperatorPaymentProfile> operatorProfiles =
+          await gateway.listOperatorPaymentProfiles();
+      if (operatorProfiles.any(
+        (NativeOperatorPaymentProfile profile) =>
+            !trustedSenders.any((SenderIdentity sender) =>
+                sender.value == profile.sender),
+      )) {
+        throw const FormatException('profile_without_trusted_sender');
+      }
       final NativeCaptureHealth health = await gateway.captureHealth();
       final bool blocksRead =
           health.fault == CaptureFault.corruption ||
@@ -184,6 +233,7 @@ final class PaymentInboxBloc
           ready: true,
           authority: PaymentInboxAuthority.authoritative,
           trustedSenders: trustedSenders,
+          operatorProfiles: operatorProfiles,
           records: records,
           health: health,
           feedback: feedback,
@@ -237,6 +287,67 @@ final class PaymentInboxBloc
     }
     try {
       await gateway.addTrustedSender(sender.value);
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
+      );
+      emit(
+        state.copyWith(
+          feedback: reloaded
+              ? PaymentInboxFeedback.ruleSaved
+              : PaymentInboxFeedback.ruleAddReloadFailed,
+        ),
+      );
+    } on Object {
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
+      );
+      emit(
+        state.copyWith(
+          feedback: reloaded
+              ? PaymentInboxFeedback.ruleAddReloaded
+              : PaymentInboxFeedback.ruleAddReloadFailed,
+        ),
+      );
+    }
+  }
+
+  Future<void> _saveOperatorProfile(
+    PaymentInboxOperatorProfileSaveRequested event,
+    Emitter<PaymentInboxState> emit,
+  ) async {
+    final SenderIdentity? sender = SenderIdentity.fromOsMetadata(event.sender);
+    if (sender == null) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidSender));
+      return;
+    }
+    if (!RegExp(r'^[A-Z0-9._-]{3,32}$').hasMatch(event.provider)) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidProvider));
+      return;
+    }
+    final String? template = event.template?.trim();
+    if (event.structure == NativeOperatorPaymentStructure.manual &&
+        (template == null || !PaymentTemplate(template).valid)) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidTemplate));
+      return;
+    }
+    if (event.structure == NativeOperatorPaymentStructure.gemma4 &&
+        template != null) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidOperatorProfile));
+      return;
+    }
+    try {
+      await gateway.upsertOperatorPaymentProfile(
+        NativeOperatorPaymentProfile(
+          sender: sender.value,
+          provider: event.provider,
+          structure: event.structure,
+          template: event.structure == NativeOperatorPaymentStructure.manual
+              ? template
+              : null,
+        ),
+      );
       final bool reloaded = await _reload(
         emit,
         feedback: PaymentInboxFeedback.none,
@@ -374,6 +485,53 @@ final class PaymentInboxBloc
         state.copyWith(
           busyRecordIds: <String>{...state.busyRecordIds}
             ..remove(event.recordId),
+        ),
+      );
+    }
+  }
+
+  Future<void> _submitAnalysis(
+    PaymentInboxAnalysisSubmissionRequested event,
+    Emitter<PaymentInboxState> emit,
+  ) async {
+    if (state.busyRecordIds.contains(event.recordId)) return;
+    final Set<String> busy = <String>{
+      ...state.busyRecordIds,
+      event.recordId,
+    };
+    emit(
+      state.copyWith(
+        busyRecordIds: busy,
+        feedback: PaymentInboxFeedback.none,
+      ),
+    );
+    try {
+      final Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+          submit = submitFailedSmsForAnalysis;
+      if (submit == null) {
+        emit(
+          state.copyWith(feedback: PaymentInboxFeedback.analysisUnavailable),
+        );
+        return;
+      }
+      final OperatorSmsAnalysisSubmission outcome = await submit(event.recordId);
+      emit(
+        state.copyWith(
+          feedback: outcome is OperatorSmsAnalysisAlreadySubmitted
+              ? PaymentInboxFeedback.analysisAlreadySubmitted
+              : PaymentInboxFeedback.analysisSubmitted,
+        ),
+      );
+    } on Object {
+      emit(
+        state.copyWith(feedback: PaymentInboxFeedback.analysisUnavailable),
+      );
+    } finally {
+      emit(
+        state.copyWith(
+          busyRecordIds: <String>{...state.busyRecordIds}
+            ..remove(event.recordId),
+          feedback: PaymentInboxFeedback.none,
         ),
       );
     }

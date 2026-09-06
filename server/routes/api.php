@@ -7,6 +7,7 @@ use App\Http\Controllers\ConfirmPairingIntentController;
 use App\Http\Controllers\GetPairingActivationController;
 use App\Http\Controllers\GetPairingConfirmationController;
 use App\Http\Controllers\IssuePairingIntentController;
+use App\Http\Controllers\ListOperatorSmsPatternReleasesController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Controllers\StoreMobileEnvelopeController;
 use App\Http\Middleware\RequireClientCredentialsGrant;
@@ -48,6 +49,10 @@ Route::get('/mobile/identity', static function () {
 Route::post('/mobile/deposits', StoreMobileDepositController::class)
     ->middleware(['auth:mobile', 'abilities:mobile:deposits:write', 'mobile.activation', 'throttle:mobile-api'])
     ->name('mobile.deposits.store');
+
+Route::get('/mobile/operator-sms/pattern-releases', ListOperatorSmsPatternReleasesController::class)
+    ->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'])
+    ->name('mobile.operator-sms.pattern-releases.index');
 
 Route::post('/mobile/envelopes', StoreMobileEnvelopeController::class)
     ->middleware(['throttle:mobile-envelope'])
