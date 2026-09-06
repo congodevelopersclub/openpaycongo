@@ -35,15 +35,21 @@ final class OperatorSmsPatternReviewTest extends TestCase
         $operator = $this->financialOperator('00000000-0000-4000-8000-000000000401');
         config()->set('services.gemma.api_key', 'test-key');
 
-        Http::fake(['*' => Http::response([
-            'candidates' => [[
-                'content' => ['parts' => [['text' => json_encode([
-                    'provider' => 'ORANGE_MONEY',
-                    'sender' => 'ORANGE',
-                    'template' => 'Paid {amount} {currency} ref {reference}',
-                ], JSON_THROW_ON_ERROR)]],],
-            ]],
-        ])]);
+        Http::fake([
+            '*' => Http::response([
+                'candidates' => [[
+                    'content' => [
+                        'parts' => [[
+                            'text' => json_encode([
+                                'provider' => 'ORANGE_MONEY',
+                                'sender' => 'ORANGE',
+                                'template' => 'Paid {amount} {currency} ref {reference}',
+                            ], JSON_THROW_ON_ERROR),
+                        ]],
+                    ],
+                ]],
+            ]),
+        ]);
 
         $proposal = app(OperatorPaymentPatternReview::class)->propose(
             $operator->organization_id,
