@@ -16,7 +16,7 @@ final class RequireAcknowledgedMobileActivation
         /** @var SourceInstallation $installation */
         $installation = $request->user('mobile');
 
-        if ($installation->pairing_intent_id !== null && $installation->activation_acknowledged_at === null) {
+        if ($installation->revoked_at !== null || ($installation->pairing_intent_id !== null && $installation->activation_acknowledged_at === null)) {
             return response()->json(['code' => 'mobile_envelope_unavailable'], 404, ['Cache-Control' => 'no-store, private']);
         }
 

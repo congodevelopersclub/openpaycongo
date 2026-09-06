@@ -146,8 +146,8 @@ This section is normative for Android/Flutter pairing work. The wire protocol is
 - Laravel confirmation, activation delivery, and `POST /mobile/envelopes` v1 exist. Android uses a
   foreground/unlock-gated native deposit-envelope adapter: bounded payload, native directional-key and installation-ID
   use from the same atomic generation, Keystore-encrypted no-backup counter, canonical request/response AAD, and opaque routing-safe
-  result. HTTP delivery sends only the sealed five-field envelope and encrypted response handling stays native;
-  revocation, rotation, and recovery remain follow-up work. After activation,
+  result. HTTP delivery sends only the sealed five-field envelope and encrypted response handling stays native.
+  Server operator revocation deletes the old mobile credential and directional/activation material, so old bearer and envelope attempts fail closed; a SAS-confirmed fresh QR is the supported single-active re-pair rotation, without overlap or multi-device enrollment. Pre-completion retry recovery remains follow-up work. After activation,
   active bodies use directional XChaCha20-Poly1305 envelopes with locked monotonic counter and canonical AAD; TLS
   terminator sees no cleartext business/PII body.
 - Initial pairing has an all-native directional-key lifecycle. The native envelope use path does not return a key or

@@ -85,6 +85,11 @@ final class ConfirmPairingIntent
                 return 'revoked';
             }
 
+            app(RevokePairedInstallation::class)->revokeActiveForRotation(
+                $operator,
+                (string) $intent->organization_id,
+            );
+
             $installation = SourceInstallation::query()->create([
                 'organization_id' => $intent->organization_id,
                 'installation_digest' => hash('sha256', random_bytes(32)),

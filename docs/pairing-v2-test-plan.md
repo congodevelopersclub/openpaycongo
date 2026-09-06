@@ -15,6 +15,8 @@
 
 ## Follow-up boundary
 
-Laravel implements confirmation, activation delivery, counter-bound mobile envelopes, and final activation acknowledgement. Revocation and rotation remain separate follow-up slices.
+Laravel implements confirmation, activation delivery, counter-bound mobile envelopes, final activation acknowledgement, and verified-operator revocation. Revocation records a secretless audit, deletes the paired installation's Sanctum tokens, scrubs directional keys and activation ciphertext, and leaves old activation retrieval, mobile envelopes, and bearer access unavailable. A SAS-confirmed fresh QR is the supported rotation: in the confirmation transaction it revokes every existing paired installation for that organization before issuing new pairwise keys and a new credential. There is no overlapping credential rollover or multi-device protocol.
+
+Pre-completion durable retry recovery, multi-device enrollment, and any future overlap protocol remain separate work.
 
 Pairing #211 resolves the directional-key custody boundary: all production directional-key agreement, response decryption, and Keystore persistence are native. Test-only Flutter reference crypto is not the production pairing path.

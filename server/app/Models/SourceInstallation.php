@@ -18,7 +18,7 @@ class SourceInstallation extends Model implements AuthenticatableContract
 
     protected $fillable = ['organization_id', 'installation_digest', 'installation_lookup_id', 'installation_key_version', 'mobile_receive_key', 'mobile_send_key', 'mobile_replay_counter', 'pairing_intent_id', 'activation_nonce', 'activation_ciphertext'];
 
-    protected $hidden = ['installation_digest', 'installation_lookup_id', 'installation_key_version', 'mobile_receive_key', 'mobile_send_key', 'pairing_intent_id', 'activation_nonce', 'activation_ciphertext', 'activation_acknowledged_at'];
+    protected $hidden = ['installation_digest', 'installation_lookup_id', 'installation_key_version', 'mobile_receive_key', 'mobile_send_key', 'pairing_intent_id', 'activation_nonce', 'activation_ciphertext', 'activation_acknowledged_at', 'revoked_at'];
 
     protected function casts(): array
     {
@@ -29,6 +29,7 @@ class SourceInstallation extends Model implements AuthenticatableContract
             'activation_ciphertext' => 'encrypted',
             'mobile_replay_counter' => 'integer',
             'activation_acknowledged_at' => 'immutable_datetime',
+            'revoked_at' => 'immutable_datetime',
         ];
     }
 }

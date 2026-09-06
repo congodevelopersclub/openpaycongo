@@ -28,6 +28,20 @@ final class MobileEnvelopeGatewayTest extends TestCase
         self::assertDatabaseCount('ledger_entries', 2);
     }
 
+    public function test_revoked_installation_rejects_a_valid_mobile_envelope_without_mutating_state(): void
+    {
+        $installation = $this->installation();
+        $envelope = $this->envelope($installation, '1', $this->depositPayload());
+        $installation->forceFill(['revoked_at' => now('UTC')])->save();
+
+        $this->postJson('/mobile/envelopes', $envelope)
+            ->assertNotFound()
+            ->assertExactJson(['code' => 'mobile_envelope_unavailable']);
+
+        self::assertSame(0, $installation->fresh()->mobile_replay_counter);
+        self::assertDatabaseCount('deposits', 0);
+    }
+
     public function test_activation_installation_acknowledgement_is_encrypted_and_idempotent(): void
     {
         $installation = $this->installation()->forceFill([

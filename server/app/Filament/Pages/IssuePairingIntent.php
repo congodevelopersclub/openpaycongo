@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Models\SourceInstallation;
 use App\Models\User;
 use App\Pairing\IssuePendingPairingIntent as IssuePendingPairingIntentAction;
 use App\Pairing\PairingIntentIssuanceLimiter;
+use App\Pairing\RevokePairedInstallation;
 use App\Security\FinancialOperatorMfaSession;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -64,6 +67,48 @@ final class IssuePairingIntent extends Page
                     Notification::make()
                         ->danger()
                         ->title('Pairing intent could not be issued.')
+                        ->send();
+                }
+            });
+    }
+
+    public function revokePairedInstallationAction(): Action
+    {
+        return Action::make('revokePairedInstallation')
+            ->label('Revoke paired mobile')
+            ->color('danger')
+            ->requiresConfirmation()
+            ->schema([
+                Select::make('installation_id')
+                    ->label('Paired installation')
+                    ->options(function (): array {
+                        $actor = $this->verifiedActor();
+
+                        return SourceInstallation::query()
+                            ->where('organization_id', $actor->organization_id)
+                            ->whereNotNull('pairing_intent_id')
+                            ->whereNull('revoked_at')
+                            ->orderByDesc('created_at')
+                            ->pluck('id', 'id')
+                            ->all();
+                    })
+                    ->required(),
+            ])
+            ->action(function (array $data): void {
+                $actor = $this->verifiedActor();
+
+                try {
+                    app(RevokePairedInstallation::class)->revoke($actor, (string) $data['installation_id']);
+                    Notification::make()
+                        ->success()
+                        ->title('Paired mobile revoked.')
+                        ->send();
+                } catch (AuthorizationException $exception) {
+                    throw $exception;
+                } catch (Throwable) {
+                    Notification::make()
+                        ->danger()
+                        ->title('Paired mobile could not be revoked.')
                         ->send();
                 }
             });

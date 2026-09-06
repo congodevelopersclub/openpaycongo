@@ -26,7 +26,7 @@ final readonly class ReceiveMobileEnvelope
 
         return DB::transaction(function () use ($installationId, $counter, $nonce, $ciphertext): MobileEnvelopeResponse {
             $installation = SourceInstallation::query()->lockForUpdate()->find($installationId);
-            if ($installation === null || $counter <= $installation->mobile_replay_counter) {
+            if ($installation === null || $installation->revoked_at !== null || $counter <= $installation->mobile_replay_counter) {
                 throw new MobileEnvelopeUnavailable;
             }
 
