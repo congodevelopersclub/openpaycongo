@@ -71,6 +71,8 @@ docker build --target test -f android-client/Dockerfile.ci android-client
 ```
 
 The first command validates the OpenAPI document, JSON Schemas, fixtures,
-route inventory, and documentation boundary. The Laravel and Flutter commands
-run their consumer suites. A contract is not complete when only the YAML
-parser passes.
+route inventory, and documentation boundary. The Laravel command includes
+`CanonicalApiContractTest`, which loads the same OpenAPI file and validates
+live mobile-deposit and Developer Application identity responses against its
+published schemas. The Flutter command runs the mobile consumer suite. A
+contract is not complete when only the YAML parser passes.

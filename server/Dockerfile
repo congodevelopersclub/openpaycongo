@@ -35,7 +35,7 @@ RUN composer install --no-interaction --prefer-dist --no-scripts
 FROM dependencies AS quality
 
 COPY server/ ./
-COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
+COPY docs/openapi.yaml docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml
@@ -56,7 +56,7 @@ FROM dependencies AS focused
 
 ARG TEST_FILTER
 COPY server/ ./
-COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
+COPY docs/openapi.yaml docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
 COPY .github/workflows/ci.yml /ci.yml

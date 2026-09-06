@@ -28,10 +28,14 @@ test('canonical contract validates its OpenAPI, synthetic fixtures, and Laravel 
   assert.equal(api.paths['/v1/sync/pull'].get['x-openpay-status'], 'planned');
 
   const routes = await readFile(resolve(repositoryRoot, 'server/routes/api.php'), 'utf8');
+  const laravelContractTest = await readFile(resolve(repositoryRoot, 'server/tests/Feature/CanonicalApiContractTest.php'), 'utf8');
   for (const path of ['/oauth/token', '/mobile/deposits', '/mobile/envelopes', '/services/identity', '/v1/pairing/complete']) {
     assert.match(routes, new RegExp(`['"]${path.replaceAll('/', '\\/')}['"]`), `Laravel route missing from inventory: ${path}`);
     assert.ok(api.paths[path], `OpenAPI path missing Laravel route: ${path}`);
   }
+  assert.match(laravelContractTest, /Yaml::parseFile\(base_path\('\.\.\/docs\/openapi\.yaml'\)\)/);
+  assert.match(laravelContractTest, /assertConforms\('\/mobile\/deposits'/);
+  assert.match(laravelContractTest, /assertConforms\('\/services\/identity'/);
 });
 
 test('documentation states the Laravel and Flutter implementation boundary without legacy runtimes', async () => {

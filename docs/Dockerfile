@@ -27,6 +27,7 @@ COPY server/composer.json /workspace/server/composer.json
 COPY server/phpstan.neon /workspace/server/phpstan.neon
 COPY server/routes/api.php /workspace/server/routes/api.php
 COPY server/tests/Feature/AuthorizationBoundaryTest.php /workspace/server/tests/Feature/AuthorizationBoundaryTest.php
+COPY server/tests/Feature/CanonicalApiContractTest.php /workspace/server/tests/Feature/CanonicalApiContractTest.php
 COPY android-client/Dockerfile.ci /workspace/android-client/Dockerfile.ci
 COPY android-client/README.md /workspace/android-client/README.md
 COPY android-client/android/app/build.gradle /workspace/android-client/android/app/build.gradle
