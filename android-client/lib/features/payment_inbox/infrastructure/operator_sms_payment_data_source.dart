@@ -6,7 +6,6 @@ import '../domain/approved_operator_pattern.dart';
 import '../domain/operator_sms_payment_data.dart';
 import '../domain/payment_ingestion.dart';
 import 'operator_sms_payment_adapter.dart';
-import 'platform_gemma4_proposal_port.dart';
 
 /// The sole read boundary the separately-owned push worker needs. It joins the
 /// authoritative encrypted inbox with its persisted operator profile, creates
@@ -15,27 +14,10 @@ final class OperatorSmsPaymentDataSource {
   OperatorSmsPaymentDataSource({
     required this.gateway,
     this.adapter = const OperatorSmsPaymentAdapter(),
-    this.gemmaFactory,
   });
 
   final SmsGatewayPort gateway;
   final OperatorSmsPaymentAdapter adapter;
-  final Gemma4PaymentDataFactory? gemmaFactory;
-
-  /// Production composition for Android: Gemma stays completely on-device.
-  factory OperatorSmsPaymentDataSource.onDeviceGemma({
-    required SmsGatewayPort gateway,
-    OperatorSmsPaymentAdapter adapter = const OperatorSmsPaymentAdapter(),
-  }) => OperatorSmsPaymentDataSource(
-    gateway: gateway,
-    adapter: adapter,
-    gemmaFactory: Gemma4PaymentDataFactory(
-      BoundedProposalRunner(
-        port: const PlatformGemma4ProposalPort(),
-        clock: const SystemClock(),
-      ),
-    ),
-  );
 
   Future<List<OperatorSmsPaymentData>> read(OutboxScope scope) async {
     final List<NativeOperatorPaymentProfile> profiles =
@@ -56,21 +38,10 @@ final class OperatorSmsPaymentDataSource {
         data.add(const PaymentDataNeedsReview('operator_payment_profile_missing'));
         continue;
       }
-      if (profile.structure == NativeOperatorPaymentStructure.manual) {
-        data.add(adapter.interpret(record: record, profile: profile, scope: scope));
-        continue;
-      }
-      final Gemma4PaymentDataFactory? configuredGemmaFactory = gemmaFactory;
-      data.add(
-        configuredGemmaFactory == null
-            ? const PaymentDataNeedsReview('gemma4_runtime_not_configured')
-            : await adapter.interpretWithGemma(
-                record: record,
-                profile: profile,
-                scope: scope,
-                factory: configuredGemmaFactory,
-              ),
-      );
+      // No raw SMS is ever sent to an on-device or third-party model here.
+      // A legacy Gemma profile remains review-only until a separately delivered,
+      // developer-approved signed backend pattern is verified and reanalysed.
+      data.add(adapter.interpret(record: record, profile: profile, scope: scope));
     }
     return List<OperatorSmsPaymentData>.unmodifiable(data);
   }

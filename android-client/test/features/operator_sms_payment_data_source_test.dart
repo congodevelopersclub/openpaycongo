@@ -71,6 +71,38 @@ void main() {
     );
   });
 
+  test('legacy Gemma profiles remain review-only until a signed backend release arrives',
+      () async {
+    final _Gateway gateway = _Gateway(
+      records: <NativeSmsRecord>[
+        NativeSmsRecord(
+          id: 'g' * 43,
+          sender: 'ORANGE',
+          receivedAt: DateTime.utc(2026, 9, 6),
+          segments: 1,
+          body: 'Provider notification format changed',
+        ),
+      ],
+      profiles: const <NativeOperatorPaymentProfile>[
+        NativeOperatorPaymentProfile(
+          sender: 'ORANGE',
+          provider: 'ORANGE_MONEY',
+          structure: NativeOperatorPaymentStructure.gemma4,
+        ),
+      ],
+    );
+
+    final List<OperatorSmsPaymentData> results =
+        await OperatorSmsPaymentDataSource(gateway: gateway).read(scope);
+
+    expect(results.single, isA<PaymentDataNeedsReview>());
+    expect(
+      (results.single as PaymentDataNeedsReview).reason,
+      'gemma4_proposal_required',
+    );
+    expect(gateway.commitCalls, 0);
+  });
+
   test('a verified release reanalyses retained records without acknowledging them',
       () async {
     final Ed25519 algorithm = Ed25519();
