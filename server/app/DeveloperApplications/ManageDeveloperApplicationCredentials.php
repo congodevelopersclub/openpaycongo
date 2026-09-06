@@ -148,7 +148,22 @@ final class ManageDeveloperApplicationCredentials
 
     private function isReservedScope(string $scope): bool
     {
-        return $scope === 'customers:pii:read';
+        return in_array($scope, $this->reservedScopes(), true);
+    }
+
+    /** @return string[] */
+    private function reservedScopes(): array
+    {
+        $reservedScopes = config('openpay.reserved_service_scopes');
+
+        if (! is_array($reservedScopes)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map(static fn (mixed $scope): string => (string) $scope, $reservedScopes),
+            static fn (string $scope): bool => $scope !== '',
+        ));
     }
 
     /** @param string[] $scopes */
