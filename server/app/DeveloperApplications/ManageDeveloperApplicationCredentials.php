@@ -158,6 +158,7 @@ final class ManageDeveloperApplicationCredentials
             'developer_application_id' => $application->getKey(),
             'oauth_client_id' => $client->getKey(),
             'actor_user_id' => $actor->getKey(),
+            'actor_user_identifier' => (string) $actor->getKey(),
             'action' => $action,
             'scopes' => $scopes,
         ]);

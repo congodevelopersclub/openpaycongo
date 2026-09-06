@@ -22,10 +22,6 @@ final class ManageDeveloperApplications extends Page
 
     protected static ?string $navigationLabel = 'Developer credentials';
 
-    public ?string $revealedClientId = null;
-
-    public ?string $revealedClientSecret = null;
-
     public function mount(): void
     {
         $this->verifiedActor();
@@ -54,8 +50,10 @@ final class ManageDeveloperApplications extends Page
                     is_array($data['scopes'] ?? null) ? $data['scopes'] : [],
                 );
 
-                $this->revealedClientId = $issued->clientId;
-                $this->revealedClientSecret = $issued->clientSecret;
+                $this->dispatch('developer-application-credentials-issued',
+                    clientId: $issued->clientId,
+                    clientSecret: $issued->clientSecret,
+                );
 
                 Notification::make()
                     ->success()
@@ -73,8 +71,10 @@ final class ManageDeveloperApplications extends Page
                 $application = $this->authorizedApplication((string) ($arguments['application'] ?? ''));
                 $issued = app(ManageDeveloperApplicationCredentials::class)->rotate($this->verifiedActor(), $application);
 
-                $this->revealedClientId = $issued->clientId;
-                $this->revealedClientSecret = $issued->clientSecret;
+                $this->dispatch('developer-application-credentials-issued',
+                    clientId: $issued->clientId,
+                    clientSecret: $issued->clientSecret,
+                );
 
                 Notification::make()
                     ->success()
@@ -92,8 +92,7 @@ final class ManageDeveloperApplications extends Page
             ->action(function (array $arguments): void {
                 $application = $this->authorizedApplication((string) ($arguments['application'] ?? ''));
                 app(ManageDeveloperApplicationCredentials::class)->revoke($this->verifiedActor(), $application);
-                $this->revealedClientId = null;
-                $this->revealedClientSecret = null;
+                $this->dispatch('developer-application-credentials-cleared');
 
                 Notification::make()
                     ->success()

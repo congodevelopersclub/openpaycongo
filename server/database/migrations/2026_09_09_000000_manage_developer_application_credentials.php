@@ -23,7 +23,8 @@ return new class extends Migration
             $table->uuid('organization_id')->index();
             $table->uuid('developer_application_id')->index();
             $table->uuid('oauth_client_id')->index();
-            $table->foreignId('actor_user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('actor_user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('actor_user_identifier', 64);
             $table->string('action', 32);
             $table->json('scopes');
             $table->timestamp('created_at')->useCurrent();

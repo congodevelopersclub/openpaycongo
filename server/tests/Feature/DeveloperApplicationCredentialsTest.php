@@ -17,6 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Client;
 use Livewire\Livewire;
+use ReflectionClass;
 use Tests\TestCase;
 
 final class DeveloperApplicationCredentialsTest extends TestCase
@@ -144,9 +145,10 @@ final class DeveloperApplicationCredentialsTest extends TestCase
         self::assertEqualsCanonicalizing(['issued', 'revoked'], DeveloperApplicationCredentialAudit::query()->pluck('action')->all());
     }
 
-    public function test_filament_management_reveals_new_secret_without_persisting_it_in_the_application_list(): void
+    public function test_filament_management_delivers_new_secret_without_public_component_state(): void
     {
         $operator = $this->financialOperator('00000000-0000-4000-8000-000000000205');
+        $dispatchedSecret = null;
 
         $page = Livewire::actingAs($operator)
             ->test(ManageDeveloperApplications::class)
@@ -155,20 +157,42 @@ final class DeveloperApplicationCredentialsTest extends TestCase
                 'scopes' => ['payment-requests:read'],
             ])
             ->assertHasNoFormErrors()
+            ->assertDispatched('developer-application-credentials-issued', function (string $eventName, array $params) use (&$dispatchedSecret): bool {
+                $dispatchedSecret = (string) ($params['clientSecret'] ?? '');
+
+                return $eventName === 'developer-application-credentials-issued'
+                    && (string) ($params['clientId'] ?? '') !== ''
+                    && $dispatchedSecret !== '';
+            })
             ->assertSee('New client secret')
             ->assertSee('Reporting connector')
             ->assertSee('payment-requests:read')
             ->assertDontSee('customers:pii:read');
 
-        $secret = (string) $page->get('revealedClientSecret');
-        self::assertNotSame('', $secret);
-        self::assertNotSame($secret, DeveloperApplication::query()->sole()->oauthClient()->firstOrFail()->secret);
+        self::assertNotSame('', $dispatchedSecret);
+        self::assertNotSame($dispatchedSecret, DeveloperApplication::query()->sole()->oauthClient()->firstOrFail()->secret);
+        self::assertFalse((new ReflectionClass(ManageDeveloperApplications::class))->hasProperty('revealedClientSecret'));
 
         Livewire::actingAs($operator)
             ->test(ManageDeveloperApplications::class)
             ->assertSee('Reporting connector')
             ->assertSee('Never')
-            ->assertDontSee($secret);
+            ->assertDontSee($dispatchedSecret);
+    }
+
+    public function test_credential_audit_survives_actor_account_deletion(): void
+    {
+        $operator = $this->financialOperator('00000000-0000-4000-8000-000000000206');
+        $actorId = $operator->getKey();
+
+        app(ManageDeveloperApplicationCredentials::class)->issue($operator, 'Retained audit connector', ['payment-requests:read']);
+
+        $operator->delete();
+
+        $audit = DeveloperApplicationCredentialAudit::query()->sole();
+        self::assertNull($audit->actor_user_id);
+        self::assertSame((string) $actorId, $audit->actor_user_identifier);
+        self::assertSame('issued', $audit->action);
     }
 
     private function financialOperator(string $organizationId): User
