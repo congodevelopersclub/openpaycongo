@@ -355,7 +355,7 @@ class AtomicSmsQueueTest {
             ApprovedOperatorPatternActivation.stale,
             queue().activateDeveloperApprovedOperatorPaymentProfile(older).activation,
         )
-        assertFailsWith<IllegalArgumentException> {
+        assertThrows(IllegalArgumentException::class.java) {
             queue().upsertOperatorPaymentProfile(approved.copy(developerApprovedPatternVersion = null))
         }
         assertEquals(listOf(approved), queue().operatorPaymentProfiles())
