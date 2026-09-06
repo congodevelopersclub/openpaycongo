@@ -32,6 +32,20 @@ class MobileEnvelopeFormatTest {
         assertThrows(MobileEnvelopeException::class.java) {
             MobileEnvelopeFormat.plaintext("deposit", ByteArray(MobileEnvelopeFormat.MAX_PAYLOAD_BYTES + 1))
         }
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeFormat.plaintext("activation_acknowledgement", "{}".toByteArray())
+        }
+    }
+
+    @Test
+    fun wrapsActivationAcknowledgementWithoutCallerPayload() {
+        val plaintext = MobileEnvelopeFormat.plaintext("activation_acknowledgement", ByteArray(0))
+
+        val envelope = JSONObject(String(plaintext, StandardCharsets.UTF_8))
+        assertEquals(3, envelope.length())
+        assertEquals(1, envelope.getInt("version"))
+        assertEquals("activation_acknowledgement", envelope.getString("operation"))
+        assertEquals(0, envelope.getJSONObject("payload").length())
     }
 
     @Test
@@ -82,6 +96,23 @@ class MobileEnvelopeFormatTest {
         }
         assertThrows(MobileEnvelopeException::class.java) {
             MobileEnvelopeFormat.responseOutcome(201, "{\"outcome\":\"recorded\",\"extra\":true}".toByteArray())
+        }
+    }
+
+    @Test
+    fun activationAcknowledgementRequiresItsAuthenticatedOutcome() {
+        assertEquals(
+            "acknowledged",
+            MobileEnvelopeFormat.activationAcknowledgementOutcome(
+                201,
+                "{\"outcome\":\"acknowledged\"}".toByteArray(),
+            ),
+        )
+        assertThrows(MobileEnvelopeException::class.java) {
+            MobileEnvelopeFormat.activationAcknowledgementOutcome(
+                200,
+                "{\"outcome\":\"acknowledged\"}".toByteArray(),
+            )
         }
     }
 

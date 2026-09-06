@@ -28,6 +28,74 @@ final class MobileEnvelopeGatewayTest extends TestCase
         self::assertDatabaseCount('ledger_entries', 2);
     }
 
+    public function test_activation_installation_acknowledgement_is_encrypted_and_idempotent(): void
+    {
+        $installation = $this->installation()->forceFill([
+            'pairing_intent_id' => 'YWNrLWludGVudC0xMjM0NQ',
+        ]);
+        $installation->save();
+
+        $first = $this->postJson(
+            '/mobile/envelopes',
+            $this->envelope($installation, '1', [], 'activation_acknowledgement'),
+        );
+
+        $first->assertCreated()->assertHeader('cache-control', 'no-store, private');
+        self::assertSame(
+            ['outcome' => 'acknowledged'],
+            $this->decryptResponse($installation, '1', 201, $first->json()),
+        );
+        self::assertNotNull($installation->fresh()->activation_acknowledged_at);
+        self::assertSame(1, $installation->fresh()->mobile_replay_counter);
+        self::assertDatabaseCount('deposits', 0);
+
+        $replay = $this->postJson(
+            '/mobile/envelopes',
+            $this->envelope($installation, '2', [], 'activation_acknowledgement'),
+        );
+
+        $replay->assertCreated();
+        self::assertSame(
+            ['outcome' => 'acknowledged'],
+            $this->decryptResponse($installation, '2', 201, $replay->json()),
+        );
+        self::assertSame(2, $installation->fresh()->mobile_replay_counter);
+        self::assertDatabaseCount('deposits', 0);
+    }
+
+    public function test_activation_installation_cannot_submit_a_deposit_before_its_encrypted_acknowledgement(): void
+    {
+        $installation = $this->installation()->forceFill([
+            'pairing_intent_id' => 'YWNrLWludGVudC0xMjM0NQ',
+        ]);
+        $installation->save();
+
+        $this->postJson('/mobile/envelopes', $this->envelope($installation, '1', $this->depositPayload()))
+            ->assertNotFound()
+            ->assertExactJson(['code' => 'mobile_envelope_unavailable']);
+
+        self::assertSame(0, $installation->fresh()->mobile_replay_counter);
+        self::assertDatabaseCount('deposits', 0);
+    }
+
+    public function test_activation_acknowledgement_rejects_any_payload_without_advancing_its_counter(): void
+    {
+        $installation = $this->installation()->forceFill([
+            'pairing_intent_id' => 'YWNrLWludGVudC0xMjM0NQ',
+        ]);
+        $installation->save();
+
+        $this->postJson(
+            '/mobile/envelopes',
+            $this->envelope($installation, '1', ['unexpected' => 'value'], 'activation_acknowledgement'),
+        )
+            ->assertNotFound()
+            ->assertExactJson(['code' => 'mobile_envelope_unavailable']);
+
+        self::assertNull($installation->fresh()->activation_acknowledged_at);
+        self::assertSame(0, $installation->fresh()->mobile_replay_counter);
+    }
+
     public function test_android_v1_request_vector_decrypts_and_returns_an_encrypted_recorded_result(): void
     {
         $installation = new SourceInstallation;
@@ -205,10 +273,14 @@ final class MobileEnvelopeGatewayTest extends TestCase
     }
 
     /** @param array<string, int|string> $payload @return array<string, string|int> */
-    private function envelope(SourceInstallation $installation, string $counter, array $payload): array
-    {
+    private function envelope(
+        SourceInstallation $installation,
+        string $counter,
+        array $payload,
+        string $operation = 'deposit',
+    ): array {
         $nonce = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES);
-        $plaintext = json_encode(['version' => 1, 'operation' => 'deposit', 'payload' => $payload], JSON_THROW_ON_ERROR);
+        $plaintext = json_encode(['version' => 1, 'operation' => $operation, 'payload' => $payload], JSON_THROW_ON_ERROR);
         $ciphertext = sodium_crypto_aead_xchacha20poly1305_ietf_encrypt($plaintext, $this->requestAad($installation->id, $counter), $nonce, $installation->mobile_receive_key);
 
         return [

@@ -139,6 +139,48 @@ class GuardedTaskRunnerTest {
     }
 
     @Test
+    fun `timed out non interruptible operation cannot commit activation late`() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val timedOut = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val activated = AtomicInteger(0)
+        val runner = GuardedTaskRunner(
+            threads = 1,
+            queueCapacity = 1,
+            operationTimeoutMillis = 50,
+            isCurrent = { true },
+            deliver = { it() },
+        )
+
+        assertEquals(GuardedSubmitResult.accepted, runner.submitWithCommitFence<Unit>(1, { commit ->
+            started.countDown()
+            while (release.count > 0) {
+                try {
+                    release.await(10, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    // Native crypto may not observe cancellation promptly.
+                }
+            }
+            try {
+                commit.commit { activated.incrementAndGet() }
+            } finally {
+                finished.countDown()
+            }
+        }, {}, { error ->
+            if (error is GuardedTaskTimeoutException) timedOut.countDown()
+        }, { throw AssertionError("activation task unexpectedly denied") }))
+
+        assertTrue(started.await(1, TimeUnit.SECONDS))
+        assertTrue(timedOut.await(1, TimeUnit.SECONDS))
+        release.countDown()
+        assertTrue(finished.await(1, TimeUnit.SECONDS))
+
+        assertEquals(0, activated.get())
+        runner.close()
+    }
+
+    @Test
     fun `submission deadline starts before enqueue and queued mutation never runs late`() {
         val release = CountDownLatch(1)
         val firstStarted = CountDownLatch(1)

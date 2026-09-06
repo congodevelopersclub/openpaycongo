@@ -31,6 +31,7 @@ import com.congodeveloperclub.opencongopay.pairing.PairingQrScanGate
 import com.congodeveloperclub.opencongopay.pairing.PairingQrScanOutcome
 import com.congodeveloperclub.opencongopay.pairing.PairingActivationException
 import com.congodeveloperclub.opencongopay.pairing.MobileEnvelopeVault
+import com.congodeveloperclub.opencongopay.pairing.PairingDirectionalKeyVault
 import com.congodeveloperclub.opencongopay.pairing.PairingV2NativeCompletion
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -343,10 +344,16 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun handlePairingActivationCall(call: MethodCall, result: MethodChannel.Result) {
-        if (call.method != "consume") {
-            result.notImplemented()
-            return
+        when (call.method) {
+            "consume" -> consumePairingActivation(call, result)
+            "acknowledgementState" -> activationAcknowledgementState(call, result)
+            "sealAcknowledgement" -> sealActivationAcknowledgement(call, result)
+            "openAcknowledgement" -> openActivationAcknowledgement(call, result)
+            else -> result.notImplemented()
         }
+    }
+
+    private fun consumePairingActivation(call: MethodCall, result: MethodChannel.Result) {
         val arguments = call.arguments as? Map<*, *>
         val intent = arguments?.get("intent_id") as? ByteArray
         val nonce = arguments?.get("nonce") as? ByteArray
@@ -374,6 +381,90 @@ class MainActivity : FlutterFragmentActivity() {
                 ciphertext.fill(0)
             }
         }
+    }
+
+    private fun activationAcknowledgementState(call: MethodCall, result: MethodChannel.Result) {
+        if (call.arguments != null) {
+            result.error("recovery_required", "Pairing activation recovery is required", null)
+            return
+        }
+        pairingDirectionalKeyTasks.execute {
+            try {
+                val state = when (PairingDirectionalKeyVault(applicationContext).activationAcknowledgementState()) {
+                    null -> "none"
+                    false -> "pending"
+                    true -> "active"
+                }
+                mainHandler.post { result.success(state) }
+            } catch (_: Exception) {
+                mainHandler.post { result.error("recovery_required", "Pairing activation recovery is required", null) }
+            }
+        }
+    }
+
+    private fun sealActivationAcknowledgement(call: MethodCall, result: MethodChannel.Result) {
+        if (call.arguments != null) {
+            result.error("recovery_required", "Pairing activation recovery is required", null)
+            return
+        }
+        val generation = requireSmsGatewayAccess(result) ?: return
+        smsTasks.submit(
+            generation = generation,
+            operation = {
+                MobileEnvelopeVault(
+                    context = applicationContext,
+                    accessLease = accessGuard.lease(
+                        permissionGranted = {
+                            checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                        },
+                        expectedGeneration = generation,
+                    ),
+                ).sealActivationAcknowledgement()
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("recovery_required", "Pairing activation recovery is required", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
+    }
+
+    private fun openActivationAcknowledgement(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+        val installationId = arguments?.get("installation_id") as? String
+        val counter = arguments?.get("counter") as? String
+        val status = arguments?.get("status") as? Int
+        val nonce = arguments?.get("nonce") as? String
+        val ciphertext = arguments?.get("ciphertext") as? String
+        if (arguments == null || arguments.keys != setOf("installation_id", "counter", "status", "nonce", "ciphertext") ||
+            installationId == null || counter == null || status == null || nonce == null || ciphertext == null
+        ) {
+            result.error("recovery_required", "Pairing activation recovery is required", null)
+            return
+        }
+        val generation = requireSmsGatewayAccess(result) ?: return
+        smsTasks.submitWithCommitFence(
+            generation = generation,
+            operation = { commit ->
+                MobileEnvelopeVault(
+                    context = applicationContext,
+                    accessLease = accessGuard.lease(
+                        permissionGranted = {
+                            checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                        },
+                        expectedGeneration = generation,
+                    ),
+                    acknowledgementCommit = { action -> commit.commit(action) },
+                ).openActivationAcknowledgement(
+                    installationId,
+                    counter,
+                    status,
+                    nonce,
+                    ciphertext,
+                )
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("recovery_required", "Pairing activation recovery is required", null) },
+            onDenied = { deliverAccessDenied(result) },
+        )
     }
 
     private fun handleMobileEnvelopeCall(call: MethodCall, result: MethodChannel.Result) {

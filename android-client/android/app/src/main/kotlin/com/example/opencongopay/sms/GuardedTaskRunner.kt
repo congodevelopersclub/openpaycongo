@@ -15,6 +15,28 @@ import java.util.concurrent.atomic.AtomicReference
 internal enum class GuardedSubmitResult { accepted, busy }
 internal class GuardedTaskTimeoutException : Exception("outcome_unknown")
 internal class GuardedTaskBusyException : Exception("gateway_busy")
+internal class GuardedTaskCommitRejectedException : Exception()
+
+/** A single native mutation may cross this fence only before timeout or revocation. */
+internal class GuardedTaskCommitFence(
+    private val isCurrent: () -> Boolean,
+) {
+    private var expired = false
+    private var committed = false
+
+    @Synchronized
+    fun expire(): Boolean {
+        if (committed) return false
+        expired = true
+        return true
+    }
+
+    @Synchronized
+    fun <T> commit(action: () -> T): T {
+        if (expired || !isCurrent()) throw GuardedTaskCommitRejectedException()
+        return action().also { committed = true }
+    }
+}
 
 internal class GuardedTaskRunner(
     threads: Int = 1,
@@ -26,6 +48,7 @@ internal class GuardedTaskRunner(
     private data class Pending(
         val completed: AtomicBoolean,
         val onDenied: () -> Unit,
+        val commitFence: GuardedTaskCommitFence,
         val task: AtomicReference<Future<*>?> = AtomicReference(null),
         val deadline: AtomicReference<ScheduledFuture<*>?> = AtomicReference(null),
     )
@@ -56,9 +79,28 @@ internal class GuardedTaskRunner(
         onSuccess: (T) -> Unit,
         onFailure: (Throwable) -> Unit,
         onDenied: () -> Unit,
+    ): GuardedSubmitResult = submitWithCommitFence(
+        generation = generation,
+        operation = { _: GuardedTaskCommitFence -> operation() },
+        onSuccess = onSuccess,
+        onFailure = onFailure,
+        onDenied = onDenied,
+    )
+
+    @Synchronized
+    fun <T> submitWithCommitFence(
+        generation: Long,
+        operation: (GuardedTaskCommitFence) -> T,
+        onSuccess: (T) -> Unit,
+        onFailure: (Throwable) -> Unit,
+        onDenied: () -> Unit,
     ): GuardedSubmitResult {
         val id = nextId.incrementAndGet()
-        val request = Pending(AtomicBoolean(false), onDenied)
+        val request = Pending(
+            completed = AtomicBoolean(false),
+            onDenied = onDenied,
+            commitFence = GuardedTaskCommitFence { isCurrent(generation) },
+        )
         pending[id] = request
         fun complete(callback: () -> Unit) {
             if (!request.completed.compareAndSet(false, true)) return
@@ -76,6 +118,7 @@ internal class GuardedTaskRunner(
             request.deadline.set(
                 deadlines.schedule(
                     {
+                        if (!request.commitFence.expire()) return@schedule
                         complete {
                             if (isCurrent(generation)) {
                                 onFailure(GuardedTaskTimeoutException())
@@ -103,7 +146,7 @@ internal class GuardedTaskRunner(
                         return@submit
                     }
                     try {
-                        val value = operation()
+                        val value = operation(request.commitFence)
                         complete {
                             if (isCurrent(generation)) onSuccess(value) else onDenied()
                         }
@@ -129,6 +172,7 @@ internal class GuardedTaskRunner(
         pending.forEach { (id, request) ->
             if (request.completed.compareAndSet(false, true)) {
                 pending.remove(id)
+                request.commitFence.expire()
                 request.deadline.get()?.cancel(false)
                 request.task.get()?.cancel(true)
                 deliver(request.onDenied)
