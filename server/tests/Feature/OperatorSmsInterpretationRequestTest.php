@@ -73,7 +73,7 @@ final class OperatorSmsInterpretationRequestTest extends TestCase
 
         Sanctum::actingAs($installation, ['mobile:sync:write'], 'mobile');
         $this->postJson('/mobile/operator-sms/interpretation-requests', [
-            'record_id' => 'too-short',
+            'record_id' => 'short',
             'sender' => 'untrusted sender',
             'sms_body' => '',
             'received_at' => '2026-02-30T01:00:00Z',
