@@ -18,6 +18,14 @@ internal data class TrustedSmsRecord(
     val body: String,
 )
 
+internal enum class OperatorPaymentStructure { manual, gemma4 }
+internal data class OperatorPaymentProfileRecord(
+    val sender: String,
+    val provider: String,
+    val structure: OperatorPaymentStructure,
+    val template: String?,
+)
+
 internal enum class PersistResult { stored, duplicate, decided, faulted }
 internal enum class CaptureDecision { reviewed, rejected, processed }
 internal data class DecisionRecord(val decision: CaptureDecision, val decidedAtMillis: Long)
@@ -130,6 +138,7 @@ internal class AtomicSmsQueue(
     companion object {
         private const val SCHEMA = "v3"
         private const val MAX_RULES = 64
+        private const val MAX_OPERATOR_PROFILES = 64
         private const val DECISIONS_PER_SEGMENT = 64
         private val CURSOR = Regex("^v3:([0-9]{1,10}):([0-9]{1,2})$")
     }
@@ -139,6 +148,7 @@ internal class AtomicSmsQueue(
     private val decisionIndexDirectory = File(root, "decision-index")
     private val quarantineDirectory = File(root, "quarantine")
     private val rulesFile = File(root, "rules.enc")
+    private val operatorProfilesFile = File(root, "operator-payment-profiles.enc")
     private val faultFile = File(root, "fault.state")
     private val missFile = File(root, "miss.state")
     private val probeFile = File(root, "storage.probe")
@@ -194,6 +204,7 @@ internal class AtomicSmsQueue(
 
     @Synchronized
     fun clearTrustedSenders(): List<String> {
+        writeOperatorPaymentProfiles(emptyList())
         replaceTrustedSenders(emptyList())
         return emptyList()
     }
@@ -202,8 +213,44 @@ internal class AtomicSmsQueue(
     fun revokeTrustedSender(value: String): List<String> {
         val normalized = SenderRules.normalize(value) ?: throw IllegalArgumentException()
         val next = trustedSenders().filterNot { it == normalized }
+        writeOperatorPaymentProfiles(
+            operatorPaymentProfiles().filterNot { it.sender == normalized },
+        )
         replaceTrustedSenders(next)
         return next
+    }
+
+    /**
+     * Persists a profile only after its sender has been registered as trusted.
+     * A failed rule write may leave an unused profile behind, but can never
+     * enable capture: [operatorPaymentProfiles] filters against trusted rules.
+     */
+    @Synchronized
+    fun upsertOperatorPaymentProfile(profile: OperatorPaymentProfileRecord): List<OperatorPaymentProfileRecord> {
+        validateProfile(profile)
+        addTrustedSender(profile.sender)
+        val next = (operatorPaymentProfiles() + profile)
+            .associateBy(OperatorPaymentProfileRecord::sender)
+            .values
+            .sortedBy(OperatorPaymentProfileRecord::sender)
+        writeOperatorPaymentProfiles(next)
+        return next
+    }
+
+    @Synchronized
+    fun operatorPaymentProfiles(): List<OperatorPaymentProfileRecord> {
+        if (!operatorProfilesFile.exists()) return emptyList()
+        val trusted = trustedSenders().toSet()
+        return try {
+            val profiles = decodeOperatorPaymentProfiles(
+                rulesCrypto.decrypt("rules", "operator-payment-profiles", files.read(operatorProfilesFile)),
+            )
+            profiles.filter { it.sender in trusted }
+        } catch (error: Exception) {
+            files.quarantine(operatorProfilesFile, quarantineDirectory, SmsCiphertextDomain.rules)
+            recordFault(classify(error))
+            throw SmsStorageException(error)
+        }
     }
 
     @Synchronized
@@ -226,6 +273,67 @@ internal class AtomicSmsQueue(
             .filter(String::isNotEmpty)
         require(values.size <= MAX_RULES && values == values.distinct().sorted())
         return values.map { SenderRules.normalize(it) ?: throw IllegalArgumentException() }
+    }
+
+    private fun writeOperatorPaymentProfiles(values: List<OperatorPaymentProfileRecord>) {
+        require(values.size <= MAX_OPERATOR_PROFILES)
+        val canonical = values.sortedBy(OperatorPaymentProfileRecord::sender)
+        require(canonical.map(OperatorPaymentProfileRecord::sender).distinct().size == canonical.size)
+        canonical.forEach(::validateProfile)
+        val cleartext = ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.writeInt(1)
+                output.writeInt(canonical.size)
+                canonical.forEach { profile ->
+                    output.writeUTF(profile.sender)
+                    output.writeUTF(profile.provider)
+                    output.writeUTF(profile.structure.name)
+                    output.writeBoolean(profile.template != null)
+                    profile.template?.let(output::writeUTF)
+                }
+            }
+            bytes.toByteArray()
+        }
+        try {
+            files.writeAtomic(
+                operatorProfilesFile,
+                rulesCrypto.encrypt("rules", "operator-payment-profiles", cleartext),
+            )
+        } catch (error: Exception) {
+            recordFault(classify(error))
+            throw SmsStorageException(error)
+        }
+    }
+
+    private fun decodeOperatorPaymentProfiles(cleartext: ByteArray): List<OperatorPaymentProfileRecord> =
+        DataInputStream(ByteArrayInputStream(cleartext)).use { input ->
+            require(input.readInt() == 1)
+            val count = input.readInt()
+            require(count in 0..MAX_OPERATOR_PROFILES)
+            val profiles = List(count) {
+                val sender = input.readUTF()
+                val provider = input.readUTF()
+                val structure = OperatorPaymentStructure.valueOf(input.readUTF())
+                val template = if (input.readBoolean()) input.readUTF() else null
+                OperatorPaymentProfileRecord(sender, provider, structure, template).also(::validateProfile)
+            }
+            require(input.available() == 0)
+            require(profiles == profiles.sortedBy(OperatorPaymentProfileRecord::sender))
+            require(profiles.map(OperatorPaymentProfileRecord::sender).distinct().size == profiles.size)
+            profiles
+        }
+
+    private fun validateProfile(profile: OperatorPaymentProfileRecord) {
+        require(SenderRules.normalize(profile.sender) == profile.sender)
+        require(profile.provider.matches(Regex("^[A-Z0-9._-]{3,32}$")))
+        when (profile.structure) {
+            OperatorPaymentStructure.manual -> require(
+                profile.template != null && profile.template.isNotEmpty() &&
+                    profile.template.length <= 512 &&
+                    profile.template.toByteArray(StandardCharsets.UTF_8).size <= 2048,
+            )
+            OperatorPaymentStructure.gemma4 -> require(profile.template == null)
+        }
     }
 
     @Synchronized

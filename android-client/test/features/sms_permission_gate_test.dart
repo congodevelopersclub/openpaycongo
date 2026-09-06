@@ -151,6 +151,15 @@ final class _FakeSmsGateway implements SmsGatewayPort {
   Future<List<String>> revokeTrustedSender(String sender) async => const <String>[];
 
   @override
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async =>
+      const <NativeOperatorPaymentProfile>[];
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async => <NativeOperatorPaymentProfile>[profile];
+
+  @override
   Future<NativeCaptureHealth> captureHealth() async =>
       const NativeCaptureHealth(fault: null);
 

@@ -312,6 +312,29 @@ class AtomicSmsQueueTest {
     }
 
     @Test
+    fun `operator payment profile is encrypted durable and requires an exact trusted sender`() {
+        val root = temporary.newFolder("operator-profile")
+        val queue = queue(root)
+        val profile = OperatorPaymentProfileRecord(
+            sender = "ORANGE",
+            provider = "ORANGE_MONEY",
+            structure = OperatorPaymentStructure.manual,
+            template = "Paid {amount} {currency} ref {reference}",
+        )
+
+        assertEquals(listOf(profile), queue.upsertOperatorPaymentProfile(profile))
+        assertEquals(listOf("ORANGE"), queue.trustedSenders())
+        assertEquals(listOf(profile), queue(root).operatorPaymentProfiles())
+        assertTrue(File(root, "operator-payment-profiles.enc").isFile)
+        assertFalse(File(root, "operator-payment-profiles.enc").readText().contains("ORANGE_MONEY"))
+
+        queue.revokeTrustedSender("ORANGE")
+        assertTrue(queue.operatorPaymentProfiles().isEmpty())
+        queue.addTrustedSender("ORANGE")
+        assertTrue(queue.operatorPaymentProfiles().isEmpty())
+    }
+
+    @Test
     fun appendOnlyDecisionJournalNeverBlocksLaterCapture() {
         val queue = queue(
             root = temporary.newFolder("decision-capacity"),

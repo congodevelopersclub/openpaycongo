@@ -482,7 +482,7 @@ void main() {
     },
   );
 
-  testWidgets('exact trusted rule is stored through secure gateway callback', (
+  testWidgets('operator payment profile is stored through secure gateway callback', (
     WidgetTester tester,
   ) async {
     final _FakeGateway gateway = _FakeGateway();
@@ -494,10 +494,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsNWidgets(2));
+    expect(find.byType(TextField), findsNWidgets(3));
     await tester.enterText(find.byType(TextField).at(0), 'ORANGE');
+    await tester.enterText(find.byType(TextField).at(1), 'ORANGE_MONEY');
     await tester.enterText(
-      find.byType(TextField).at(1),
+      find.byType(TextField).at(2),
       'Paid {amount} {currency} ref {reference}',
     );
     await tester.drag(find.byType(ListView), const Offset(0, -420));
@@ -505,6 +506,7 @@ void main() {
     await tester.tap(find.text('Store trusted rule securely'));
     await tester.pump();
     expect(gateway.trustedSenders, <String>['ORANGE']);
+    expect(gateway.operatorProfiles.single.provider, 'ORANGE_MONEY');
   });
 
   testWidgets('rule add never claims reload when reconciliation fails', (
@@ -521,8 +523,9 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), 'ORANGE');
+    await tester.enterText(find.byType(TextField).at(1), 'ORANGE_MONEY');
     await tester.enterText(
-      find.byType(TextField).at(1),
+      find.byType(TextField).at(2),
       'Paid {amount} {currency} ref {reference}',
     );
     await tester.tap(find.text('Store trusted rule securely'));
@@ -684,6 +687,8 @@ final class _FakeGateway implements SmsGatewayPort {
   final List<NativeCaptureDecision> decisions = <NativeCaptureDecision>[];
   int probeCount = 0;
   List<String> trustedSenders;
+  List<NativeOperatorPaymentProfile> operatorProfiles =
+      <NativeOperatorPaymentProfile>[];
 
   @override
   Future<NativeCaptureHealth> captureHealth() async {
@@ -767,6 +772,23 @@ final class _FakeGateway implements SmsGatewayPort {
         .where((String value) => value != sender)
         .toList();
     return List<String>.of(trustedSenders);
+  }
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async =>
+      List<NativeOperatorPaymentProfile>.of(operatorProfiles);
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async {
+    if (failAdd) {
+      mutationFailed = true;
+      throw StateError('add timeout');
+    }
+    trustedSenders = (<String>{...trustedSenders, profile.sender}.toList()..sort());
+    operatorProfiles = <NativeOperatorPaymentProfile>[profile];
+    return List<NativeOperatorPaymentProfile>.of(operatorProfiles);
   }
 
   @override

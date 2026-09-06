@@ -18,6 +18,8 @@ import com.congodeveloperclub.opencongopay.sms.InvalidDecisionCursorException
 import com.congodeveloperclub.opencongopay.sms.LegacySmsMigrationRequiredException
 import com.congodeveloperclub.opencongopay.sms.OutboxRecoveryRequiredException
 import com.congodeveloperclub.opencongopay.sms.OutboxStorageException
+import com.congodeveloperclub.opencongopay.sms.OperatorPaymentProfileRecord
+import com.congodeveloperclub.opencongopay.sms.OperatorPaymentStructure
 import com.congodeveloperclub.opencongopay.sms.PaymentOutboxVaultProvider
 import com.congodeveloperclub.opencongopay.sms.RecoveryRequiredException
 import com.congodeveloperclub.opencongopay.sms.SmsAccessDenial
@@ -129,6 +131,8 @@ class MainActivity : FlutterFragmentActivity() {
             "listTrustedSenders" -> listTrustedSenders(result)
             "clearTrustedSenders" -> clearTrustedSenders(result)
             "revokeTrustedSender" -> revokeTrustedSender(call, result)
+            "upsertOperatorPaymentProfile" -> upsertOperatorPaymentProfile(call, result)
+            "listOperatorPaymentProfiles" -> listOperatorPaymentProfiles(result)
             "drainInbox" -> drainInbox(result)
             "captureHealth" -> captureHealth(result)
             "probeStorage" -> probeStorage(result)
@@ -567,6 +571,53 @@ class MainActivity : FlutterFragmentActivity() {
             onFailure = { result.error("secure_storage_failure", "Trusted sender revoke outcome is unknown; reload", null) },
         )
     }
+
+    private fun upsertOperatorPaymentProfile(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+        val expectedKeys = setOf("sender", "provider", "structure", "template")
+        val sender = arguments?.get("sender") as? String
+        val provider = arguments?.get("provider") as? String
+        val structure = when (arguments?.get("structure") as? String) {
+            "manual" -> OperatorPaymentStructure.manual
+            "gemma4" -> OperatorPaymentStructure.gemma4
+            else -> null
+        }
+        val template = arguments?.get("template") as? String
+        if (arguments == null || arguments.keys.toSet() != expectedKeys || sender == null || provider == null || structure == null ||
+            (arguments.containsKey("template") && arguments["template"] != null && template == null)
+        ) {
+            result.error("invalid_operator_profile", "Operator payment profile is invalid", null)
+            return
+        }
+        runSmsTask(
+            result,
+            operation = {
+                SmsVaultProvider.get(applicationContext).upsertOperatorPaymentProfile(
+                    OperatorPaymentProfileRecord(sender, provider, structure, template),
+                ).map(::operatorPaymentProfileForFlutter)
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("secure_storage_failure", "Operator payment profile outcome is unknown; reload", null) },
+        )
+    }
+
+    private fun listOperatorPaymentProfiles(result: MethodChannel.Result) {
+        runSmsTask(
+            result,
+            operation = {
+                SmsVaultProvider.get(applicationContext).operatorPaymentProfiles().map(::operatorPaymentProfileForFlutter)
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("secure_storage_failure", "Operator payment profiles could not be read", null) },
+        )
+    }
+
+    private fun operatorPaymentProfileForFlutter(profile: OperatorPaymentProfileRecord): Map<String, Any?> = mapOf(
+        "sender" to profile.sender,
+        "provider" to profile.provider,
+        "structure" to profile.structure.name,
+        "template" to profile.template,
+    )
 
     private fun drainInbox(result: MethodChannel.Result) {
         runSmsTask(

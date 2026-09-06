@@ -61,6 +61,21 @@ final class NativeSmsRecord {
   final String body;
 }
 
+enum NativeOperatorPaymentStructure { manual, gemma4 }
+
+final class NativeOperatorPaymentProfile {
+  const NativeOperatorPaymentProfile({
+    required this.sender,
+    required this.provider,
+    required this.structure,
+    this.template,
+  });
+  final String sender;
+  final String provider;
+  final NativeOperatorPaymentStructure structure;
+  final String? template;
+}
+
 abstract interface class SmsGatewayPort {
   Future<SmsAccessState> permissionState();
   Future<SmsAccessState> requestPermission();
@@ -71,6 +86,10 @@ abstract interface class SmsGatewayPort {
   Future<List<String>> listTrustedSenders();
   Future<List<String>> clearTrustedSenders();
   Future<List<String>> revokeTrustedSender(String sender);
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  );
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles();
   Future<NativeCaptureHealth> captureHealth();
   Future<bool> probeStorage();
   Future<NativeDecisionPage> exportDecisions({int limit = 100, String? cursor});

@@ -10,6 +10,8 @@ enum PaymentInboxFeedback {
   none,
   invalidSender,
   invalidTemplate,
+  invalidProvider,
+  invalidOperatorProfile,
   ruleSaved,
   inboxUnavailable,
   legacyRecoveryRequired,
@@ -31,6 +33,7 @@ final class PaymentInboxState {
     this.ready = false,
     this.authority = PaymentInboxAuthority.loading,
     this.trustedSenders = const <SenderIdentity>[],
+    this.operatorProfiles = const <NativeOperatorPaymentProfile>[],
     this.records = const <NativeSmsRecord>[],
     this.health,
     this.busyRecordIds = const <String>{},
@@ -40,6 +43,7 @@ final class PaymentInboxState {
   final bool ready;
   final PaymentInboxAuthority authority;
   final List<SenderIdentity> trustedSenders;
+  final List<NativeOperatorPaymentProfile> operatorProfiles;
   final List<NativeSmsRecord> records;
   final NativeCaptureHealth? health;
   final Set<String> busyRecordIds;
@@ -49,6 +53,7 @@ final class PaymentInboxState {
     bool? ready,
     PaymentInboxAuthority? authority,
     List<SenderIdentity>? trustedSenders,
+    List<NativeOperatorPaymentProfile>? operatorProfiles,
     List<NativeSmsRecord>? records,
     NativeCaptureHealth? health,
     bool clearHealth = false,
@@ -58,6 +63,7 @@ final class PaymentInboxState {
     ready: ready ?? this.ready,
     authority: authority ?? this.authority,
     trustedSenders: trustedSenders ?? this.trustedSenders,
+    operatorProfiles: operatorProfiles ?? this.operatorProfiles,
     records: records ?? this.records,
     health: clearHealth ? null : health ?? this.health,
     busyRecordIds: busyRecordIds ?? this.busyRecordIds,
@@ -89,6 +95,20 @@ final class PaymentInboxTrustedSenderSaveRequested extends PaymentInboxEvent {
 
   final String sender;
   final String template;
+}
+
+final class PaymentInboxOperatorProfileSaveRequested extends PaymentInboxEvent {
+  const PaymentInboxOperatorProfileSaveRequested({
+    required this.sender,
+    required this.provider,
+    required this.structure,
+    this.template,
+  });
+
+  final String sender;
+  final String provider;
+  final NativeOperatorPaymentStructure structure;
+  final String? template;
 }
 
 final class PaymentInboxTrustedSenderRevoked extends PaymentInboxEvent {
@@ -141,6 +161,7 @@ final class PaymentInboxBloc
     PaymentInboxReloadRequested() => _reloadRequested(event, emit),
     PaymentInboxStorageProbeRequested() => _probeStorage(event, emit),
     PaymentInboxTrustedSenderSaveRequested() => _saveRule(event, emit),
+    PaymentInboxOperatorProfileSaveRequested() => _saveOperatorProfile(event, emit),
     PaymentInboxTrustedSenderRevoked() => _revokeRule(event, emit),
     PaymentInboxTrustedSendersCleared() => _clearRules(event, emit),
     PaymentInboxDecisionRequested() => _commitDecision(event, emit),
@@ -171,6 +192,15 @@ final class PaymentInboxBloc
       final List<SenderIdentity> trustedSenders = _decodeTrustedSenders(
         storedSenders,
       );
+      final List<NativeOperatorPaymentProfile> operatorProfiles =
+          await gateway.listOperatorPaymentProfiles();
+      if (operatorProfiles.any(
+        (NativeOperatorPaymentProfile profile) =>
+            !trustedSenders.any((SenderIdentity sender) =>
+                sender.value == profile.sender),
+      )) {
+        throw const FormatException('profile_without_trusted_sender');
+      }
       final NativeCaptureHealth health = await gateway.captureHealth();
       final bool blocksRead =
           health.fault == CaptureFault.corruption ||
@@ -184,6 +214,7 @@ final class PaymentInboxBloc
           ready: true,
           authority: PaymentInboxAuthority.authoritative,
           trustedSenders: trustedSenders,
+          operatorProfiles: operatorProfiles,
           records: records,
           health: health,
           feedback: feedback,
@@ -237,6 +268,67 @@ final class PaymentInboxBloc
     }
     try {
       await gateway.addTrustedSender(sender.value);
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
+      );
+      emit(
+        state.copyWith(
+          feedback: reloaded
+              ? PaymentInboxFeedback.ruleSaved
+              : PaymentInboxFeedback.ruleAddReloadFailed,
+        ),
+      );
+    } on Object {
+      final bool reloaded = await _reload(
+        emit,
+        feedback: PaymentInboxFeedback.none,
+      );
+      emit(
+        state.copyWith(
+          feedback: reloaded
+              ? PaymentInboxFeedback.ruleAddReloaded
+              : PaymentInboxFeedback.ruleAddReloadFailed,
+        ),
+      );
+    }
+  }
+
+  Future<void> _saveOperatorProfile(
+    PaymentInboxOperatorProfileSaveRequested event,
+    Emitter<PaymentInboxState> emit,
+  ) async {
+    final SenderIdentity? sender = SenderIdentity.fromOsMetadata(event.sender);
+    if (sender == null) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidSender));
+      return;
+    }
+    if (!RegExp(r'^[A-Z0-9._-]{3,32}$').hasMatch(event.provider)) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidProvider));
+      return;
+    }
+    final String? template = event.template?.trim();
+    if (event.structure == NativeOperatorPaymentStructure.manual &&
+        (template == null || !PaymentTemplate(template).valid)) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidTemplate));
+      return;
+    }
+    if (event.structure == NativeOperatorPaymentStructure.gemma4 &&
+        template != null) {
+      emit(state.copyWith(feedback: PaymentInboxFeedback.invalidOperatorProfile));
+      return;
+    }
+    try {
+      await gateway.upsertOperatorPaymentProfile(
+        NativeOperatorPaymentProfile(
+          sender: sender.value,
+          provider: event.provider,
+          structure: event.structure,
+          template: event.structure == NativeOperatorPaymentStructure.manual
+              ? template
+              : null,
+        ),
+      );
       final bool reloaded = await _reload(
         emit,
         feedback: PaymentInboxFeedback.none,

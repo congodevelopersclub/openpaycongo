@@ -57,6 +57,8 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
   final TextEditingController _template = TextEditingController(
     text: '{amount} {currency} {reference}',
   );
+  final TextEditingController _provider = TextEditingController();
+  bool _useGemma4 = false;
   bool _showSetup = false;
   late final PaymentInboxBloc _inboxBloc =
       widget.inboxBloc ?? PaymentInboxBloc(gateway: widget.gateway);
@@ -72,6 +74,7 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
   void dispose() {
     _sender.dispose();
     _template.dispose();
+    _provider.dispose();
     if (_ownsInboxBloc) _inboxBloc.close();
     super.dispose();
   }
@@ -215,7 +218,8 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                       inbox.trustedSenders.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 12),
                     _TrustedRuleStatus(
-                      senders: inbox.trustedSenders,
+                        senders: inbox.trustedSenders,
+                        profiles: inbox.operatorProfiles,
                       onRevoke: (SenderIdentity sender) async => _inboxBloc.add(
                         PaymentInboxTrustedSenderRevoked(sender),
                       ),
@@ -228,13 +232,21 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                     const SizedBox(height: 20),
                     _SetupCard(
                       sender: _sender,
+                      provider: _provider,
                       template: _template,
+                      useGemma4: _useGemma4,
+                      onUseGemma4Changed: (bool value) =>
+                          setState(() => _useGemma4 = value),
                       error: _setupFeedbackMessage(inbox.feedback),
                       trustedSenders: inbox.trustedSenders,
                       onSave: () async => _inboxBloc.add(
-                        PaymentInboxTrustedSenderSaveRequested(
+                        PaymentInboxOperatorProfileSaveRequested(
                           sender: _sender.text,
-                          template: _template.text,
+                          provider: _provider.text.trim(),
+                          structure: _useGemma4
+                              ? NativeOperatorPaymentStructure.gemma4
+                              : NativeOperatorPaymentStructure.manual,
+                          template: _useGemma4 ? null : _template.text,
                         ),
                       ),
                     ),
@@ -316,6 +328,10 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       'Use an exact E.164 number or 3-11 character capital ASCII sender ID.',
     PaymentInboxFeedback.invalidTemplate =>
       'Template uses only {amount}, {currency}, {reference}.',
+    PaymentInboxFeedback.invalidProvider =>
+      'Provider uses 3-32 uppercase letters, numbers, dots, underscores or hyphens.',
+    PaymentInboxFeedback.invalidOperatorProfile =>
+      'Gemma 4 profiles do not store a deterministic template.',
     _ => null,
   };
 
@@ -645,13 +661,19 @@ final class _GemmaStatusCard extends StatelessWidget {
 final class _SetupCard extends StatelessWidget {
   const _SetupCard({
     required this.sender,
+    required this.provider,
     required this.template,
+    required this.useGemma4,
+    required this.onUseGemma4Changed,
     required this.error,
     required this.trustedSenders,
     required this.onSave,
   });
   final TextEditingController sender;
+  final TextEditingController provider;
   final TextEditingController template;
+  final bool useGemma4;
+  final ValueChanged<bool> onUseGemma4Changed;
   final String? error;
   final List<SenderIdentity> trustedSenders;
   final Future<void> Function() onSave;
@@ -679,13 +701,32 @@ final class _SetupCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
+           TextField(
+              controller: provider,
+              decoration: const InputDecoration(
+                labelText: 'Canonical provider',
+                hintText: 'ORANGE_MONEY',
+                helperText: 'Never inferred from the SMS sender.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: useGemma4,
+              onChanged: onUseGemma4Changed,
+              title: const Text('Use Gemma 4 assisted interpretation'),
+              subtitle: const Text(
+                'For a changed provider format. Every proposal needs review before hand-off.',
+              ),
+            ),
+            if (!useGemma4)
+              TextField(
             controller: template,
             decoration: const InputDecoration(
               labelText: 'Template',
               helperText: 'Only {amount}, {currency}, {reference}',
             ),
-          ),
+              ),
           if (error != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -715,10 +756,12 @@ final class _SetupCard extends StatelessWidget {
 final class _TrustedRuleStatus extends StatelessWidget {
   const _TrustedRuleStatus({
     required this.senders,
+    required this.profiles,
     required this.onRevoke,
     required this.onClear,
   });
   final List<SenderIdentity> senders;
+  final List<NativeOperatorPaymentProfile> profiles;
   final Future<void> Function(SenderIdentity sender) onRevoke;
   final Future<void> Function() onClear;
   @override
@@ -745,6 +788,13 @@ final class _TrustedRuleStatus extends StatelessWidget {
                   child: const Text('Revoke'),
                 ),
               ],
+            ),
+          for (final NativeOperatorPaymentProfile profile in profiles)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${profile.sender}: ${profile.provider} (${profile.structure.name})',
+              ),
             ),
           TextButton(
             onPressed: onClear,

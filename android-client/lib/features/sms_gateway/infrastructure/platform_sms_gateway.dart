@@ -87,6 +87,31 @@ final class PlatformSmsGateway implements SmsGatewayPort {
   }
 
   @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async {
+    final List<Object?>? values = await _channel.invokeMethod<List<Object?>>(
+      'upsertOperatorPaymentProfile',
+      _encodeProfile(profile),
+    );
+    if (values == null) {
+      throw const FormatException('invalid_operator_payment_profiles');
+    }
+    return _operatorPaymentProfiles(values);
+  }
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async {
+    final List<Object?>? values = await _channel.invokeMethod<List<Object?>>(
+      'listOperatorPaymentProfiles',
+    );
+    if (values == null) {
+      throw const FormatException('invalid_operator_payment_profiles');
+    }
+    return _operatorPaymentProfiles(values);
+  }
+
+  @override
   Future<NativeCaptureHealth> captureHealth() async {
     final Map<Object?, Object?>? value = await _channel
         .invokeMethod<Map<Object?, Object?>>('captureHealth');
@@ -333,6 +358,91 @@ final class PlatformSmsGateway implements SmsGatewayPort {
       throw const FormatException('invalid_trusted_senders');
     }
     return List<String>.unmodifiable(result);
+  }
+
+  static Map<String, Object?> _encodeProfile(
+    NativeOperatorPaymentProfile profile,
+  ) {
+    if (!_senderPattern.hasMatch(profile.sender) ||
+        !RegExp(r'^[A-Z0-9._-]{3,32}$').hasMatch(profile.provider) ||
+        (profile.structure == NativeOperatorPaymentStructure.manual &&
+            (profile.template == null ||
+                profile.template!.isEmpty ||
+                profile.template!.length > 512 ||
+                utf8.encode(profile.template!).length > 2048)) ||
+        (profile.structure == NativeOperatorPaymentStructure.gemma4 &&
+            profile.template != null)) {
+      throw const FormatException('invalid_operator_payment_profile');
+    }
+    return <String, Object?>{
+      'sender': profile.sender,
+      'provider': profile.provider,
+      'structure': profile.structure.name,
+      'template': profile.template,
+    };
+  }
+
+  static List<NativeOperatorPaymentProfile> _operatorPaymentProfiles(
+    List<Object?> values,
+  ) {
+    if (values.length > 64) {
+      throw const FormatException('invalid_operator_payment_profiles');
+    }
+    final List<NativeOperatorPaymentProfile> profiles = values
+        .map(_decodeOperatorPaymentProfile)
+        .toList(growable: false);
+    final List<String> senders = profiles
+        .map((NativeOperatorPaymentProfile profile) => profile.sender)
+        .toList(growable: false);
+    final List<String> canonical = List<String>.of(senders)..sort();
+    if (senders.toSet().length != senders.length || !_sameStrings(senders, canonical)) {
+      throw const FormatException('invalid_operator_payment_profiles');
+    }
+    return List<NativeOperatorPaymentProfile>.unmodifiable(profiles);
+  }
+
+  static NativeOperatorPaymentProfile _decodeOperatorPaymentProfile(
+    Object? value,
+  ) {
+    if (value is! Map<Object?, Object?> ||
+        !_hasExactKeys(value, const <Object?>{
+          'sender',
+          'provider',
+          'structure',
+          'template',
+        })) {
+      throw const FormatException('invalid_operator_payment_profile');
+    }
+    final Object? sender = value['sender'];
+    final Object? provider = value['provider'];
+    final Object? structureValue = value['structure'];
+    final Object? template = value['template'];
+    final NativeOperatorPaymentStructure? structure = switch (structureValue) {
+      'manual' => NativeOperatorPaymentStructure.manual,
+      'gemma4' => NativeOperatorPaymentStructure.gemma4,
+      _ => null,
+    };
+    if (sender is! String ||
+        !_senderPattern.hasMatch(sender) ||
+        provider is! String ||
+        !RegExp(r'^[A-Z0-9._-]{3,32}$').hasMatch(provider) ||
+        structure == null ||
+        template is! String? ||
+        (structure == NativeOperatorPaymentStructure.manual &&
+            (template == null ||
+                template.isEmpty ||
+                template.length > 512 ||
+                utf8.encode(template).length > 2048)) ||
+        (structure == NativeOperatorPaymentStructure.gemma4 &&
+            template != null)) {
+      throw const FormatException('invalid_operator_payment_profile');
+    }
+    return NativeOperatorPaymentProfile(
+      sender: sender,
+      provider: provider,
+      structure: structure,
+      template: template,
+    );
   }
 
   static bool _sameStrings(List<String> left, List<String> right) {

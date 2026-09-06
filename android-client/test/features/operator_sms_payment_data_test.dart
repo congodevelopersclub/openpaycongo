@@ -1,7 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/payment_inbox/domain/operator_sms_payment_data.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_payment_adapter.dart';
 import 'package:opencongopay/features/payment_outbox/domain/payment_outbox.dart';
+import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
 
 void main() {
   final DateTime receivedAt = DateTime.utc(2026, 9, 6, 12);
@@ -114,6 +116,33 @@ void main() {
     expect(
       (accepted as PaymentDataReadyForPush).data.envelope.provider,
       'ORANGE_MONEY',
+    );
+  });
+
+  test('guarded native inbox and profile records become pushable data together', () {
+    final OperatorSmsPaymentData result = OperatorSmsPaymentAdapter(
+      now: () => receivedAt,
+    ).interpret(
+      record: NativeSmsRecord(
+        id: 'e' * 43,
+        sender: 'ORANGE',
+        receivedAt: receivedAt,
+        segments: 1,
+        body: 'Paid 12.50 USD ref REF-1234',
+      ),
+      profile: const NativeOperatorPaymentProfile(
+        sender: 'ORANGE',
+        provider: 'ORANGE_MONEY',
+        structure: NativeOperatorPaymentStructure.manual,
+        template: 'Paid {amount} {currency} ref {reference}',
+      ),
+      scope: scope,
+    );
+
+    expect(result, isA<PaymentDataReadyForPush>());
+    expect(
+      (result as PaymentDataReadyForPush).data.envelope.providerReference,
+      'REF-1234',
     );
   });
 }
