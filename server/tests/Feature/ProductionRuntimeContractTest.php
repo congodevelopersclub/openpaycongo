@@ -163,7 +163,7 @@ final class ProductionRuntimeContractTest extends TestCase
 
     public function test_private_gemma_profile_remains_internal_and_capacity_bounded_for_sms_review(): void
     {
-        $profile = file_get_contents(dirname(base_path()).'/compose.gemma.yaml');
+        $profile = file_get_contents(file_exists('/compose.gemma.yaml') ? '/compose.gemma.yaml' : dirname(base_path()).'/compose.gemma.yaml');
         $operations = file_get_contents('/docs/operations.md');
 
         self::assertIsString($profile);
