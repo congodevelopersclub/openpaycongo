@@ -145,6 +145,37 @@ void main() {
       'REF-1234',
     );
   });
+
+  test('Gemma native record adapter emits a confirmation-gated proposal', () async {
+    final OperatorSmsPaymentData proposal = await OperatorSmsPaymentAdapter(
+      now: () => receivedAt,
+    ).interpretWithGemma(
+      record: NativeSmsRecord(
+        id: 'f' * 43,
+        sender: 'ORANGE',
+        receivedAt: receivedAt,
+        segments: 1,
+        body: 'Format changed, paid twelve dollars and fifty cents, ref REF-1234',
+      ),
+      profile: const NativeOperatorPaymentProfile(
+        sender: 'ORANGE',
+        provider: 'ORANGE_MONEY',
+        structure: NativeOperatorPaymentStructure.gemma4,
+      ),
+      scope: scope,
+      factory: Gemma4PaymentDataFactory(
+        BoundedProposalRunner(
+          port: _GemmaPort(
+            '{"amount_minor":1250,"currency":"USD","reference":"REF-1234","provider":"ORANGE","confidence":0.99}',
+          ),
+          clock: _FixedClock(receivedAt),
+        ),
+      ),
+    );
+
+    expect(proposal, isA<PaymentDataNeedsReview>());
+    expect((proposal as PaymentDataNeedsReview).proposal, isNotNull);
+  });
 }
 
 final class _FixedClock implements Clock {
