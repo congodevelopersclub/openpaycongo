@@ -20,16 +20,16 @@ return new class extends Migration
 
         Schema::create('developer_application_credential_audits', function (Blueprint $table): void {
             $table->uuid('id')->primary();
-            $table->uuid('organization_id')->index();
-            $table->uuid('developer_application_id')->index();
-            $table->uuid('oauth_client_id')->index();
+            $table->uuid('organization_id')->index('dev_app_cred_audits_org_idx');
+            $table->uuid('developer_application_id')->index('dev_app_cred_audits_app_idx');
+            $table->uuid('oauth_client_id')->index('dev_app_cred_audits_client_idx');
             $table->foreignId('actor_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('actor_user_identifier', 64);
             $table->string('action', 32);
             $table->json('scopes');
             $table->unsignedBigInteger('organization_sequence');
             $table->timestamp('created_at', 6)->useCurrent();
-            $table->unique(['organization_id', 'organization_sequence']);
+            $table->unique(['organization_id', 'organization_sequence'], 'dev_app_cred_audits_org_seq_unique');
         });
     }
 

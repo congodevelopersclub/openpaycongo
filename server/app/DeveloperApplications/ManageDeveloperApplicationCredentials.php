@@ -9,6 +9,7 @@ use App\Models\DeveloperApplicationCredentialAudit;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Passport\Client;
@@ -173,8 +174,16 @@ final class ManageDeveloperApplicationCredentials
             ->lockForUpdate()
             ->firstOrFail();
 
-        return ((int) DeveloperApplicationCredentialAudit::query()
+        return ((int) $this->auditSequenceQuery($organizationId)
+            ->value('organization_sequence')) + 1;
+    }
+
+    /** @return Builder<DeveloperApplicationCredentialAudit> */
+    private function auditSequenceQuery(string $organizationId): Builder
+    {
+        return DeveloperApplicationCredentialAudit::query()
             ->where('organization_id', $organizationId)
-            ->max('organization_sequence')) + 1;
+            ->orderByDesc('organization_sequence')
+            ->lockForUpdate();
     }
 }

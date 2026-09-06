@@ -14,11 +14,13 @@ use App\Security\FinancialOperatorMfaSession;
 use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Passport\Client;
 use Livewire\Livewire;
 use ReflectionClass;
+use ReflectionMethod;
 use Tests\TestCase;
 
 final class DeveloperApplicationCredentialsTest extends TestCase
@@ -246,6 +248,39 @@ final class DeveloperApplicationCredentialsTest extends TestCase
                 ->pluck('organization_sequence')
                 ->all(),
         );
+    }
+
+    public function test_credential_audit_migration_uses_portable_index_names(): void
+    {
+        $migration = file_get_contents(database_path('migrations/2026_09_09_000000_manage_developer_application_credentials.php'));
+        self::assertIsString($migration);
+
+        foreach ([
+            'dev_app_cred_audits_org_idx',
+            'dev_app_cred_audits_app_idx',
+            'dev_app_cred_audits_client_idx',
+            'dev_app_cred_audits_org_seq_unique',
+        ] as $name) {
+            self::assertLessThanOrEqual(64, strlen($name));
+            self::assertStringContainsString("'" . $name . "'", $migration);
+        }
+
+        self::assertStringNotContainsString("->unique(['organization_id', 'organization_sequence']);", $migration);
+    }
+
+    public function test_audit_sequence_read_uses_a_current_locking_query(): void
+    {
+        $method = new ReflectionMethod(ManageDeveloperApplicationCredentials::class, 'auditSequenceQuery');
+        $query = $method->invoke(app(ManageDeveloperApplicationCredentials::class), '00000000-0000-4000-8000-000000000208');
+        self::assertInstanceOf(Builder::class, $query);
+
+        $baseQuery = $query->getQuery();
+
+        self::assertTrue($baseQuery->lock);
+        self::assertSame('developer_application_credential_audits', $baseQuery->from);
+        self::assertSame('organization_id', $baseQuery->wheres[0]['column']);
+        self::assertSame('organization_sequence', $baseQuery->orders[0]['column']);
+        self::assertSame('desc', $baseQuery->orders[0]['direction']);
     }
 
     private function financialOperator(string $organizationId): User
