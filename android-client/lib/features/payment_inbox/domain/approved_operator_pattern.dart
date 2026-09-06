@@ -69,7 +69,9 @@ final class DeveloperApprovedOperatorPaymentPatternVerifier {
         SenderIdentity.fromOsMetadata(sender) == null ||
         !PaymentTemplate(template).valid || version <= 0 ||
         approvedAt == null || expiresAt == null || !expiresAt.isAfter(approvedAt) ||
-        !expiresAt.isAfter(now.toUtc()) || signature == null) return null;
+        !expiresAt.isAfter(now.toUtc()) || signature == null) {
+      return null;
+    }
     final bool valid;
     try {
       valid = await Ed25519().verify(
@@ -108,34 +110,52 @@ final class DeveloperApprovedOperatorPaymentPatternVerifier {
 
   Map<String, Object?>? _fields(String input) {
     final Object value;
-    try { value = jsonDecode(input); } on FormatException { return null; }
-    if (value is! Map<Object?, Object?> || value.length != _keys.length) return null;
+    try {
+      value = jsonDecode(input);
+    } on FormatException {
+      return null;
+    }
+    if (value is! Map<Object?, Object?> || value.length != _keys.length) {
+      return null;
+    }
     final Map<String, Object?> result = <String, Object?>{};
     for (final MapEntry<Object?, Object?> entry in value.entries) {
-      if (entry.key is! String || !_keys.contains(entry.key)) return null;
+      if (entry.key is! String || !_keys.contains(entry.key)) {
+        return null;
+      }
       result[entry.key! as String] = entry.value;
     }
     if (result['schema_version'] is! String || result['provider'] is! String ||
         result['sender'] is! String || result['template'] is! String ||
         result['pattern_version'] is! int || result['approved_at'] is! String ||
-        result['expires_at'] is! String || result['signature'] is! String) return null;
+        result['expires_at'] is! String || result['signature'] is! String) {
+      return null;
+    }
     return result;
   }
 
   DateTime? _time(String value) {
-    if (!_timestamp.hasMatch(value)) return null;
+    if (!_timestamp.hasMatch(value)) {
+      return null;
+    }
     try {
       final DateTime parsed = DateTime.parse(value).toUtc();
       return parsed.toIso8601String().replaceFirst('.000Z', 'Z') == value ? parsed : null;
-    } on FormatException { return null; }
+    } on FormatException {
+      return null;
+    }
   }
 
   Uint8List? _signatureBytes(String value) {
-    if (!_signature.hasMatch(value)) return null;
+    if (!_signature.hasMatch(value)) {
+      return null;
+    }
     try {
       final Uint8List bytes = Uint8List.fromList(base64Url.decode(base64Url.normalize(value)));
       return bytes.length == 64 && base64UrlEncode(bytes).replaceAll('=', '') == value ? bytes : null;
-    } on FormatException { return null; }
+    } on FormatException {
+      return null;
+    }
   }
 }
 
@@ -177,7 +197,9 @@ final class ApprovedOperatorPatternActivation {
     final List<PendingPatternReview> review = <PendingPatternReview>[];
     final Set<String> seen = <String>{};
     for (final PendingOperatorSms item in pending) {
-      if (!seen.add(item.sourceRecordId) || item.sms.sender != sender) continue;
+      if (!seen.add(item.sourceRecordId) || item.sms.sender != sender) {
+        continue;
+      }
       switch (const OperatorSmsPaymentDataFactory().interpret(
         sourceRecordId: item.sourceRecordId,
         sms: item.sms,
