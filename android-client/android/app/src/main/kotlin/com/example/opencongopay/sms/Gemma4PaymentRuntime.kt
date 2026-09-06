@@ -2,6 +2,7 @@ package com.congodeveloperclub.opencongopay.sms
 
 import android.content.Context
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Engine
@@ -27,7 +28,9 @@ internal class Gemma4PaymentRuntime(private val context: Context) : AutoCloseabl
                 maxOutputToken = 160,
             ),
         ).use { conversation ->
-            conversation.sendMessage(Gemma4PaymentPrompt.forSms(sender, body)).text
+            val message = conversation.sendMessage(Gemma4PaymentPrompt.forSms(sender, body))
+            (message.contents.contents.singleOrNull() as? Content.Text)?.text
+                ?: throw IllegalStateException("gemma_response_not_text")
         }
         require(response.toByteArray(StandardCharsets.UTF_8).size <= 2048) { "gemma_response_oversized" }
         return response
