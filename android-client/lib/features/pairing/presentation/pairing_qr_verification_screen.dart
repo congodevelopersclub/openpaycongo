@@ -162,6 +162,12 @@ final class _VerificationStatus extends StatelessWidget {
             ),
             child: const Text('Retry final pairing confirmation'),
           ),
+          TextButton(
+            onPressed: () => context.read<PairingProtocolBloc>().add(
+              const PairingActivationAcknowledgementReplacementRequested(),
+            ),
+            child: const Text('Start again with a new administrator QR'),
+          ),
         ],
       );
     }

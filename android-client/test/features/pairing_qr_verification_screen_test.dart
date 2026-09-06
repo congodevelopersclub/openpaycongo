@@ -109,6 +109,37 @@ void main() {
     expect(find.text('Pairing activated.'), findsOneWidget);
     expect(find.textContaining('bearer'), findsNothing);
   });
+
+  testWidgets('pending acknowledgement offers an explicit redacted re-pair path', (
+    WidgetTester tester,
+  ) async {
+    final PairingQrBloc qr = PairingQrBloc(trustStore: const _Store());
+    final PairingProtocolBloc protocol = PairingProtocolBloc(
+      protocol: _PendingProtocol(_ActivationRequest()),
+      activation: const _Activation(),
+      acknowledgement: const _RetryableAcknowledgement(),
+    );
+    addTearDown(qr.close);
+    addTearDown(protocol.close);
+    await tester.pumpWidget(
+      MaterialApp(home: PairingQrVerificationScreen(bloc: qr, protocol: protocol)),
+    );
+    protocol.add(const PairingProtocolStarted(_Command()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Check activation after administrator confirms'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Retry final pairing confirmation'), findsOneWidget);
+    expect(find.text('Start again with a new administrator QR'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
+
+    await tester.tap(find.text('Start again with a new administrator QR'));
+    await tester.pumpAndSettle();
+
+    expect(protocol.state, isA<PairingProtocolRecoveryRequired>());
+    expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNotNull);
+    expect(find.textContaining('ciphertext'), findsNothing);
+  });
 }
 
 final class _Scanner implements PairingQrScanner {
@@ -174,6 +205,18 @@ final class _Acknowledgement implements PairingActivationAcknowledgementPort {
   @override
   Future<PairingActivationAcknowledgementOutcome> acknowledge() async =>
       PairingActivationAcknowledgementOutcome.acknowledged;
+
+  @override
+  Future<PairingActivationAcknowledgementRecovery> restore() async =>
+      PairingActivationAcknowledgementRecovery.none;
+}
+
+final class _RetryableAcknowledgement implements PairingActivationAcknowledgementPort {
+  const _RetryableAcknowledgement();
+
+  @override
+  Future<PairingActivationAcknowledgementOutcome> acknowledge() async =>
+      PairingActivationAcknowledgementOutcome.retryable;
 
   @override
   Future<PairingActivationAcknowledgementRecovery> restore() async =>

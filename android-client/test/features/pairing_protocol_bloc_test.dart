@@ -146,6 +146,49 @@ void main() {
     expect(acknowledgement.calls, 2);
   });
 
+  test('retryable acknowledgement can be abandoned for a redacted replacement pairing', () async {
+    final _Acknowledgement acknowledgement = _Acknowledgement(<PairingActivationAcknowledgementOutcome>[
+      PairingActivationAcknowledgementOutcome.retryable,
+    ]);
+    final _ActivationRequest request = _ActivationRequest();
+    final _Protocol protocol = _Protocol(activationRequest: request);
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: protocol,
+      activation: const _Activation(PairingActivationOutcome.activated),
+      acknowledgement: acknowledgement,
+    );
+    addTearDown(bloc.close);
+
+    final Future<PairingProtocolState> firstPairing = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    bloc.add(const PairingProtocolStarted(_Command()));
+    await firstPairing;
+    final Future<PairingProtocolState> pending = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolActivationAcknowledgementPending,
+    );
+    bloc.add(const PairingActivationRequested());
+    await pending;
+
+    final _TrackedCommand replacement = _TrackedCommand();
+    final Future<PairingProtocolState> replacing = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolRecoveryRequired,
+    );
+    bloc.add(const PairingActivationAcknowledgementReplacementRequested());
+    await replacing;
+
+    final Future<PairingProtocolState> replacementStarted = bloc.stream.firstWhere(
+      (PairingProtocolState state) => state is PairingProtocolAwaitingConfirmation,
+    );
+    bloc.add(PairingProtocolStarted(replacement));
+    await replacementStarted;
+
+    expect(protocol.calls, 2);
+    expect(request.disposed, isTrue);
+    expect(replacement.disposed, isTrue);
+    expect(bloc.state.toString(), isNot(contains('ciphertext')));
+  });
+
   test('startup resumes a durable pending acknowledgement without restoring QR data', () async {
     final PairingProtocolBloc bloc = PairingProtocolBloc(
       protocol: _Protocol(),

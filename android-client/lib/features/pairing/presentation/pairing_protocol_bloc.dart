@@ -106,6 +106,12 @@ final class PairingActivationAcknowledgementRequested extends PairingProtocolEve
   const PairingActivationAcknowledgementRequested();
 }
 
+/// Leaves only the pending acknowledgement flow so a new QR may replace it.
+/// Native storage remains non-active until that later pairing succeeds.
+final class PairingActivationAcknowledgementReplacementRequested extends PairingProtocolEvent {
+  const PairingActivationAcknowledgementReplacementRequested();
+}
+
 sealed class PairingProtocolState {
   const PairingProtocolState();
 }
@@ -160,6 +166,7 @@ final class PairingProtocolBloc
     on<PairingProtocolRecoveryRequested>(_restore);
     on<PairingActivationRequested>(_activate);
     on<PairingActivationAcknowledgementRequested>(_acknowledge);
+    on<PairingActivationAcknowledgementReplacementRequested>(_replaceAcknowledgement);
   }
 
   final PairingProtocolPort protocol;
@@ -290,6 +297,14 @@ final class PairingProtocolBloc
     } finally {
       _activationActive = false;
     }
+  }
+
+  Future<void> _replaceAcknowledgement(
+    PairingActivationAcknowledgementReplacementRequested _,
+    Emitter<PairingProtocolState> emit,
+  ) async {
+    if (_activationActive || state is! PairingProtocolActivationAcknowledgementPending) return;
+    emit(const PairingProtocolRecoveryRequired());
   }
 
   Future<void> _finishAcknowledgement(Emitter<PairingProtocolState> emit) async {
