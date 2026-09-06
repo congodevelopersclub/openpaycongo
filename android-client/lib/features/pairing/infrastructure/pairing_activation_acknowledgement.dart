@@ -42,6 +42,14 @@ typedef PairingActivationAcknowledgementPost =
       PairingActivationAcknowledgementEnvelope envelope,
     );
 
+final class _PairingActivationAcknowledgementAccessDenied implements Exception {
+  const _PairingActivationAcknowledgementAccessDenied();
+}
+
+final class _PairingActivationAcknowledgementOpenUncertain implements Exception {
+  const _PairingActivationAcknowledgementOpenUncertain();
+}
+
 /// Native bridge; native code alone can mark the installation active.
 final class PlatformPairingActivationAcknowledgementVault {
   const PlatformPairingActivationAcknowledgementVault()
@@ -97,7 +105,10 @@ final class PlatformPairingActivationAcknowledgementVault {
         nonce: nonce,
         ciphertext: ciphertext,
       );
-    } on PlatformException {
+    } on PlatformException catch (error) {
+      if (_isAccessDenied(error)) {
+        throw const _PairingActivationAcknowledgementAccessDenied();
+      }
       throw StateError('Pairing activation acknowledgement is unavailable');
     } on FormatException {
       throw StateError('Pairing activation acknowledgement is unavailable');
@@ -123,9 +134,14 @@ final class PlatformPairingActivationAcknowledgementVault {
       );
       return result == 'acknowledged';
     } on PlatformException {
-      return false;
+      throw const _PairingActivationAcknowledgementOpenUncertain();
     }
   }
+
+  static bool _isAccessDenied(PlatformException error) => switch (error.code) {
+    'locked' || 'not_foreground' || 'permission_revoked' => true,
+    _ => false,
+  };
 }
 
 /// Posts only a native-sealed envelope. A missing or unauthenticated response
@@ -154,6 +170,8 @@ final class PairingV2ActivationAcknowledgementPort
     PairingActivationAcknowledgementEnvelope envelope;
     try {
       envelope = await vault.seal();
+    } on _PairingActivationAcknowledgementAccessDenied {
+      return PairingActivationAcknowledgementOutcome.retryable;
     } on Object {
       return PairingActivationAcknowledgementOutcome.recoveryRequired;
     }
@@ -164,20 +182,35 @@ final class PairingV2ActivationAcknowledgementPort
       if (response == null) {
         return PairingActivationAcknowledgementOutcome.retryable;
       }
-      return await vault.open(
-        request: envelope,
-        status: response.status,
-        nonce: response.nonce,
-        ciphertext: response.ciphertext,
-      )
-          ? PairingActivationAcknowledgementOutcome.acknowledged
-          : PairingActivationAcknowledgementOutcome.retryable;
+      try {
+        return await vault.open(
+          request: envelope,
+          status: response.status,
+          nonce: response.nonce,
+          ciphertext: response.ciphertext,
+        )
+            ? PairingActivationAcknowledgementOutcome.acknowledged
+            : PairingActivationAcknowledgementOutcome.retryable;
+      } on _PairingActivationAcknowledgementOpenUncertain {
+        return await _reconcileUncertainOpen();
+      }
     } on Object {
       return PairingActivationAcknowledgementOutcome.retryable;
     } finally {
       client.close(force: true);
     }
   }
+
+  Future<PairingActivationAcknowledgementOutcome> _reconcileUncertainOpen() async =>
+      switch (await vault.restore()) {
+        PairingActivationAcknowledgementRecovery.active =>
+          PairingActivationAcknowledgementOutcome.acknowledged,
+        PairingActivationAcknowledgementRecovery.pending =>
+          PairingActivationAcknowledgementOutcome.retryable,
+        PairingActivationAcknowledgementRecovery.none ||
+        PairingActivationAcknowledgementRecovery.recoveryRequired =>
+          PairingActivationAcknowledgementOutcome.recoveryRequired,
+      };
 
   static Future<PairingActivationAcknowledgementHttpResponse?> _postEnvelope(
     HttpClient client,

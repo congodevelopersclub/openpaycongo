@@ -132,6 +132,57 @@ void main() {
     expect(seals, 2);
     expect(opens, 2);
   });
+
+  test('lock denial while sealing stays retryable and preserves pending recovery', () async {
+    final List<String> calls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall call) async {
+          calls.add(call.method);
+          throw PlatformException(code: 'locked');
+        });
+    final PairingV2ActivationAcknowledgementPort port =
+        PairingV2ActivationAcknowledgementPort(
+          vault: const PlatformPairingActivationAcknowledgementVault(),
+        );
+
+    final PairingActivationAcknowledgementOutcome outcome = await port.acknowledge();
+
+    expect(outcome, PairingActivationAcknowledgementOutcome.retryable);
+    expect(calls, <String>['sealAcknowledgement']);
+  });
+
+  test('stale open callback reconciles a native active acknowledgement', () async {
+    final List<String> calls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall call) async {
+          calls.add(call.method);
+          return switch (call.method) {
+            'sealAcknowledgement' => _envelope(),
+            'openAcknowledgement' => throw PlatformException(code: 'locked'),
+            'acknowledgementState' => 'active',
+            _ => throw PlatformException(code: 'unexpected'),
+          };
+        });
+    final PairingV2ActivationAcknowledgementPort port =
+        PairingV2ActivationAcknowledgementPort(
+          vault: const PlatformPairingActivationAcknowledgementVault(),
+          post: (_, PairingActivationAcknowledgementEnvelope envelope) async =>
+              PairingActivationAcknowledgementHttpResponse(
+                status: 201,
+                nonce: 'response-nonce-${envelope.counter}',
+                ciphertext: 'response-ciphertext-${envelope.counter}',
+              ),
+        );
+
+    final PairingActivationAcknowledgementOutcome outcome = await port.acknowledge();
+
+    expect(outcome, PairingActivationAcknowledgementOutcome.acknowledged);
+    expect(calls, <String>[
+      'sealAcknowledgement',
+      'openAcknowledgement',
+      'acknowledgementState',
+    ]);
+  });
 }
 
 Map<String, Object> _envelope({String counter = '7'}) => <String, Object>{
