@@ -81,4 +81,20 @@ final class Gemma4PaymentPatternAuthorTest extends TestCase
             ),
         );
     }
+
+    public function test_it_refuses_a_public_inference_endpoint_before_raw_sms_can_leave_the_backend(): void
+    {
+        config()->set('services.gemma.private_inference_url', 'https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent');
+        config()->set('services.gemma.auth_token', 'test-token');
+
+        $this->expectExceptionMessage('gemma_pattern_author_unavailable');
+
+        app(Gemma4PaymentPatternAuthor::class)->propose(
+            new OperatorPaymentPatternSubmission(
+                sender: 'ORANGE',
+                body: 'Paid 12.50 USD ref REF-1234',
+                provider: 'ORANGE_MONEY',
+            ),
+        );
+    }
 }

@@ -23,7 +23,10 @@ return [
     ],
 
     'gemma' => [
-        'api_key' => env('GEMMA_API_KEY'),
+        // Raw SMS evidence may only reach a private, backend-controlled Gemma
+        // runtime. Do not configure a public hosted-model URL here.
+        'private_inference_url' => env('GEMMA_PRIVATE_INFERENCE_URL'),
+        'auth_token' => env('GEMMA_PRIVATE_INFERENCE_TOKEN'),
         'model' => env('GEMMA_MODEL', 'gemma-4-26b-a4b-it'),
         'timeout_seconds' => (int) env('GEMMA_TIMEOUT_SECONDS', 20),
     ],

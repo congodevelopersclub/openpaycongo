@@ -18,11 +18,13 @@ final class Gemma4PaymentPatternAuthor
 
     public function propose(OperatorPaymentPatternSubmission $submission): OperatorPaymentPatternCandidate
     {
-        $apiKey = config('services.gemma.api_key');
+        $privateInferenceUrl = config('services.gemma.private_inference_url');
+        $authToken = config('services.gemma.auth_token');
         $model = config('services.gemma.model');
         $timeout = config('services.gemma.timeout_seconds');
 
-        if (is_string($apiKey) === false || trim($apiKey) === ''
+        if (is_string($privateInferenceUrl) === false || $this->isPrivateInferenceUrl($privateInferenceUrl) === false
+            || is_string($authToken) === false || trim($authToken) === ''
             || is_string($model) === false || preg_match('/^gemma-4-[a-z0-9-]+$/', $model) !== 1
             || is_int($timeout) === false || $timeout < 1 || $timeout > 60) {
             throw new RuntimeException('gemma_pattern_author_unavailable');
@@ -30,38 +32,34 @@ final class Gemma4PaymentPatternAuthor
 
         $response = $this->http
             ->acceptJson()
+            ->withToken($authToken)
             ->timeout($timeout)
-            ->post(
-                'https://generativelanguage.googleapis.com/v1beta/models/'.$model.':generateContent?key='.rawurlencode($apiKey),
-                [
-                    'systemInstruction' => [
-                        'parts' => [[
-                            'text' => 'Return exactly one JSON object with provider, sender, and template. '
-                                .'Template must contain {amount}, {currency}, and {reference}. '
-                                .'This is a review-only candidate, never an approval.',
-                        ]],
+            ->post($privateInferenceUrl, [
+                'model' => $model,
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'Return exactly one JSON object with provider, sender, and template. '
+                            .'Template must contain {amount}, {currency}, and {reference}. '
+                            .'This is a review-only candidate, never an approval.',
                     ],
-                    'contents' => [[
+                    [
                         'role' => 'user',
-                        'parts' => [[
-                            'text' => "Provider: {$submission->provider}\n"
-                                ."Sender: {$submission->sender}\n"
-                                ."Payment SMS: {$submission->body}",
-                        ]],
-                    ]],
-                    'generationConfig' => [
-                        'responseMimeType' => 'application/json',
-                        'temperature' => 0,
-                        'thinkingConfig' => ['thinkingLevel' => 'minimal'],
+                        'content' => "Provider: {$submission->provider}\n"
+                            ."Sender: {$submission->sender}\n"
+                            ."Payment SMS: {$submission->body}",
                     ],
                 ],
-            );
+                'temperature' => 0,
+                'max_tokens' => 512,
+                'response_format' => ['type' => 'json_object'],
+            ]);
 
         if ($response->failed()) {
             throw new RuntimeException('gemma_pattern_author_unavailable');
         }
 
-        $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
+        $text = data_get($response->json(), 'choices.0.message.content');
         if (is_string($text) === false || strlen($text) > 4096) {
             throw new RuntimeException('gemma_pattern_candidate_invalid');
         }
@@ -93,5 +91,23 @@ final class Gemma4PaymentPatternAuthor
             && substr_count($template, '{amount}') === 1
             && substr_count($template, '{currency}') === 1
             && substr_count($template, '{reference}') === 1;
+    }
+
+    private function isPrivateInferenceUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        if (is_array($parts) === false
+            || ! isset($parts['scheme'], $parts['host'])
+            || ! in_array($parts['scheme'], ['http', 'https'], true)
+            || is_string($parts['host']) === false) {
+            return false;
+        }
+
+        $host = strtolower($parts['host']);
+
+        return $host === 'localhost'
+            || str_ends_with($host, '.internal')
+            || (filter_var($host, FILTER_VALIDATE_IP) !== false
+                && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false);
     }
 }
