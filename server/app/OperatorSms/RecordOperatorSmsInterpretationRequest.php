@@ -14,7 +14,7 @@ final class RecordOperatorSmsInterpretationRequest
      * The authenticated installation, not a client-supplied field, supplies
      * tenant authority. The encrypted body is intentionally not returned.
      *
-     * @param array{record_id: string, sender: string, sms_body: string, received_at: string} $input
+     * @param array{record_id:string,sender:string,sms_body:string,received_at:string} $input
      */
     public function record(SourceInstallation $installation, array $input): OperatorSmsInterpretationRequestResult
     {
