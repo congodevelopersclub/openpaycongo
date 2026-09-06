@@ -19,7 +19,7 @@ return new class extends Migration
             $table->unsignedInteger('pattern_version');
             $table->text('encoded_release');
             $table->timestamp('expires_at', 6);
-            $table->foreignUuid('issued_by_user_id')->constrained('users')->restrictOnDelete();
+            $table->foreignId('issued_by_user_id')->constrained('users')->restrictOnDelete();
             $table->timestamp('issued_at', 6);
 
             $table->unique(['organization_id', 'provider', 'sender', 'pattern_version'], 'operator_sms_pattern_release_version_unique');
