@@ -153,7 +153,7 @@ class GuardedTaskRunnerTest {
             deliver = { it() },
         )
 
-        assertEquals(GuardedSubmitResult.accepted, runner.submitWithCommitFence(1, { commit ->
+        assertEquals(GuardedSubmitResult.accepted, runner.submitWithCommitFence<Unit>(1, { commit ->
             started.countDown()
             while (release.count > 0) {
                 try {
