@@ -14,6 +14,12 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
+      # SMS pattern proposals are deliberately small. Do not expose Gemma's
+      # full 256K context window to untrusted message content.
+      - --max-model-len
+      - "4096"
+      - --gpu-memory-utilization
+      - "0.85"
       - --api-key
       - ${GEMMA_PRIVATE_INFERENCE_TOKEN:?Set GEMMA_PRIVATE_INFERENCE_TOKEN outside the repository}
     environment:

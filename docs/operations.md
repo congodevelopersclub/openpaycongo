@@ -197,6 +197,15 @@ public hosted-model endpoint because this flow carries user-consented financial
 SMS evidence. Google recommends Gemma 4's 26B A4B instruction model as a
 starting point for server use and lists vLLM as a production serving option.
 
+Capacity is a release prerequisite, not a best-effort setting. Google estimates
+the 26B A4B base weights at about 57.7 GB in BF16, before runtime and KV-cache
+overhead. Provision a reviewed GPU with at least 80 GB of VRAM for this profile;
+the checked-in configuration limits context to 4,096 tokens and caps vLLM at 85%
+of GPU memory because a payment SMS proposal does not need Gemma's 256K-token
+maximum. Do not replace this with a 24 GB or 48 GB GPU and hope the 4B active
+parameter count will fit: all 26B parameters are loaded for routing. Reassess
+the model and capacity if a supported server-format QAT variant is selected.
+
 Before startup, accept the model terms using the organization account, place a
 reviewed immutable vLLM image digest and the Hugging Face access token in the
 deployment secret manager, and generate a distinct random API token for the
@@ -212,6 +221,14 @@ export GEMMA_TIMEOUT_SECONDS='20'
 docker compose -f compose.yaml -f compose.gemma.yaml --profile gemma-private up -d
 docker compose -f compose.yaml -f compose.gemma.yaml --profile gemma-private ps
 ```
+
+Before allowing the scheduler to process consented evidence, verify all of the
+following on that private host: the `gemma` health check is healthy, `php`,
+`queue`, and `scheduler` are running with `GEMMA_PRIVATE_INFERENCE_URL` set to
+`http://gemma.internal:8000/v1/chat/completions`, and no host port is published
+for `gemma`. Submit only the non-production integration fixture through the
+review workflow and confirm it creates an unapproved candidate; do not use a
+real customer's SMS as a deployment smoke test.
 
 The first start downloads model weights to the runtime's disposable image/cache
 layer. Pin and scan both the serving image and the approved model revision
