@@ -14,9 +14,7 @@ use RuntimeException;
  */
 final class Gemma4PaymentPatternAuthor
 {
-    public function __construct(private readonly HttpFactory $http)
-    {
-    }
+    public function __construct(private readonly HttpFactory $http) {}
 
     public function propose(OperatorPaymentPatternSubmission $submission): OperatorPaymentPatternCandidate
     {
