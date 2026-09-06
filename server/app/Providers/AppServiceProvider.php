@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Http\Responses\PasskeyLoginResponse;
 use App\Models\Deposit;
+use App\Models\OAuthClient;
 use App\OAuth\ClientScopeRepository;
 use App\Operations\LaravelMigrationReadiness;
 use App\Operations\LedgerProjectionReadiness;
@@ -35,6 +36,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         Passport::ignoreRoutes();
+        Passport::useClientModel(OAuthClient::class);
 
         $this->app->bind(PassportScopeRepository::class, ClientScopeRepository::class);
 

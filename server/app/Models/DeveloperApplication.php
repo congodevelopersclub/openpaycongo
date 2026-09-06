@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Laravel\Passport\Client;
 
 final class DeveloperApplication extends Model
 {
@@ -24,10 +23,10 @@ final class DeveloperApplication extends Model
         return $this->belongsTo(Organization::class);
     }
 
-    /** @return BelongsTo<Client, $this> */
+    /** @return BelongsTo<OAuthClient, $this> */
     public function oauthClient(): BelongsTo
     {
-        return $this->belongsTo(Client::class, 'oauth_client_id');
+        return $this->belongsTo(OAuthClient::class, 'oauth_client_id');
     }
 
     /** @return HasMany<DeveloperApplicationCredentialAudit, $this> */

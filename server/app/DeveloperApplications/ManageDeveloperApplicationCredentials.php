@@ -6,6 +6,7 @@ namespace App\DeveloperApplications;
 
 use App\Models\DeveloperApplication;
 use App\Models\DeveloperApplicationCredentialAudit;
+use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -92,7 +93,7 @@ final class ManageDeveloperApplicationCredentials
 
     private function authorizedOrganizationId(User $actor): string
     {
-        if (! $actor->is_financial_operator || ! is_string($actor->organization_id)) {
+        if (!$actor->is_financial_operator || !is_string($actor->organization_id)) {
             throw new AuthorizationException;
         }
 
@@ -161,6 +162,19 @@ final class ManageDeveloperApplicationCredentials
             'actor_user_identifier' => (string) $actor->getKey(),
             'action' => $action,
             'scopes' => $scopes,
+            'organization_sequence' => $this->nextAuditSequence($application->organization_id),
         ]);
+    }
+
+    private function nextAuditSequence(string $organizationId): int
+    {
+        Organization::query()
+            ->whereKey($organizationId)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        return ((int) DeveloperApplicationCredentialAudit::query()
+            ->where('organization_id', $organizationId)
+            ->max('organization_sequence')) + 1;
     }
 }

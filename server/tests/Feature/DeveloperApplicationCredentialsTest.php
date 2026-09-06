@@ -218,7 +218,7 @@ final class DeveloperApplicationCredentialsTest extends TestCase
         self::assertSame('issued', $audit->action);
     }
 
-    public function test_audit_history_uses_uuid7_to_order_events_with_tied_timestamps(): void
+    public function test_audit_history_uses_organization_sequence_to_order_events_with_tied_timestamps(): void
     {
         $operator = $this->financialOperator('00000000-0000-4000-8000-000000000208');
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-06 12:00:00 UTC'));
@@ -239,6 +239,13 @@ final class DeveloperApplicationCredentialsTest extends TestCase
         }
 
         self::assertSame(['revoked', 'rotated', 'issued'], $actions);
+        self::assertSame(
+            [1, 2, 3],
+            DeveloperApplicationCredentialAudit::query()
+                ->orderBy('organization_sequence')
+                ->pluck('organization_sequence')
+                ->all(),
+        );
     }
 
     private function financialOperator(string $organizationId): User
