@@ -1,0 +1,13 @@
+{
+  "customer_lookup_identifier": "customer-fixture-001",
+  "provider_reference": "provider-fixture-001",
+  "amount_minor": 12500,
+  "currency": "CDF",
+  "provider_occurred_at": "2026-08-01T12:34:56Z",
+  "sender_identifier": "+243000000001",
+  "receiver_identifier": "+243000000002",
+  "customer_name": "Synthetic Customer",
+  "customer_address": "1 Fixture Street",
+  "customer_phone": "+243000000003",
+  "customer_email": "customer@example.test"
+}

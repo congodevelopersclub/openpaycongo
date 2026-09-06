@@ -1,0 +1,8 @@
+{
+  "organization_id": "00000000-0000-4000-8000-000000000001",
+  "customer_lookup_identifier": "customer-fixture-001",
+  "provider_reference": "provider-fixture-001",
+  "amount_minor": 12500,
+  "currency": "USD",
+  "provider_occurred_at": "2026-08-01T12:34:56Z"
+}

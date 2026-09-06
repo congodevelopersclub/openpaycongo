@@ -35,6 +35,7 @@ server/storage/*
 !scripts/security/**
 !android-client/
 android-client/*
+!android-client/README.md
 !android-client/Dockerfile.ci
 !android-client/test/
 !android-client/test/**

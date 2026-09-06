@@ -15,6 +15,105 @@ security:
   - MobileOAuth: []
   - MerchantOAuth: []
 paths:
+  /oauth/token:
+    post:
+      summary: Exchange a Developer Application credential for a scoped access token
+      operationId: issueDeveloperAccessToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [grant_type, client_id, client_secret]
+              properties:
+                grant_type: { type: string, const: client_credentials }
+                client_id: { type: string, minLength: 1 }
+                client_secret: { type: string, minLength: 1 }
+                scope: { type: string, description: Space-delimited subset of the application's granted scopes. }
+      responses:
+        '200':
+          description: Scoped bearer token; credentials are never returned in this response
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthToken' }
+        '400':
+          description: Unsupported grant or invalid client/scope request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthError' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /mobile/identity:
+    get:
+      summary: Read the organization identity of the authenticated mobile installation
+      operationId: getMobileIdentity
+      security:
+        - MobileOAuth: [mobile:sync:read]
+      responses:
+        '200':
+          description: Installation identity; organization and installation are derived from the credential
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MobileEnvelopeNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileIdentity' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /mobile/deposits:
+    post:
+      summary: Record one authenticated mobile deposit
+      operationId: storeMobileDeposit
+      description: |
+        The mobile credential supplies the organization and source installation. Those fields are prohibited in
+        the request body. Optional customer and provider identifiers are accepted only as encrypted server-side PII;
+        they are never returned, logged, placed in telemetry, or included in public fixtures.
+      security:
+        - MobileOAuth: [mobile:deposits:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MobileDepositRequest' }
+      responses:
+        '201':
+          description: Deposit recorded exactly once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositOutcome' }
+        '200':
+          description: Exact idempotent replay of an already-recorded deposit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositOutcome' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: Provider reference conflicts with different transfer data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositOutcome' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /services/identity:
+    get:
+      summary: Read the organization identity bound to a Developer Application token
+      operationId: getDeveloperApplicationIdentity
+      security:
+        - DeveloperOAuth: [payment-requests:read]
+      responses:
+        '200':
+          description: Application and organization identity derived from the token
+          headers:
+            Cache-Control: { $ref: '#/components/headers/MobileEnvelopeNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeveloperIdentity' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/pairing/intents:
     post:
       summary: Issue one short-lived signed enrollment QR from the verified administrator session
@@ -366,6 +465,7 @@ paths:
   /v1/sync/push:
     post:
       summary: Persist exactly one canonical event for replication or merchant integration
+      x-openpay-status: planned
       operationId: pushEvent
       security:
         - MobileOAuth: [ledger:write]
@@ -404,6 +504,7 @@ paths:
   /v1/sync/pull:
     get:
       summary: Read replicated events after an opaque cursor
+      x-openpay-status: planned
       operationId: pullEvents
       security:
         - MobileOAuth: [ledger:read]
@@ -438,6 +539,7 @@ paths:
   /v1/sync/ack:
     post:
       summary: Monotonically and idempotently acknowledge an applied cursor for the authenticated replica
+      x-openpay-status: planned
       operationId: acknowledgeCursor
       security:
         - MobileOAuth: [ledger:ack]
@@ -536,6 +638,18 @@ components:
             ledger:read: Read a tenant-authorized replicated event page
             ledger:ack: Acknowledge a cursor for the enrolled replica
             analytics:read: Read the enrolled device tenant's bounded ready sales projection
+    DeveloperOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.example.invalid/oauth/token
+          scopes:
+            payment-requests:read: Read payment-request resources for the application's organization
+            payment-requests:write: Create or update payment requests for the application's organization
+            deposits:read: Read deposits for the application's organization
+            wallets:read: Read customer credit balances for the application's organization
+            customers:read: Read customer references for the application's organization
+            customers:pii:read: Reserved scope requiring separate authorization; never granted by default
     MerchantOAuth:
       type: oauth2
       flows:
@@ -547,6 +661,58 @@ components:
             ledger:ack: Acknowledge application of a pull cursor
             analytics:read: Read the authenticated merchant tenant's bounded ready sales projection
   schemas:
+    OAuthToken:
+      type: object
+      additionalProperties: false
+      required: [token_type, expires_in, access_token]
+      properties:
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, minimum: 1 }
+        access_token: { type: string, minLength: 1 }
+        refresh_token: { type: string, minLength: 1 }
+        scope: { type: string }
+    OAuthError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { type: string, enum: [invalid_request, invalid_client, invalid_grant, invalid_scope, unsupported_grant_type] }
+        error_description: { type: string }
+    MobileIdentity:
+      type: object
+      additionalProperties: false
+      required: [organization_id]
+      properties:
+        organization_id: { type: string, format: uuid }
+    DeveloperIdentity:
+      type: object
+      additionalProperties: false
+      required: [application_id, organization_id]
+      properties:
+        application_id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+    MobileDepositRequest:
+      type: object
+      additionalProperties: false
+      required: [customer_lookup_identifier, provider_reference, amount_minor, currency, provider_occurred_at]
+      properties:
+        customer_lookup_identifier: { type: string, minLength: 1, maxLength: 255, pattern: '^[^\x00-\x1F\x7F]+$' }
+        provider_reference: { type: string, minLength: 1, maxLength: 255, pattern: '^[^\x00-\x1F\x7F]+$' }
+        amount_minor: { type: integer, minimum: 1 }
+        currency: { type: string, const: CDF }
+        provider_occurred_at: { type: string, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2})$' }
+        sender_identifier: { type: [string, 'null'], minLength: 1, maxLength: 255, pattern: '^[^\x00-\x1F\x7F]+$' }
+        receiver_identifier: { type: [string, 'null'], minLength: 1, maxLength: 255, pattern: '^[^\x00-\x1F\x7F]+$' }
+        customer_name: { type: [string, 'null'], minLength: 1, maxLength: 255, pattern: '^[^\x00-\x1F\x7F]+$' }
+        customer_address: { type: [string, 'null'], minLength: 1, maxLength: 2000, pattern: '^[^\x00-\x1F\x7F]+$' }
+        customer_phone: { type: [string, 'null'], minLength: 1, maxLength: 64, pattern: '^[^\x00-\x1F\x7F]+$' }
+        customer_email: { type: [string, 'null'], minLength: 1, maxLength: 320, pattern: '^[^\x00-\x1F\x7F]+$' }
+    DepositOutcome:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [recorded, replayed, conflict] }
     MobileEnvelopeRequest:
       type: object
       additionalProperties: false
