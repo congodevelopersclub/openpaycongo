@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\OperatorSms;
 
 use App\Models\OperatorSmsInterpretationRequest;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -42,7 +43,7 @@ final class ProcessPendingOperatorSmsInterpretationRequests
                 $provider = $request->provider;
                 $sender = $request->sender;
                 $body = $request->protected_sms_body;
-                if (! is_string($provider) || ! is_string($sender) || ! is_string($body)) {
+                if (! is_string($provider)) {
                     $this->markFailed($request, 'gemma_pattern_analysis_failed');
 
                     continue;
@@ -71,7 +72,9 @@ final class ProcessPendingOperatorSmsInterpretationRequests
     {
         return DB::transaction(function () use ($id): ?OperatorSmsInterpretationRequest {
             $request = OperatorSmsInterpretationRequest::query()->lockForUpdate()->find($id);
-            if ($request === null || $request->analysis_status !== 'pending' || $request->expires_at->isPast() || $request->provider === null) {
+            if ($request === null || $request->analysis_status !== 'pending'
+                || CarbonImmutable::parse($request->expires_at, 'UTC')->isPast()
+                || $request->provider === null) {
                 return null;
             }
 

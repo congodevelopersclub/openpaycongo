@@ -31,7 +31,7 @@ require_laravel_filter() {
     || die 'focused laravel requires a PHPUnit class-name filter'
 }
 run_contracts() { docker build --target test -f docs/Dockerfile .; }
-run_laravel_quality_and_tests() { docker build --progress=plain --target test -f server/Dockerfile .; }
+run_laravel_quality_and_tests() { docker build --target test -f server/Dockerfile .; }
 run_flutter_quality_and_tests() {
   docker build --target analyze -f android-client/Dockerfile.ci android-client
   docker build --target test -f android-client/Dockerfile.ci android-client
