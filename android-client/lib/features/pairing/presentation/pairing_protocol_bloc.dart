@@ -187,6 +187,20 @@ final class PairingProtocolBloc
     }
     PairingRecoveredMaterial? material;
     try {
+      material = await recovery.restore();
+      if (material != null) {
+        if (state is! PairingProtocolIdle) return;
+        final PairingActivationRequest? request = material.activationRequest;
+        if (request == null || !RegExp(r'^[0-9]{6}$').hasMatch(material.serverSas)) {
+          material.dispose();
+          emit(const PairingProtocolRecoveryRequired());
+          return;
+        }
+        material.activationRequest = null;
+        _activationRequest = request;
+        emit(PairingProtocolAwaitingConfirmation(material.serverSas));
+        return;
+      }
       final PairingActivationAcknowledgementRecovery acknowledgementRecovery =
           await acknowledgement.restore();
       if (acknowledgementRecovery == PairingActivationAcknowledgementRecovery.pending) {
@@ -201,17 +215,6 @@ final class PairingProtocolBloc
         emit(const PairingProtocolRecoveryRequired());
         return;
       }
-      material = await recovery.restore();
-      if (material == null || state is! PairingProtocolIdle) return;
-      final PairingActivationRequest? request = material.activationRequest;
-      if (request == null || !RegExp(r'^[0-9]{6}$').hasMatch(material.serverSas)) {
-        material.dispose();
-        emit(const PairingProtocolRecoveryRequired());
-        return;
-      }
-      material.activationRequest = null;
-      _activationRequest = request;
-      emit(PairingProtocolAwaitingConfirmation(material.serverSas));
     } on Object {
       emit(const PairingProtocolRecoveryRequired());
     } finally {

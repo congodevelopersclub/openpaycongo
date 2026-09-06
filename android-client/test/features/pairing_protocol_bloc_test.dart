@@ -181,6 +181,32 @@ void main() {
 
     expect(bloc.state, isA<PairingProtocolActivated>());
   });
+
+  test('startup resumes a confirmed replacement before an older active pairing', () async {
+    final _ActivationRequest replacement = _ActivationRequest();
+    final PairingProtocolBloc bloc = PairingProtocolBloc(
+      protocol: _Protocol(),
+      acknowledgement: _Acknowledgement(
+        <PairingActivationAcknowledgementOutcome>[
+          PairingActivationAcknowledgementOutcome.acknowledged,
+        ],
+        recovery: PairingActivationAcknowledgementRecovery.active,
+      ),
+      recovery: _Recovery(
+        PairingRecoveredMaterial(
+          serverSas: '482901',
+          activationRequest: replacement,
+        ),
+      ),
+    );
+    addTearDown(bloc.close);
+
+    await bloc.restore();
+
+    expect(bloc.state, isA<PairingProtocolAwaitingConfirmation>());
+    expect((bloc.state as PairingProtocolAwaitingConfirmation).sas, '482901');
+    expect(replacement.disposed, isFalse);
+  });
 }
 
 final class _Command implements PairingProtocolCommand {
