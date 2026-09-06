@@ -71,8 +71,8 @@ final class OperatorSmsPaymentDataSource {
       DeveloperApprovedOperatorPaymentProfile(
         sender: release.proposal.sender,
         provider: release.proposal.provider,
-        template: release.proposal.template.value,
-        patternVersion: release.proposal.patternVersion,
+        template: release.proposal.template,
+        patternVersion: release.proposal.version,
       ),
     );
     if (activation.activation == DeveloperApprovedPatternActivation.stale) {

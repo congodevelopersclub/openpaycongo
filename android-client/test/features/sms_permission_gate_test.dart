@@ -160,6 +160,21 @@ final class _FakeSmsGateway implements SmsGatewayPort {
   ) async => <NativeOperatorPaymentProfile>[profile];
 
   @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async => DeveloperApprovedPatternActivationResult(
+    activation: DeveloperApprovedPatternActivation.installed,
+    profile: NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    ),
+  );
+
+  @override
   Future<NativeCaptureHealth> captureHealth() async =>
       const NativeCaptureHealth(fault: null);
 

@@ -792,6 +792,21 @@ final class _FakeGateway implements SmsGatewayPort {
   }
 
   @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async => DeveloperApprovedPatternActivationResult(
+    activation: DeveloperApprovedPatternActivation.installed,
+    profile: NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    ),
+  );
+
+  @override
   Future<SmsAccessState> permissionState() async => SmsAccessState.granted;
   @override
   Future<SmsAccessState> requestPermission() async => SmsAccessState.granted;

@@ -248,6 +248,20 @@ final class _Gateway implements SmsGatewayPort {
     return List<NativeOperatorPaymentProfile>.of(operatorProfiles);
   }
   @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async => DeveloperApprovedPatternActivationResult(
+    activation: DeveloperApprovedPatternActivation.installed,
+    profile: NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    ),
+  );
+  @override
   Future<int> accessGeneration() async => 1;
   @override
   Future<void> setUnlocked(bool unlocked, {int? generation}) async {}
