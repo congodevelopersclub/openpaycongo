@@ -22,6 +22,7 @@ final class RecordOperatorSmsInterpretationRequest
             ],
             [
                 'organization_id' => $installation->organization_id,
+                'provider' => $input['provider'],
                 'sender' => $input['sender'],
                 'protected_sms_body' => $input['sms_body'],
                 'received_at' => CarbonImmutable::parse($input['received_at'], 'UTC'),

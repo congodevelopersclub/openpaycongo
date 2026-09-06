@@ -20,6 +20,7 @@ final class OperatorSmsInterpretationRequestTest extends TestCase
         $installation = $this->installation('00000000-0000-4000-8000-000000000411');
         $payload = [
             'record_id' => str_repeat('r', 43),
+            'provider' => 'ORANGE_MONEY',
             'sender' => 'ORANGE',
             'sms_body' => 'Paid 12.50 USD ref REF-1234',
             'received_at' => '2026-09-06T01:00:00Z',
@@ -35,6 +36,7 @@ final class OperatorSmsInterpretationRequestTest extends TestCase
         $request = OperatorSmsInterpretationRequest::query()->sole();
         self::assertSame($installation->organization_id, $request->organization_id);
         self::assertSame($installation->id, $request->source_installation_id);
+        self::assertSame($payload['provider'], $request->provider);
         self::assertSame($payload['sms_body'], $request->protected_sms_body);
         self::assertGreaterThan(now('UTC'), $request->expires_at);
         self::assertArrayNotHasKey('protected_sms_body', $request->toArray());
@@ -60,6 +62,7 @@ final class OperatorSmsInterpretationRequestTest extends TestCase
 
         $this->postJson('/mobile/operator-sms/interpretation-requests', [
             'record_id' => str_repeat('r', 43),
+            'provider' => 'ORANGE_MONEY',
             'sender' => 'ORANGE',
             'sms_body' => 'Paid 12.50 USD ref REF-1234',
             'received_at' => '2026-09-06T01:00:00Z',
@@ -74,11 +77,12 @@ final class OperatorSmsInterpretationRequestTest extends TestCase
         Sanctum::actingAs($installation, ['mobile:sync:write'], 'mobile');
         $this->postJson('/mobile/operator-sms/interpretation-requests', [
             'record_id' => 'short',
+            'provider' => 'orange money',
             'sender' => 'untrusted sender',
             'sms_body' => '',
             'received_at' => '2026-02-30T01:00:00Z',
         ])->assertUnprocessable()
-            ->assertJsonValidationErrors(['record_id', 'sender', 'sms_body', 'received_at']);
+            ->assertJsonValidationErrors(['record_id', 'provider', 'sender', 'sms_body', 'received_at']);
 
         self::assertDatabaseCount('operator_sms_interpretation_requests', 0);
     }

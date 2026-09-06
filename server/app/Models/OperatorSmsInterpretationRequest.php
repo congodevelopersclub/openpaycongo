@@ -25,10 +25,16 @@ final class OperatorSmsInterpretationRequest extends Model
         'organization_id',
         'source_installation_id',
         'sms_record_id',
+        'provider',
         'sender',
         'protected_sms_body',
         'received_at',
         'expires_at',
+        'analysis_status',
+        'operator_sms_pattern_proposal_id',
+        'analysis_started_at',
+        'analysed_at',
+        'analysis_error',
     ];
 
     protected $hidden = ['protected_sms_body'];
@@ -39,6 +45,8 @@ final class OperatorSmsInterpretationRequest extends Model
             'protected_sms_body' => 'encrypted',
             'received_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
+            'analysis_started_at' => 'immutable_datetime',
+            'analysed_at' => 'immutable_datetime',
         ];
     }
 
@@ -46,5 +54,11 @@ final class OperatorSmsInterpretationRequest extends Model
     public function sourceInstallation(): BelongsTo
     {
         return $this->belongsTo(SourceInstallation::class);
+    }
+
+    /** @return BelongsTo<OperatorSmsPatternProposal, $this> */
+    public function proposal(): BelongsTo
+    {
+        return $this->belongsTo(OperatorSmsPatternProposal::class, 'operator_sms_pattern_proposal_id');
     }
 }

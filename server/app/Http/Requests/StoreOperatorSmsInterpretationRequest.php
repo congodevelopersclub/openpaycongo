@@ -23,6 +23,7 @@ final class StoreOperatorSmsInterpretationRequest extends FormRequest
     {
         return [
             'record_id' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]{8,64}$/'],
+            'provider' => ['required', 'string', 'regex:/^[A-Z0-9._-]{3,32}$/'],
             'sender' => ['required', 'string', 'regex:/^(?:\\+[1-9][0-9]{7,14}|[A-Z0-9]{3,11})$/'],
             'sms_body' => ['required', 'string', 'min:1', 'max:4096'],
             'received_at' => ['required', 'date_format:Y-m-d\\TH:i:s\\Z'],
