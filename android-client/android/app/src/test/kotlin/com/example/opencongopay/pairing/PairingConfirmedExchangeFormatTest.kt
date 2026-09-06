@@ -67,6 +67,17 @@ class PairingConfirmedExchangeFormatTest {
         listOf(
             exchange(origin = "http://pairing.example.test"),
             exchange(origin = "https://pairing.example.test/"),
+        ).forEach { candidate ->
+            try {
+                assertThrows(PairingDirectionalKeyStorageException::class.java) {
+                    PairingConfirmedExchangeFormat.copyRecord(candidate)
+                }
+            } finally {
+                candidate.dispose()
+            }
+        }
+
+        listOf(
             exchange(intent = ByteArray(15)),
             exchange(sendKey = ByteArray(31)),
             exchange(receiveKey = ByteArray(33)),
