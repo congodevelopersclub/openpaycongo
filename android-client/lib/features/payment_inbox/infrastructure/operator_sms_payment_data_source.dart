@@ -5,6 +5,7 @@ import '../../sms_gateway/domain/sms_gateway.dart';
 import '../domain/approved_operator_pattern.dart';
 import '../domain/operator_sms_payment_data.dart';
 import '../domain/payment_ingestion.dart';
+import 'operator_sms_analysis_envelope_transport.dart';
 import 'operator_sms_payment_adapter.dart';
 
 /// The sole read boundary the separately-owned push worker needs. It joins the
@@ -44,6 +45,64 @@ final class OperatorSmsPaymentDataSource {
       data.add(adapter.interpret(record: record, profile: profile, scope: scope));
     }
     return List<OperatorSmsPaymentData>.unmodifiable(data);
+  }
+
+  /// Sends one retained SMS only after a user has explicitly consented from
+  /// the protected review screen. This creates review evidence, never a
+  /// payment or parser activation; the backend can only propose a pattern for
+  /// developer approval.
+  Future<OperatorSmsAnalysisSubmission> submitFailedSmsForAnalysis({
+    required String sourceRecordId,
+    required bool userConfirmed,
+    required DateTime now,
+    required OperatorSmsAnalysisEnvelopeTransport transport,
+  }) async {
+    if (!userConfirmed) {
+      throw StateError('operator_sms_analysis_consent_required');
+    }
+    final List<NativeSmsRecord> records = await gateway.drainInbox();
+    NativeSmsRecord? record;
+    for (final NativeSmsRecord value in records) {
+      if (value.id == sourceRecordId) {
+        record = value;
+        break;
+      }
+    }
+    if (record == null) throw StateError('operator_sms_record_unavailable');
+    final SenderIdentity? sender = SenderIdentity.fromOsMetadata(record.sender);
+    final SmsEnvelope? envelope = sender == null
+        ? null
+        : SmsEnvelope.fromOs(
+            sender: sender,
+            body: record.body,
+            receivedAt: record.receivedAt,
+            segments: record.segments,
+            now: now,
+          );
+    if (envelope == null) {
+      throw StateError('operator_sms_record_invalid');
+    }
+    final List<NativeOperatorPaymentProfile> profiles =
+        await gateway.listOperatorPaymentProfiles();
+    NativeOperatorPaymentProfile? profile;
+    for (final NativeOperatorPaymentProfile value in profiles) {
+      if (value.sender == record.sender) {
+        profile = value;
+        break;
+      }
+    }
+    if (profile == null) {
+      throw StateError('operator_sms_provider_unconfigured');
+    }
+    return transport.submit(
+      OperatorSmsAnalysisEvidence(
+        recordId: record.id,
+        provider: profile.provider,
+        sender: sender.value,
+        body: envelope.body,
+        receivedAt: envelope.receivedAt,
+      ),
+    );
   }
 
   /// The independently-owned release delivery worker calls this with one

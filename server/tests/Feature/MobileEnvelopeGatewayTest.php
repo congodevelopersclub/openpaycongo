@@ -28,6 +28,35 @@ final class MobileEnvelopeGatewayTest extends TestCase
         self::assertDatabaseCount('ledger_entries', 2);
     }
 
+    public function test_explicit_encrypted_sms_analysis_request_is_recorded_without_exposing_its_body(): void
+    {
+        $installation = $this->installation();
+        $payload = [
+            'record_id' => 'sms-record-0001',
+            'provider' => 'ORANGE_MONEY',
+            'sender' => 'ORANGEMNY',
+            'sms_body' => 'Paid 12.50 USD ref SECRET-1234',
+            'received_at' => '2026-09-01T01:00:00Z',
+        ];
+
+        $response = $this->postJson(
+            '/mobile/envelopes',
+            $this->envelope($installation, '1', $payload, 'operator_sms_interpretation_request'),
+        );
+
+        $response->assertCreated();
+        self::assertSame(['outcome' => 'recorded'], $this->decryptResponse($installation, '1', 201, $response->json()));
+        self::assertDatabaseHas('operator_sms_interpretation_requests', [
+            'source_installation_id' => $installation->id,
+            'sms_record_id' => 'sms-record-0001',
+            'provider' => 'ORANGE_MONEY',
+            'sender' => 'ORANGEMNY',
+            'analysis_status' => 'pending',
+        ]);
+        self::assertDatabaseMissing('operator_sms_interpretation_requests', ['protected_sms_body' => $payload['sms_body']]);
+        self::assertSame(1, $installation->fresh()->mobile_replay_counter);
+    }
+
     public function test_revoked_installation_rejects_a_valid_mobile_envelope_without_mutating_state(): void
     {
         $installation = $this->installation();

@@ -46,6 +46,22 @@ internal object MobileEnvelopeFormat {
                     throw MobileEnvelopeException()
                 }
             }
+            "operator_sms_interpretation_request" -> {
+                if (payload.size !in 2..MAX_PAYLOAD_BYTES) throw MobileEnvelopeException()
+                try {
+                    val tokener = JSONTokener(String(payload, StandardCharsets.UTF_8))
+                    val parsed = tokener.nextValue() as? JSONObject ?: throw MobileEnvelopeException()
+                    if (tokener.nextClean().code != 0 || parsed.length() != 5 ||
+                        parsed.opt("record_id") !is String || parsed.opt("provider") !is String ||
+                        parsed.opt("sender") !is String || parsed.opt("sms_body") !is String || parsed.opt("received_at") !is String
+                    ) throw MobileEnvelopeException()
+                    parsed
+                } catch (_: MobileEnvelopeException) {
+                    throw MobileEnvelopeException()
+                } catch (_: Exception) {
+                    throw MobileEnvelopeException()
+                }
+            }
             "activation_acknowledgement" -> {
                 if (payload.isNotEmpty()) throw MobileEnvelopeException()
                 JSONObject()

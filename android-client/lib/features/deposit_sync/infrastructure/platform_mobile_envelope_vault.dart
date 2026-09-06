@@ -11,10 +11,19 @@ final class PlatformMobileEnvelopeVault implements MobileEnvelopeSealer {
 
   @override
   Future<MobileRequestEnvelope> sealDeposit(Uint8List payload) async {
+    return _seal('deposit', payload);
+  }
+
+  @override
+  Future<MobileRequestEnvelope> sealOperatorSmsInterpretationRequest(
+    Uint8List payload,
+  ) async => _seal('operator_sms_interpretation_request', payload);
+
+  Future<MobileRequestEnvelope> _seal(String operation, Uint8List payload) async {
     try {
       final Map<Object?, Object?>? value = await _channel.invokeMapMethod<Object?, Object?>(
         'seal',
-        <String, Object>{'operation': 'deposit', 'payload': payload},
+        <String, Object>{'operation': operation, 'payload': payload},
       );
       if (value == null) {
         throw const FormatException();
