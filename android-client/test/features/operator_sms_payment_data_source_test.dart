@@ -156,6 +156,63 @@ void main() {
     );
     expect(gateway.commitCalls, 0);
   });
+
+  test('a verified release persists its parser for later guarded inbox reads',
+      () async {
+    final Ed25519 algorithm = Ed25519();
+    final SimpleKeyPair pair = await algorithm.newKeyPair();
+    final SimplePublicKey publicKey = await pair.extractPublicKey();
+    const String approvedAt = '2026-09-06T00:00:00Z';
+    const String expiresAt = '2026-10-06T00:00:00Z';
+    final Signature signature = await algorithm.sign(
+      DeveloperApprovedOperatorPaymentPatternVerifier.canonicalPayload(
+        schema: '1',
+        provider: 'ORANGE_MONEY',
+        sender: 'ORANGE',
+        template: 'Paid {amount} {currency} ref {reference}',
+        version: 1,
+        approvedAt: approvedAt,
+        expiresAt: expiresAt,
+      ),
+      keyPair: pair,
+    );
+    final _Gateway gateway = _Gateway(records: <NativeSmsRecord>[
+      NativeSmsRecord(
+        id: 'd' * 43,
+        sender: 'ORANGE',
+        receivedAt: DateTime.utc(2026, 9, 6),
+        segments: 1,
+        body: 'Paid 12.50 USD ref REF-5678',
+      ),
+    ]);
+    final OperatorSmsPaymentDataSource source =
+        OperatorSmsPaymentDataSource(gateway: gateway);
+
+    await source.reanalyseRelease(
+      encodedRelease: jsonEncode(<String, Object>{
+        'schema_version': '1',
+        'provider': 'ORANGE_MONEY',
+        'sender': 'ORANGE',
+        'template': 'Paid {amount} {currency} ref {reference}',
+        'pattern_version': 1,
+        'approved_at': approvedAt,
+        'expires_at': expiresAt,
+        'signature': base64UrlEncode(signature.bytes).replaceAll('=', ''),
+      }),
+      pinnedSigningKey: Uint8List.fromList(publicKey.bytes),
+      now: DateTime.utc(2026, 9, 6, 0, 1),
+      scope: scope,
+    );
+
+    expect(gateway.profiles, hasLength(1));
+    final List<OperatorSmsPaymentData> laterRead = await source.read(scope);
+    expect(laterRead.single, isA<PaymentDataReadyForPush>());
+    expect(
+      (laterRead.single as PaymentDataReadyForPush).data.envelope.providerReference,
+      'REF-5678',
+    );
+    expect(gateway.commitCalls, 0);
+  });
 }
 
 final class _Gateway implements SmsGatewayPort {
@@ -165,7 +222,7 @@ final class _Gateway implements SmsGatewayPort {
   });
 
   final List<NativeSmsRecord> records;
-  final List<NativeOperatorPaymentProfile> profiles;
+  List<NativeOperatorPaymentProfile> profiles;
   int commitCalls = 0;
 
   @override
@@ -174,6 +231,22 @@ final class _Gateway implements SmsGatewayPort {
   @override
   Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles() async =>
       profiles;
+
+  @override
+  Future<List<NativeOperatorPaymentProfile>> upsertOperatorPaymentProfile(
+    NativeOperatorPaymentProfile profile,
+  ) async {
+    profiles = <NativeOperatorPaymentProfile>[
+      ...profiles.where(
+        (NativeOperatorPaymentProfile existing) => existing.sender != profile.sender,
+      ),
+      profile,
+    ]..sort(
+        (NativeOperatorPaymentProfile left, NativeOperatorPaymentProfile right) =>
+            left.sender.compareTo(right.sender),
+      );
+    return profiles;
+  }
 
   @override
   Future<void> commitInboxDecision(
