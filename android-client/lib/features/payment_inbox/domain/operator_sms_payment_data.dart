@@ -51,9 +51,38 @@ final class CapturedPaymentForPush {
   const CapturedPaymentForPush({
     required this.sourceRecordId,
     required this.envelope,
+    required this.provenance,
   });
   final String sourceRecordId;
   final PaymentEnvelope envelope;
+  final PaymentParserProvenance provenance;
+}
+
+/// Attribution travels with the local push-ready data; it lets the separate
+/// push owner audit exactly which local parsing authority created the value.
+final class PaymentParserProvenance {
+  const PaymentParserProvenance.manualConfiguration()
+      : kind = PaymentParserKind.manualConfiguration,
+        approvedPatternVersion = null;
+
+  const PaymentParserProvenance.developerApprovedPattern(
+    int patternVersion,
+  )   : assert(patternVersion > 0),
+        kind = PaymentParserKind.developerApprovedPattern,
+        approvedPatternVersion = patternVersion;
+
+  const PaymentParserProvenance.userConfirmedGemma4()
+      : kind = PaymentParserKind.userConfirmedGemma4,
+        approvedPatternVersion = null;
+
+  final PaymentParserKind kind;
+  final int? approvedPatternVersion;
+}
+
+enum PaymentParserKind {
+  manualConfiguration,
+  developerApprovedPattern,
+  userConfirmedGemma4,
 }
 
 final class OperatorSmsPaymentDataFactory {
@@ -64,6 +93,8 @@ final class OperatorSmsPaymentDataFactory {
     required SmsEnvelope sms,
     required OperatorSmsPaymentProfile profile,
     required OutboxScope scope,
+    PaymentParserProvenance provenance =
+        const PaymentParserProvenance.manualConfiguration(),
   }) {
     if (!_validSourceId(sourceRecordId) || !_validProfile(profile)) {
       return const PaymentDataNeedsReview('invalid_operator_payment_profile');
@@ -86,6 +117,7 @@ final class OperatorSmsPaymentDataFactory {
       capturedAt: sms.receivedAt,
       profile: profile,
       scope: scope,
+      provenance: provenance,
     );
   }
 }
@@ -137,6 +169,7 @@ final class Gemma4PaymentDataFactory {
       capturedAt: proposal.capturedAt,
       profile: proposal.profile,
       scope: proposal.scope,
+      provenance: const PaymentParserProvenance.userConfirmedGemma4(),
     );
   }
 }
@@ -162,6 +195,7 @@ OperatorSmsPaymentData _ready({
   required DateTime capturedAt,
   required OperatorSmsPaymentProfile profile,
   required OutboxScope scope,
+  required PaymentParserProvenance provenance,
 }) {
   final PaymentEnvelope? envelope = PaymentEnvelope.create(
     scope: scope,
@@ -175,7 +209,11 @@ OperatorSmsPaymentData _ready({
     return const PaymentDataNeedsReview('invalid_payment_data');
   }
   return PaymentDataReadyForPush(
-    CapturedPaymentForPush(sourceRecordId: sourceRecordId, envelope: envelope),
+    CapturedPaymentForPush(
+      sourceRecordId: sourceRecordId,
+      envelope: envelope,
+      provenance: provenance,
+    ),
   );
 }
 
