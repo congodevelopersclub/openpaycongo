@@ -11,6 +11,7 @@ use App\Models\DeveloperApplicationCredentialAudit;
 use App\Models\Organization;
 use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
+use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -145,6 +146,28 @@ final class DeveloperApplicationCredentialsTest extends TestCase
         self::assertEqualsCanonicalizing(['issued', 'revoked'], DeveloperApplicationCredentialAudit::query()->pluck('action')->all());
     }
 
+    public function test_service_token_usage_tracking_is_debounced(): void
+    {
+        $operator = $this->financialOperator('00000000-0000-4000-8000-000000000207');
+        $issued = app(ManageDeveloperApplicationCredentials::class)->issue($operator, 'Usage connector', ['payment-requests:read']);
+        $client = $issued->application->oauthClient()->firstOrFail();
+        $token = $this->tokenFor($client, $issued->clientSecret, 'payment-requests:read');
+        $firstUsedAt = CarbonImmutable::parse('2026-09-06 12:00:00 UTC');
+
+        $this->travelTo($firstUsedAt);
+        $this->withToken($token)->getJson('/services/identity')->assertOk();
+        self::assertTrue($client->refresh()->last_used_at->equalTo($firstUsedAt));
+
+        $this->travelTo($firstUsedAt->addSeconds(30));
+        $this->withToken($token)->getJson('/services/identity')->assertOk();
+        self::assertTrue($client->refresh()->last_used_at->equalTo($firstUsedAt));
+
+        $refreshedAt = $firstUsedAt->addSeconds(61);
+        $this->travelTo($refreshedAt);
+        $this->withToken($token)->getJson('/services/identity')->assertOk();
+        self::assertTrue($client->refresh()->last_used_at->equalTo($refreshedAt));
+    }
+
     public function test_filament_management_delivers_new_secret_without_public_component_state(): void
     {
         $operator = $this->financialOperator('00000000-0000-4000-8000-000000000205');
@@ -193,6 +216,29 @@ final class DeveloperApplicationCredentialsTest extends TestCase
         self::assertNull($audit->actor_user_id);
         self::assertSame((string) $actorId, $audit->actor_user_identifier);
         self::assertSame('issued', $audit->action);
+    }
+
+    public function test_audit_history_uses_uuid7_to_order_events_with_tied_timestamps(): void
+    {
+        $operator = $this->financialOperator('00000000-0000-4000-8000-000000000208');
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-06 12:00:00 UTC'));
+
+        try {
+            $issued = app(ManageDeveloperApplicationCredentials::class)->issue($operator, 'Ordered audit connector', ['payment-requests:read']);
+            app(ManageDeveloperApplicationCredentials::class)->rotate($operator, $issued->application);
+            app(ManageDeveloperApplicationCredentials::class)->revoke($operator, $issued->application->refresh());
+
+            $actions = Livewire::actingAs($operator)
+                ->test(ManageDeveloperApplications::class)
+                ->instance()
+                ->auditHistory()
+                ->pluck('action')
+                ->all();
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+
+        self::assertSame(['revoked', 'rotated', 'issued'], $actions);
     }
 
     private function financialOperator(string $organizationId): User

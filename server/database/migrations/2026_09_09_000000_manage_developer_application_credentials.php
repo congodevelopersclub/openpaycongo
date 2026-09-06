@@ -27,7 +27,7 @@ return new class extends Migration
             $table->string('actor_user_identifier', 64);
             $table->string('action', 32);
             $table->json('scopes');
-            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('created_at', 6)->useCurrent();
         });
     }
 

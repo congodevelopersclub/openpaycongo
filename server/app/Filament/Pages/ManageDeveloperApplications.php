@@ -120,7 +120,8 @@ final class ManageDeveloperApplications extends Page
 
         return DeveloperApplicationCredentialAudit::query()
             ->where('organization_id', $actor->organization_id)
-            ->latest('created_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->limit(10)
             ->get();
     }

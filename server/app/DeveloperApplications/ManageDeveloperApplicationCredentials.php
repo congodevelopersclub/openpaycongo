@@ -92,7 +92,7 @@ final class ManageDeveloperApplicationCredentials
 
     private function authorizedOrganizationId(User $actor): string
     {
-        if (! $actor->is_financial_operator || ! is_string($actor->organization_id)) {
+        if (! $actor->is_financial_operator || !is_string($actor->organization_id)) {
             throw new AuthorizationException;
         }
 
