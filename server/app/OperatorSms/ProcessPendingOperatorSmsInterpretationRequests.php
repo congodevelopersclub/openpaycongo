@@ -39,12 +39,20 @@ final class ProcessPendingOperatorSmsInterpretationRequests
             }
 
             try {
+                $provider = $request->provider;
+                $sender = $request->sender;
+                $body = $request->protected_sms_body;
+                if (! is_string($provider) || ! is_string($sender) || ! is_string($body)) {
+                    $this->markFailed($request, 'gemma_pattern_analysis_failed');
+
+                    continue;
+                }
                 $proposal = $this->review->propose(
                     $request->organization_id,
                     new OperatorPaymentPatternSubmission(
-                        sender: $request->sender,
-                        body: $request->protected_sms_body,
-                        provider: $request->provider,
+                        sender: $sender,
+                        body: $body,
+                        provider: $provider,
                     ),
                     $this->author,
                 );

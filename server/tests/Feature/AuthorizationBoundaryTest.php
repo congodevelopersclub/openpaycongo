@@ -122,7 +122,7 @@ final class AuthorizationBoundaryTest extends TestCase
 
         self::assertNotNull($livewireUpdate);
         self::assertNotContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($livewireUpdate));
-        self::assertCount(5, $operationsRoutes);
+        self::assertCount(6, $operationsRoutes);
 
         foreach ($operationsRoutes as $route) {
             self::assertContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($route));
