@@ -16,6 +16,10 @@ use RuntimeException;
  */
 final class ProcessPendingOperatorSmsInterpretationRequests
 {
+    private const int FailedRetryDelayHours = 6;
+
+    private const int StalledClaimDelayMinutes = 10;
+
     public function __construct(
         private readonly OperatorPaymentPatternReview $review,
         private readonly Gemma4PaymentPatternAuthor $author,
@@ -24,9 +28,20 @@ final class ProcessPendingOperatorSmsInterpretationRequests
     public function execute(int $limit = 25): int
     {
         $limit = max(1, min($limit, 100));
+        $now = now('UTC');
         $ids = OperatorSmsInterpretationRequest::query()
             ->where('expires_at', '>', now('UTC'))
-            ->where('analysis_status', 'pending')
+            ->where(function ($query) use ($now): void {
+                $query->where('analysis_status', 'pending')
+                    ->orWhere(function ($query) use ($now): void {
+                        $query->where('analysis_status', 'failed')
+                            ->where('analysed_at', '<=', $now->copy()->subHours(self::FailedRetryDelayHours));
+                    })
+                    ->orWhere(function ($query) use ($now): void {
+                        $query->where('analysis_status', 'processing')
+                            ->where('analysis_started_at', '<=', $now->copy()->subMinutes(self::StalledClaimDelayMinutes));
+                    });
+            })
             ->whereNotNull('provider')
             ->orderBy('created_at')
             ->limit($limit)
@@ -72,7 +87,16 @@ final class ProcessPendingOperatorSmsInterpretationRequests
     {
         return DB::transaction(function () use ($id): ?OperatorSmsInterpretationRequest {
             $request = OperatorSmsInterpretationRequest::query()->lockForUpdate()->find($id);
-            if ($request === null || $request->analysis_status !== 'pending'
+            $retryable = $request !== null && ($request->analysis_status === 'pending'
+                || ($request->analysis_status === 'failed'
+                    && $request->analysed_at !== null
+                    && CarbonImmutable::parse($request->analysed_at, 'UTC')
+                        ->lessThanOrEqualTo(now('UTC')->subHours(self::FailedRetryDelayHours)))
+                || ($request->analysis_status === 'processing'
+                    && $request->analysis_started_at !== null
+                    && CarbonImmutable::parse($request->analysis_started_at, 'UTC')
+                        ->lessThanOrEqualTo(now('UTC')->subMinutes(self::StalledClaimDelayMinutes))));
+            if (! $retryable
                 || CarbonImmutable::parse($request->expires_at, 'UTC')->isPast()
                 || $request->provider === null) {
                 return null;

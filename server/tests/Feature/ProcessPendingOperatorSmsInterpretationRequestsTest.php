@@ -72,6 +72,42 @@ final class ProcessPendingOperatorSmsInterpretationRequestsTest extends TestCase
         self::assertSame('proposed', $proposed->analysis_status);
     }
 
+    public function test_failed_retained_evidence_is_reanalysed_after_a_bounded_delay_but_not_immediately(): void
+    {
+        config()->set('services.gemma.private_inference_url', 'http://gemma-inference.internal/v1/chat/completions');
+        config()->set('services.gemma.auth_token', 'private-test-token');
+        config()->set('services.gemma.model', 'gemma-4-26b-a4b-it');
+        config()->set('services.gemma.timeout_seconds', 5);
+        Http::fake([
+            'http://gemma-inference.internal/v1/chat/completions' => Http::response([
+                'choices' => [['message' => ['content' => json_encode([
+                    'provider' => 'ORANGE_MONEY',
+                    'sender' => 'ORANGE',
+                    'template' => 'Paid {amount} {currency} ref {reference}',
+                ], JSON_THROW_ON_ERROR)]]],
+            ]),
+        ]);
+        $delayed = $this->request([
+            'analysis_status' => 'failed',
+            'analysis_error' => 'gemma_pattern_author_unavailable',
+            'analysed_at' => now('UTC')->subHours(7),
+        ]);
+        $fresh = $this->request([
+            'sms_record_id' => str_repeat('f', 43),
+            'analysis_status' => 'failed',
+            'analysis_error' => 'gemma_pattern_author_unavailable',
+            'analysed_at' => now('UTC')->subMinute(),
+        ]);
+
+        self::assertSame(1, app(ProcessPendingOperatorSmsInterpretationRequests::class)->execute());
+
+        $delayed->refresh();
+        $fresh->refresh();
+        self::assertSame('proposed', $delayed->analysis_status);
+        self::assertSame('failed', $fresh->analysis_status);
+        Http::assertSentCount(1);
+    }
+
     /** @param array<string, mixed> $overrides */
     private function request(array $overrides = []): OperatorSmsInterpretationRequest
     {

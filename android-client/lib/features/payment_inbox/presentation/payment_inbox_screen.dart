@@ -19,6 +19,10 @@ import '../../payment_outbox/presentation/payment_lifecycle_status_card.dart';
 import '../../payment_outbox/presentation/payment_request_lifecycle_bloc.dart';
 import '../../payment_outbox/presentation/payment_request_lifecycle_card.dart';
 import '../domain/payment_ingestion.dart';
+import '../infrastructure/operator_sms_analysis_envelope_transport.dart';
+import '../infrastructure/operator_sms_payment_data_source.dart';
+import '../../deposit_sync/data/mobile_deposit_http_transport.dart';
+import '../../deposit_sync/infrastructure/platform_mobile_envelope_vault.dart';
 
 final class PaymentInboxScreen extends StatefulWidget {
   const PaymentInboxScreen({
@@ -34,6 +38,7 @@ final class PaymentInboxScreen extends StatefulWidget {
     this.paymentRequestLifecycle,
     this.syncCursor,
     this.inboxBloc,
+    this.submitFailedSmsForAnalysis,
     required this.gateway,
   });
   final SmsPermissionState smsPermissionState;
@@ -47,6 +52,8 @@ final class PaymentInboxScreen extends StatefulWidget {
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final SyncCursorBloc? syncCursor;
   final PaymentInboxBloc? inboxBloc;
+  final Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+      submitFailedSmsForAnalysis;
   final SmsGatewayPort gateway;
   @override
   State<PaymentInboxScreen> createState() => _PaymentInboxScreenState();
@@ -274,6 +281,8 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                           ),
                         ),
                         onRejected: () => _confirmReject(record),
+                        onSendForPatternAnalysis: () =>
+                            _confirmAnalysisSubmission(record),
                       ),
                     const SizedBox(height: 24),
                   ],
@@ -320,6 +329,59 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
       );
     }
   }
+
+  Future<void> _confirmAnalysisSubmission(NativeSmsRecord record) async {
+    final bool confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) => AlertDialog(
+            title: const Text('Send for pattern analysis?'),
+            content: const Text(
+              'This sends this encrypted SMS evidence to the private OpenPayCongo server so Gemma 4 can propose a parser pattern. It does not send a payment, and no pattern can work until a developer approves and signs a release.',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Send for review'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    try {
+      final Future<OperatorSmsAnalysisSubmission> Function(String recordId)
+      submit = widget.submitFailedSmsForAnalysis ?? _submitWithPairedEnvelope;
+      final OperatorSmsAnalysisSubmission result = await submit(record.id);
+      if (!mounted) return;
+      final String message = result is OperatorSmsAnalysisAlreadySubmitted
+          ? 'This SMS was already sent for developer review. No payment was sent.'
+          : 'SMS sent for developer pattern review. No payment was sent.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not submit SMS evidence. It remains encrypted on this device.'),
+      ));
+    }
+  }
+
+  Future<OperatorSmsAnalysisSubmission> _submitWithPairedEnvelope(
+    String recordId,
+  ) => OperatorSmsPaymentDataSource(gateway: widget.gateway)
+      .submitFailedSmsForAnalysis(
+        sourceRecordId: recordId,
+        userConfirmed: true,
+        now: DateTime.now().toUtc(),
+        transport: OperatorSmsAnalysisEnvelopeTransport(
+          vault: const PlatformMobileEnvelopeVault(),
+          http: DartMobileDepositHttpPort(),
+        ),
+      );
 
   String? _setupFeedbackMessage(
     PaymentInboxFeedback feedback,
@@ -572,11 +634,13 @@ final class _NativeSmsCard extends StatelessWidget {
     required this.busy,
     required this.onReviewed,
     required this.onRejected,
+    required this.onSendForPatternAnalysis,
   });
   final NativeSmsRecord record;
   final bool busy;
   final VoidCallback onReviewed;
   final VoidCallback onRejected;
+  final VoidCallback onSendForPatternAnalysis;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -605,6 +669,10 @@ final class _NativeSmsCard extends StatelessWidget {
                 OutlinedButton(
                   onPressed: onRejected,
                   child: const Text('Reject evidence'),
+                ),
+                TextButton(
+                  onPressed: onSendForPatternAnalysis,
+                  child: const Text('Send for pattern review'),
                 ),
               ],
             ),

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/app_lock/presentation/app_lock_bloc.dart';
 import 'package:opencongopay/features/payment_inbox/domain/payment_ingestion.dart';
+import 'package:opencongopay/features/payment_inbox/infrastructure/operator_sms_analysis_envelope_transport.dart';
 import 'package:opencongopay/features/payment_inbox/presentation/payment_inbox_screen.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_session_bloc.dart';
 import 'package:opencongopay/features/pairing/presentation/pairing_enrollment_bloc.dart';
@@ -76,6 +77,8 @@ void main() {
     PairingEnrollmentBloc? pairingEnrollment,
     PairingSessionBloc? pairingSession,
     SyncCursorBloc? syncCursor,
+    Future<OperatorSmsAnalysisSubmission> Function(String recordId)?
+    submitFailedSmsForAnalysis,
   }) => MaterialApp(
     home: PaymentInboxScreen(
       gateway: gateway ?? _FakeGateway(),
@@ -84,6 +87,7 @@ void main() {
       pairingEnrollment: pairingEnrollment,
       pairingSession: pairingSession,
       syncCursor: syncCursor,
+      submitFailedSmsForAnalysis: submitFailedSmsForAnalysis,
     ),
   );
 
@@ -805,6 +809,40 @@ final class _FakeGateway implements SmsGatewayPort {
       developerApprovedPatternVersion: profile.patternVersion,
     ),
   );
+
+  testWidgets('explicit consent submits evidence for review without a payment decision', (
+    WidgetTester tester,
+  ) async {
+    final _FakeGateway gateway = _FakeGateway(records: <NativeSmsRecord>[
+      NativeSmsRecord(
+        id: 'a' * 43,
+        sender: 'ORANGE',
+        receivedAt: DateTime.utc(2026, 8, 10),
+        segments: 1,
+        body: 'Paid 10 USD ref ABCD-1234',
+      ),
+    ]);
+    String? submitted;
+    await tester.pumpWidget(app(
+      gateway: gateway,
+      submitFailedSmsForAnalysis: (String recordId) async {
+        submitted = recordId;
+        return const OperatorSmsAnalysisSubmitted();
+      },
+    ));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Send for pattern review'), 300);
+    await tester.tap(find.text('Send for pattern review'));
+    await tester.pumpAndSettle();
+    expect(find.text('Send for pattern analysis?'), findsOneWidget);
+    expect(find.textContaining('does not send a payment'), findsOneWidget);
+    await tester.tap(find.text('Send for review'));
+    await tester.pumpAndSettle();
+
+    expect(submitted, 'a' * 43);
+    expect(gateway.decisions, isEmpty);
+    expect(find.textContaining('No payment was sent.'), findsOneWidget);
+  });
 
   @override
   Future<SmsAccessState> permissionState() async => SmsAccessState.granted;
