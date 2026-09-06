@@ -443,7 +443,7 @@ class MainActivity : FlutterFragmentActivity() {
         val generation = requireSmsGatewayAccess(result) ?: return
         smsTasks.submit(
             generation = generation,
-            operation = {
+            operation = { commit ->
                 MobileEnvelopeVault(
                     context = applicationContext,
                     accessLease = accessGuard.lease(
@@ -452,6 +452,7 @@ class MainActivity : FlutterFragmentActivity() {
                         },
                         expectedGeneration = generation,
                     ),
+                    acknowledgementCommit = { action -> commit.commit(action) },
                 ).openActivationAcknowledgement(
                     installationId,
                     counter,

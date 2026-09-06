@@ -199,6 +199,7 @@ internal class MobileEnvelopeVault(
     private val accessLease: SensitiveOperationLease = object : SensitiveOperationLease {
         override fun <T> use(action: () -> T): T = action()
     },
+    private val acknowledgementCommit: ((() -> Unit) -> Unit) = { action -> action() },
 ) {
     private val counterStore = AndroidMobileEnvelopeCounterStore(context)
     private val counterAllocator = MobileEnvelopeCounterAllocator(counterStore)
@@ -356,7 +357,9 @@ internal class MobileEnvelopeVault(
             } else {
                 MobileEnvelopeFormat.responseOutcome(status, plaintext)
             }
-            if (activationAcknowledgement) directionalVault.markActivationAcknowledged()
+            if (activationAcknowledgement) {
+                acknowledgementCommit { directionalVault.markActivationAcknowledged() }
+            }
             return outcome
         } catch (_: MobileEnvelopeException) {
             throw MobileEnvelopeException()
