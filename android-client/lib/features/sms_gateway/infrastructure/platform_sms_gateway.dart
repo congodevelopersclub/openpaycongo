@@ -112,6 +112,32 @@ final class PlatformSmsGateway implements SmsGatewayPort {
   }
 
   @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async {
+    final Map<Object?, Object?>? value = await _channel
+        .invokeMethod<Map<Object?, Object?>>(
+          'activateDeveloperApprovedOperatorPaymentProfile',
+          _encodeDeveloperApprovedProfile(profile),
+        );
+    if (value == null ||
+        !_hasExactKeys(value, const <Object?>{'activation', 'profile'})) {
+      throw const FormatException('invalid_approved_pattern_activation');
+    }
+    final DeveloperApprovedPatternActivation activation = switch (value['activation']) {
+      'installed' => DeveloperApprovedPatternActivation.installed,
+      'already_current' => DeveloperApprovedPatternActivation.alreadyCurrent,
+      'stale' => DeveloperApprovedPatternActivation.stale,
+      _ => throw const FormatException('invalid_approved_pattern_activation'),
+    };
+    return DeveloperApprovedPatternActivationResult(
+      activation: activation,
+      profile: _decodeOperatorPaymentProfile(value['profile']),
+    );
+  }
+
+  @override
   Future<NativeCaptureHealth> captureHealth() async {
     final Map<Object?, Object?>? value = await _channel
         .invokeMethod<Map<Object?, Object?>>('captureHealth');
@@ -382,6 +408,28 @@ final class PlatformSmsGateway implements SmsGatewayPort {
     };
   }
 
+  static Map<String, Object?> _encodeDeveloperApprovedProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) {
+    final NativeOperatorPaymentProfile native = NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    );
+    _encodeProfile(native);
+    if (profile.patternVersion < 1) {
+      throw const FormatException('invalid_approved_pattern_activation');
+    }
+    return <String, Object?>{
+      'sender': profile.sender,
+      'provider': profile.provider,
+      'template': profile.template,
+      'pattern_version': profile.patternVersion,
+    };
+  }
+
   static List<NativeOperatorPaymentProfile> _operatorPaymentProfiles(
     List<Object?> values,
   ) {
@@ -410,6 +458,7 @@ final class PlatformSmsGateway implements SmsGatewayPort {
           'provider',
           'structure',
           'template',
+          'developer_approved_pattern_version',
         })) {
       throw const FormatException('invalid_operator_payment_profile');
     }
@@ -417,6 +466,7 @@ final class PlatformSmsGateway implements SmsGatewayPort {
     final Object? provider = value['provider'];
     final Object? structureValue = value['structure'];
     final Object? template = value['template'];
+    final Object? approvedVersion = value['developer_approved_pattern_version'];
     final NativeOperatorPaymentStructure? structure = switch (structureValue) {
       'manual' => NativeOperatorPaymentStructure.manual,
       'gemma4' => NativeOperatorPaymentStructure.gemma4,
@@ -434,7 +484,11 @@ final class PlatformSmsGateway implements SmsGatewayPort {
                 template.length > 512 ||
                 utf8.encode(template).length > 2048)) ||
         (structure == NativeOperatorPaymentStructure.gemma4 &&
-            template != null)) {
+            template != null) ||
+        approvedVersion is! int? ||
+        (approvedVersion != null &&
+            (approvedVersion < 1 ||
+                structure != NativeOperatorPaymentStructure.manual))) {
       throw const FormatException('invalid_operator_payment_profile');
     }
     return NativeOperatorPaymentProfile(
@@ -442,6 +496,7 @@ final class PlatformSmsGateway implements SmsGatewayPort {
       provider: provider,
       structure: structure,
       template: template,
+      developerApprovedPatternVersion: approvedVersion,
     );
   }
 

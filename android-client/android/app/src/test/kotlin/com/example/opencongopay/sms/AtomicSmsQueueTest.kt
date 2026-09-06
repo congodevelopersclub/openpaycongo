@@ -335,6 +335,33 @@ class AtomicSmsQueueTest {
     }
 
     @Test
+    fun `developer approved profile is durable and cannot be downgraded or manually overwritten`() {
+        val approved = OperatorPaymentProfileRecord(
+            sender = "ORANGE",
+            provider = "ORANGE_MONEY",
+            structure = OperatorPaymentStructure.manual,
+            template = "Paid {amount} {currency} ref {reference}",
+            developerApprovedPatternVersion = 2,
+        )
+        val queue = queue()
+        assertEquals(
+            ApprovedOperatorPatternActivation.installed,
+            queue.activateDeveloperApprovedOperatorPaymentProfile(approved).activation,
+        )
+        assertEquals(listOf(approved), queue().operatorPaymentProfiles())
+
+        val older = approved.copy(developerApprovedPatternVersion = 1)
+        assertEquals(
+            ApprovedOperatorPatternActivation.stale,
+            queue().activateDeveloperApprovedOperatorPaymentProfile(older).activation,
+        )
+        assertFailsWith<IllegalArgumentException> {
+            queue().upsertOperatorPaymentProfile(approved.copy(developerApprovedPatternVersion = null))
+        }
+        assertEquals(listOf(approved), queue().operatorPaymentProfiles())
+    }
+
+    @Test
     fun appendOnlyDecisionJournalNeverBlocksLaterCapture() {
         val queue = queue(
             root = temporary.newFolder("decision-capacity"),

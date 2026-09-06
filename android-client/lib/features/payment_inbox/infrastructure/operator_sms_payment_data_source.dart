@@ -46,9 +46,10 @@ final class OperatorSmsPaymentDataSource {
     return List<OperatorSmsPaymentData>.unmodifiable(data);
   }
 
-  /// Installs no state and does not acknowledge an SMS. The independently-owned
-  /// release delivery worker calls this with one backend-published release; only
-  /// the verifier can obtain the authority type accepted by reanalysis.
+  /// The independently-owned release delivery worker calls this with one
+  /// backend-published release. Native storage is the monotonic authority: an
+  /// older (or conflicting same-version) release cannot replace an activated
+  /// developer-approved parser. This never acknowledges an SMS.
   Future<PatternReleaseDelivery> reanalyseRelease({
     required String encodedRelease,
     required Uint8List pinnedSigningKey,
@@ -63,6 +64,19 @@ final class OperatorSmsPaymentDataSource {
     );
     if (release == null) {
       return const PatternReleaseRejected('invalid_or_expired_release');
+    }
+
+    final DeveloperApprovedPatternActivationResult activation =
+        await gateway.activateDeveloperApprovedOperatorPaymentProfile(
+      DeveloperApprovedOperatorPaymentProfile(
+        sender: release.proposal.sender,
+        provider: release.proposal.provider,
+        template: release.proposal.template.value,
+        patternVersion: release.proposal.patternVersion,
+      ),
+    );
+    if (activation.activation == DeveloperApprovedPatternActivation.stale) {
+      return const PatternReleaseRejected('stale_approved_pattern_release');
     }
 
     final SenderIdentity sender =

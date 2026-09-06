@@ -37,6 +37,7 @@ void main() {
                 'provider': 'ORANGE_MONEY',
                 'structure': 'manual',
                 'template': 'Paid {amount} {currency} ref {reference}',
+                'developer_approved_pattern_version': null,
               },
             ],
             'upsertOperatorPaymentProfile' => <Map<String, Object?>>[
@@ -45,8 +46,19 @@ void main() {
                 'provider': 'ORANGE_MONEY',
                 'structure': 'gemma4',
                 'template': null,
+                'developer_approved_pattern_version': null,
               },
             ],
+            'activateDeveloperApprovedOperatorPaymentProfile' => <String, Object?>{
+              'activation': 'installed',
+              'profile': <String, Object?>{
+                'sender': 'ORANGE',
+                'provider': 'ORANGE_MONEY',
+                'structure': 'manual',
+                'template': 'Paid {amount} {currency} ref {reference}',
+                'developer_approved_pattern_version': 2,
+              },
+            },
             'exportDecisions' => <String, Object?>{
               'records': <Map<String, Object>>[
                 <String, Object>{
@@ -99,6 +111,17 @@ void main() {
         )).single.template,
         isNull,
       );
+      expect(
+        (await gateway.activateDeveloperApprovedOperatorPaymentProfile(
+          const DeveloperApprovedOperatorPaymentProfile(
+            sender: 'ORANGE',
+            provider: 'ORANGE_MONEY',
+            template: 'Paid {amount} {currency} ref {reference}',
+            patternVersion: 2,
+          ),
+        )).activation,
+        DeveloperApprovedPatternActivation.installed,
+      );
       final List<NativeSmsRecord> records = await gateway.drainInbox();
       expect(records.single.sender, 'ORANGE');
       final NativeCaptureHealth health = await gateway.captureHealth();
@@ -120,6 +143,7 @@ void main() {
         'listTrustedSenders',
         'listOperatorPaymentProfiles',
         'upsertOperatorPaymentProfile',
+        'activateDeveloperApprovedOperatorPaymentProfile',
         'drainInbox',
         'captureHealth',
         'probeStorage',

@@ -69,11 +69,38 @@ final class NativeOperatorPaymentProfile {
     required this.provider,
     required this.structure,
     this.template,
+    this.developerApprovedPatternVersion,
   });
   final String sender;
   final String provider;
   final NativeOperatorPaymentStructure structure;
   final String? template;
+  /// Present only for a signed backend pattern that native storage accepted.
+  final int? developerApprovedPatternVersion;
+}
+
+final class DeveloperApprovedOperatorPaymentProfile {
+  const DeveloperApprovedOperatorPaymentProfile({
+    required this.sender,
+    required this.provider,
+    required this.template,
+    required this.patternVersion,
+  });
+  final String sender;
+  final String provider;
+  final String template;
+  final int patternVersion;
+}
+
+enum DeveloperApprovedPatternActivation { installed, alreadyCurrent, stale }
+
+final class DeveloperApprovedPatternActivationResult {
+  const DeveloperApprovedPatternActivationResult({
+    required this.activation,
+    required this.profile,
+  });
+  final DeveloperApprovedPatternActivation activation;
+  final NativeOperatorPaymentProfile profile;
 }
 
 abstract interface class SmsGatewayPort {
@@ -90,6 +117,10 @@ abstract interface class SmsGatewayPort {
     NativeOperatorPaymentProfile profile,
   );
   Future<List<NativeOperatorPaymentProfile>> listOperatorPaymentProfiles();
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) => throw UnimplementedError();
   Future<NativeCaptureHealth> captureHealth();
   Future<bool> probeStorage();
   Future<NativeDecisionPage> exportDecisions({int limit = 100, String? cursor});

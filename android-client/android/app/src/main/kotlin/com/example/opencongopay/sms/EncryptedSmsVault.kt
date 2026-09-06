@@ -66,6 +66,8 @@ internal class EncryptedSmsVault(context: Context) {
     fun revokeTrustedSender(value: String): List<String> = queue.revokeTrustedSender(value)
     fun upsertOperatorPaymentProfile(profile: OperatorPaymentProfileRecord): List<OperatorPaymentProfileRecord> =
         queue.upsertOperatorPaymentProfile(profile)
+    fun activateDeveloperApprovedOperatorPaymentProfile(profile: OperatorPaymentProfileRecord): ApprovedOperatorPatternActivationResult =
+        queue.activateDeveloperApprovedOperatorPaymentProfile(profile)
     fun operatorPaymentProfiles(): List<OperatorPaymentProfileRecord> = queue.operatorPaymentProfiles()
     fun isTrustedSender(sender: String): Boolean = queue.isTrustedSender(sender)
     fun persistIfAbsent(record: TrustedSmsRecord): PersistResult = queue.persistIfAbsent(record)

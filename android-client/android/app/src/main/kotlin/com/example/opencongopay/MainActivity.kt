@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.util.Base64
 import android.view.WindowManager
 import com.congodeveloperclub.opencongopay.sms.CaptureDecision
+import com.congodeveloperclub.opencongopay.sms.ApprovedOperatorPatternActivation
 import com.congodeveloperclub.opencongopay.sms.DecisionConflictException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskBusyException
 import com.congodeveloperclub.opencongopay.sms.GuardedTaskRunner
@@ -134,6 +135,7 @@ class MainActivity : FlutterFragmentActivity() {
             "clearTrustedSenders" -> clearTrustedSenders(result)
             "revokeTrustedSender" -> revokeTrustedSender(call, result)
             "upsertOperatorPaymentProfile" -> upsertOperatorPaymentProfile(call, result)
+            "activateDeveloperApprovedOperatorPaymentProfile" -> activateDeveloperApprovedOperatorPaymentProfile(call, result)
             "listOperatorPaymentProfiles" -> listOperatorPaymentProfiles(result)
             "drainInbox" -> drainInbox(result)
             "captureHealth" -> captureHealth(result)
@@ -709,11 +711,44 @@ class MainActivity : FlutterFragmentActivity() {
         )
     }
 
+    private fun activateDeveloperApprovedOperatorPaymentProfile(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+        val sender = arguments?.get("sender") as? String
+        val provider = arguments?.get("provider") as? String
+        val template = arguments?.get("template") as? String
+        val version = (arguments?.get("pattern_version") as? Number)?.toInt()
+        if (arguments == null || arguments.keys.toSet() != setOf("sender", "provider", "template", "pattern_version") ||
+            sender == null || provider == null || template == null || version == null || version < 1
+        ) {
+            result.error("invalid_operator_profile", "Developer-approved operator pattern is invalid", null)
+            return
+        }
+        runSmsTask(
+            result,
+            operation = {
+                val activation = SmsVaultProvider.get(applicationContext).activateDeveloperApprovedOperatorPaymentProfile(
+                    OperatorPaymentProfileRecord(sender, provider, OperatorPaymentStructure.manual, template, version),
+                )
+                mapOf(
+                    "activation" to when (activation.activation) {
+                        ApprovedOperatorPatternActivation.installed -> "installed"
+                        ApprovedOperatorPatternActivation.alreadyCurrent -> "already_current"
+                        ApprovedOperatorPatternActivation.stale -> "stale"
+                    },
+                    "profile" to operatorPaymentProfileForFlutter(activation.profile),
+                )
+            },
+            onSuccess = result::success,
+            onFailure = { result.error("secure_storage_failure", "Developer-approved pattern outcome is unknown; reload", null) },
+        )
+    }
+
     private fun operatorPaymentProfileForFlutter(profile: OperatorPaymentProfileRecord): Map<String, Any?> = mapOf(
         "sender" to profile.sender,
         "provider" to profile.provider,
         "structure" to profile.structure.name,
         "template" to profile.template,
+        "developer_approved_pattern_version" to profile.developerApprovedPatternVersion,
     )
 
     private fun drainInbox(result: MethodChannel.Result) {

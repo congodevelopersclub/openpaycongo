@@ -211,6 +211,10 @@ void main() {
       (laterRead.single as PaymentDataReadyForPush).data.envelope.providerReference,
       'REF-5678',
     );
+    expect(
+      (laterRead.single as PaymentDataReadyForPush).data.provenance.kind,
+      PaymentParserKind.developerApprovedPattern,
+    );
     expect(gateway.commitCalls, 0);
   });
 }
@@ -246,6 +250,37 @@ final class _Gateway implements SmsGatewayPort {
             left.sender.compareTo(right.sender),
       );
     return profiles;
+  }
+
+  @override
+  Future<DeveloperApprovedPatternActivationResult>
+  activateDeveloperApprovedOperatorPaymentProfile(
+    DeveloperApprovedOperatorPaymentProfile profile,
+  ) async {
+    final NativeOperatorPaymentProfile next = NativeOperatorPaymentProfile(
+      sender: profile.sender,
+      provider: profile.provider,
+      structure: NativeOperatorPaymentStructure.manual,
+      template: profile.template,
+      developerApprovedPatternVersion: profile.patternVersion,
+    );
+    final List<NativeOperatorPaymentProfile> matching = profiles
+        .where((NativeOperatorPaymentProfile value) => value.sender == profile.sender)
+        .toList(growable: false);
+    final NativeOperatorPaymentProfile? current =
+        matching.isEmpty ? null : matching.single;
+    if (current?.developerApprovedPatternVersion != null &&
+        current!.developerApprovedPatternVersion! > profile.patternVersion) {
+      return DeveloperApprovedPatternActivationResult(
+        activation: DeveloperApprovedPatternActivation.stale,
+        profile: current,
+      );
+    }
+    await upsertOperatorPaymentProfile(next);
+    return DeveloperApprovedPatternActivationResult(
+      activation: DeveloperApprovedPatternActivation.installed,
+      profile: next,
+    );
   }
 
   @override

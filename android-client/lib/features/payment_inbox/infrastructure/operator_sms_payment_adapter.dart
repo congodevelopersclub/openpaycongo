@@ -36,6 +36,11 @@ final class OperatorSmsPaymentAdapter {
         sms: sms,
         profile: configured,
         scope: scope,
+        provenance: profile.developerApprovedPatternVersion == null
+            ? const PaymentParserProvenance.manualConfiguration()
+            : PaymentParserProvenance.developerApprovedPattern(
+                profile.developerApprovedPatternVersion!,
+              ),
       ),
       Gemma4AssistedPaymentStructure() =>
         const PaymentDataNeedsReview('gemma4_proposal_required'),

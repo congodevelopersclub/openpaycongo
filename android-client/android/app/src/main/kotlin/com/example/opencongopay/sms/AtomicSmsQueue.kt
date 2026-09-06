@@ -24,6 +24,13 @@ internal data class OperatorPaymentProfileRecord(
     val provider: String,
     val structure: OperatorPaymentStructure,
     val template: String?,
+    val developerApprovedPatternVersion: Int? = null,
+)
+
+internal enum class ApprovedOperatorPatternActivation { installed, alreadyCurrent, stale }
+internal data class ApprovedOperatorPatternActivationResult(
+    val activation: ApprovedOperatorPatternActivation,
+    val profile: OperatorPaymentProfileRecord,
 )
 
 internal enum class PersistResult { stored, duplicate, decided, faulted }
@@ -228,6 +235,7 @@ internal class AtomicSmsQueue(
     @Synchronized
     fun upsertOperatorPaymentProfile(profile: OperatorPaymentProfileRecord): List<OperatorPaymentProfileRecord> {
         validateProfile(profile)
+        require(operatorPaymentProfiles().none { it.sender == profile.sender && it.developerApprovedPatternVersion != null })
         addTrustedSender(profile.sender)
         val next = (operatorPaymentProfiles() + profile)
             .associateBy(OperatorPaymentProfileRecord::sender)
@@ -235,6 +243,31 @@ internal class AtomicSmsQueue(
             .sortedBy(OperatorPaymentProfileRecord::sender)
         writeOperatorPaymentProfiles(next)
         return next
+    }
+
+    @Synchronized
+    fun activateDeveloperApprovedOperatorPaymentProfile(
+        profile: OperatorPaymentProfileRecord,
+    ): ApprovedOperatorPatternActivationResult {
+        validateProfile(profile)
+        require(profile.structure == OperatorPaymentStructure.manual)
+        require(profile.developerApprovedPatternVersion != null)
+        val current = operatorPaymentProfiles().firstOrNull { it.sender == profile.sender }
+        if (current?.developerApprovedPatternVersion != null) {
+            val currentVersion = checkNotNull(current.developerApprovedPatternVersion)
+            val incomingVersion = checkNotNull(profile.developerApprovedPatternVersion)
+            if (incomingVersion < currentVersion || (incomingVersion == currentVersion && current != profile)) {
+                return ApprovedOperatorPatternActivationResult(ApprovedOperatorPatternActivation.stale, current)
+            }
+            if (incomingVersion == currentVersion) {
+                return ApprovedOperatorPatternActivationResult(ApprovedOperatorPatternActivation.alreadyCurrent, current)
+            }
+        }
+        addTrustedSender(profile.sender)
+        val next = (operatorPaymentProfiles().filterNot { it.sender == profile.sender } + profile)
+            .sortedBy(OperatorPaymentProfileRecord::sender)
+        writeOperatorPaymentProfiles(next)
+        return ApprovedOperatorPatternActivationResult(ApprovedOperatorPatternActivation.installed, profile)
     }
 
     @Synchronized
@@ -282,7 +315,7 @@ internal class AtomicSmsQueue(
         canonical.forEach(::validateProfile)
         val cleartext = ByteArrayOutputStream().use { bytes ->
             DataOutputStream(bytes).use { output ->
-                output.writeInt(1)
+                output.writeInt(2)
                 output.writeInt(canonical.size)
                 canonical.forEach { profile ->
                     output.writeUTF(profile.sender)
@@ -290,6 +323,8 @@ internal class AtomicSmsQueue(
                     output.writeUTF(profile.structure.name)
                     output.writeBoolean(profile.template != null)
                     profile.template?.let(output::writeUTF)
+                    output.writeBoolean(profile.developerApprovedPatternVersion != null)
+                    profile.developerApprovedPatternVersion?.let(output::writeInt)
                 }
             }
             bytes.toByteArray()
@@ -307,7 +342,8 @@ internal class AtomicSmsQueue(
 
     private fun decodeOperatorPaymentProfiles(cleartext: ByteArray): List<OperatorPaymentProfileRecord> =
         DataInputStream(ByteArrayInputStream(cleartext)).use { input ->
-            require(input.readInt() == 1)
+            val version = input.readInt()
+            require(version in 1..2)
             val count = input.readInt()
             require(count in 0..MAX_OPERATOR_PROFILES)
             val profiles = List(count) {
@@ -315,7 +351,8 @@ internal class AtomicSmsQueue(
                 val provider = input.readUTF()
                 val structure = OperatorPaymentStructure.valueOf(input.readUTF())
                 val template = if (input.readBoolean()) input.readUTF() else null
-                OperatorPaymentProfileRecord(sender, provider, structure, template).also(::validateProfile)
+                val approvedVersion = if (version >= 2 && input.readBoolean()) input.readInt() else null
+                OperatorPaymentProfileRecord(sender, provider, structure, template, approvedVersion).also(::validateProfile)
             }
             require(input.available() == 0)
             require(profiles == profiles.sortedBy(OperatorPaymentProfileRecord::sender))
@@ -334,6 +371,8 @@ internal class AtomicSmsQueue(
             )
             OperatorPaymentStructure.gemma4 -> require(profile.template == null)
         }
+        require(profile.developerApprovedPatternVersion == null || profile.developerApprovedPatternVersion > 0)
+        require(profile.developerApprovedPatternVersion == null || profile.structure == OperatorPaymentStructure.manual)
     }
 
     @Synchronized
