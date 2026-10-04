@@ -53,6 +53,23 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
             config(['webhooks.test_receiver_url' => $url]);
             [, , , $deposit] = $this->fixture($url);
             $this->dns(['127.0.0.1']);
+            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
+            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
+            self::assertDatabaseCount('deposits', 1);
+            self::assertDatabaseCount('ledger_entries', 2);
+            self::assertDatabaseCount('customer_credit_postings', 1);
+            self::assertDatabaseHas('customer_credits', ['customer_id' => $deposit->customer_id, 'currency' => 'CDF', 'available_minor' => 12500]);
+            $delivery = WalletWebhookDelivery::query()->sole();
+            $eventId = $delivery->event_id;
+            $body = $delivery->body;
+            // Nothing is listening yet: a real failed TCP connection must leave a recoverable outbox row.
+            (new DeliverWalletWebhook($delivery->id))->handle(app(SendWalletWebhook::class));
+            $delivery->refresh();
+            self::assertSame('retry', $delivery->status);
+            self::assertSame(1, $delivery->attempts);
+            self::assertSame('transport_failed', $delivery->last_error_code);
+            self::assertNull($delivery->delivered_at);
+            self::assertNotNull($delivery->next_attempt_at);
             $process = proc_open([PHP_BINARY, '-d', 'display_errors=0', '-S', '127.0.0.1:'.$port, $router], [
                 0 => ['file', '/dev/null', 'r'], 1 => ['file', $logPath, 'a'], 2 => ['file', $logPath, 'a'],
             ], $pipes, base_path(), array_merge(getenv(), [
@@ -72,23 +89,35 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
                 usleep(50000);
             } while (microtime(true) < $deadline);
             self::assertTrue($ready, 'Controlled HTTP receiver failed to start.');
-            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
-            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
-            self::assertDatabaseCount('deposits', 1);
-            self::assertDatabaseCount('ledger_entries', 2);
-            self::assertDatabaseCount('customer_credit_postings', 1);
-            self::assertDatabaseHas('customer_credits', ['customer_id' => $deposit->customer_id, 'currency' => 'CDF', 'available_minor' => 12500]);
-            $delivery = WalletWebhookDelivery::query()->sole();
+            // The first retry is only 30 seconds ahead, inside the real receiver's five-minute timestamp window.
+            $this->travelTo($delivery->next_attempt_at);
             (new DeliverWalletWebhook($delivery->id))->handle(app(SendWalletWebhook::class));
-            self::assertSame('delivered', $delivery->fresh()->status);
+            $delivery->refresh();
+            self::assertSame('delivered', $delivery->status);
+            self::assertSame(2, $delivery->attempts);
+            self::assertSame($eventId, $delivery->event_id);
+            self::assertSame($body, $delivery->body);
+            self::assertNull($delivery->last_error_code);
             // Simulate a receiver commit followed by a lost sender acknowledgement: exact body/ID sent again.
             self::assertSame(200, app(SendWalletWebhook::class)->send($delivery->webhookEndpoint, $delivery));
             $database = new PDO('sqlite:'.$databasePath);
             self::assertSame(1, (int) $database->query('SELECT COUNT(*) FROM received_wallet_events')->fetchColumn());
             self::assertSame(12500, (int) $database->query('SELECT amount_minor FROM wallet_credit_totals')->fetchColumn());
             self::assertSame($delivery->event_id, $database->query('SELECT event_id FROM received_wallet_events')->fetchColumn());
-            // Direct loopback requests test receiver auth failures only, with no sender bypass.
+            // Direct loopback requests exercise the receiver's authentication and event-conflict rules.
             $receiverUrl = 'http://127.0.0.1:'.$port.'/wallet';
+            $changedPayload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
+            $changedPayload['amount_minor'] = 12501;
+            $changedBody = json_encode($changedPayload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            $timestamp = (string) time();
+            $headers = [
+                'Webhook-Id' => $eventId,
+                'Webhook-Timestamp' => $timestamp,
+                'Webhook-Signature' => 'v1='.hash_hmac('sha256', $timestamp.'.'.$changedBody, self::SECRET),
+            ];
+            self::assertSame(409, Http::withHeaders($headers)->withBody($changedBody, 'application/json')->post($receiverUrl)->status());
+            self::assertSame(1, (int) $database->query('SELECT COUNT(*) FROM received_wallet_events')->fetchColumn());
+            self::assertSame(12500, (int) $database->query('SELECT amount_minor FROM wallet_credit_totals')->fetchColumn());
             $headers = ['Webhook-Id' => $delivery->event_id, 'Webhook-Timestamp' => (string) time(), 'Webhook-Signature' => 'v1=invalid'];
             self::assertSame(401, Http::withHeaders($headers)->withBody($delivery->body, 'application/json')->post($receiverUrl)->status());
             $timestamp = (string) (time() - 600);
@@ -98,6 +127,7 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
             self::assertSame(1, (int) $database->query('SELECT COUNT(*) FROM received_wallet_events')->fetchColumn());
             $database = null;
         } finally {
+            $this->travelBack();
             if (is_resource($process)) {
                 proc_terminate($process);
                 proc_close($process);

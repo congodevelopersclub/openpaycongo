@@ -33,7 +33,9 @@ final class SignedSmsDepositReleaseVerifier {
     try {
       final Object? decoded = jsonDecode(bundle);
       if (decoded is! Map<String, dynamic> || decoded.length != 2 ||
-          decoded['signing_public_key'] is! String || decoded['release'] is! Map<String, dynamic>) return null;
+          decoded['signing_public_key'] is! String || decoded['release'] is! Map<String, dynamic>) {
+        return null;
+      }
       final String encodedKey = decoded['signing_public_key'] as String;
       final Uint8List? key = _base64(encodedKey, 32);
       if (key == null) return null;
@@ -46,7 +48,9 @@ final class SignedSmsDepositReleaseVerifier {
           release['schema_version'] != 2 || release['provider'] is! String ||
           release['sender'] is! String || release['template'] is! String ||
           release['pattern_version'] is! int || release['approved_at'] is! String ||
-          release['expires_at'] is! String || release['signature'] is! String) return null;
+          release['expires_at'] is! String || release['signature'] is! String) {
+        return null;
+      }
       final String provider = release['provider'] as String;
       final String sender = release['sender'] as String;
       final DepositSmsTemplate template = DepositSmsTemplate(release['template'] as String);
@@ -57,10 +61,14 @@ final class SignedSmsDepositReleaseVerifier {
       if (!RegExp(r'^[A-Z0-9._-]{3,32}$').hasMatch(provider) ||
           SenderIdentity.fromOsMetadata(sender)?.value != sender || !template.valid ||
           version < 1 || approved == null || expiry == null || approved.isAfter(now.toUtc()) ||
-          !expiry.isAfter(approved) || !expiry.isAfter(now.toUtc()) || signature == null) return null;
+          !expiry.isAfter(approved) || !expiry.isAfter(now.toUtc()) || signature == null) {
+        return null;
+      }
       final Uint8List payload = canonicalPayload(release);
       if (!await Ed25519().verify(payload, signature: Signature(signature,
-          publicKey: SimplePublicKey(key, type: KeyPairType.ed25519)))) return null;
+          publicKey: SimplePublicKey(key, type: KeyPairType.ed25519)))) {
+        return null;
+      }
       return SignedSmsDepositRelease._(provider: provider, sender: sender,
         template: template, version: version, releaseId: sha256.convert(payload).toString(), expiresAt: expiry);
     } on Object {
@@ -155,7 +163,9 @@ final class SignedSmsDepositParser {
     final SenderIdentity? expected = SenderIdentity.fromOsMetadata(release.sender);
     if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(record.id) || sender == null || expected == null ||
         record.sender != expected.value || !TrustedSenderRule(expected).allows(sender) ||
-        !release.expiresAt.isAfter(now.toUtc())) return null;
+        !release.expiresAt.isAfter(now.toUtc())) {
+      return null;
+    }
     final SmsEnvelope? sms = SmsEnvelope.fromOs(sender: sender, body: record.body,
       receivedAt: record.receivedAt, segments: record.segments, now: now);
     if (sms == null) return null;

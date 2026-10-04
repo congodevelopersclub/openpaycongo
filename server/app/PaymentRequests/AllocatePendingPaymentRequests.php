@@ -8,6 +8,7 @@ use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\PaymentRequest;
+use App\Webhooks\RecordWalletCreditWebhook;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -87,7 +88,7 @@ final class AllocatePendingPaymentRequests
                     }
 
                     $credit->save();
-                    app(\App\Webhooks\RecordWalletCreditWebhook::class)->record($deposit, $credit);
+                    app(RecordWalletCreditWebhook::class)->record($deposit, $credit);
                 }, attempts: 3);
 
                 return;

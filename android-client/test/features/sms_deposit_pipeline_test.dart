@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
@@ -9,7 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:opencongopay/features/deposit_sync/data/encrypted_sms_release_store.dart';
 import 'package:opencongopay/features/deposit_sync/data/mobile_deposit_http_transport.dart';
 import 'package:opencongopay/features/deposit_sync/domain/signed_sms_deposit_parser.dart';
-import 'package:opencongopay/features/deposit_sync/infrastructure/platform_mobile_envelope_vault.dart';
 import 'package:opencongopay/features/deposit_sync/presentation/deposit_submission_bloc.dart';
 import 'package:opencongopay/features/deposit_sync/presentation/deposit_submission_runtime.dart';
 import 'package:opencongopay/features/deposit_sync/presentation/sms_deposit_coordinator.dart';

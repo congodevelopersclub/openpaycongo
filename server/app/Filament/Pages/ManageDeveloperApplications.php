@@ -22,6 +22,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
 
 final class ManageDeveloperApplications extends Page
 {
@@ -126,11 +127,11 @@ final class ManageDeveloperApplications extends Page
                 $application = $this->authorizedApplication((string) ($arguments['application'] ?? ''));
                 $lookup = $data['customer_lookup_identifier'] ?? null;
                 if ((! is_string($lookup) || trim($lookup) === '') && empty($data['customer_id'])) {
-                    throw \Illuminate\Validation\ValidationException::withMessages(['customer_id' => 'Select a customer or provide a new lookup identifier.']);
+                    throw ValidationException::withMessages(['customer_id' => 'Select a customer or provide a new lookup identifier.']);
                 }
                 if (is_string($lookup) && trim($lookup) !== '') {
                     if (! empty($data['customer_id']) || ! ($data['grant'] ?? false)) {
-                        throw \Illuminate\Validation\ValidationException::withMessages(['customer_lookup_identifier' => 'Provisioning requires a new lookup and an access grant.']);
+                        throw ValidationException::withMessages(['customer_lookup_identifier' => 'Provisioning requires a new lookup and an access grant.']);
                     }
                     app(CustomerWalletAccess::class)->provision($this->verifiedActor(), $application->id, $lookup);
                     Notification::make()->success()->title('Customer provisioned and access granted.')->send();

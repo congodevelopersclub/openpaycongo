@@ -11,6 +11,7 @@ use App\Models\Organization;
 use App\Models\SourceInstallation;
 use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Laravel\Sanctum\Sanctum;
@@ -23,8 +24,7 @@ final class CustomerWalletApiTest extends TestCase
     public function test_authenticated_deposit_retry_updates_one_wallet_and_requires_explicit_customer_access(): void
     {
         Artisan::call('passport:keys', ['--force' => true]);
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
-        {
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
             public function assertVerified(User $user): void {}
         });
         $organization = Organization::query()->forceCreate([]);
@@ -73,8 +73,7 @@ final class CustomerWalletApiTest extends TestCase
 
     public function test_wallet_access_cannot_be_granted_across_organizations(): void
     {
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession
-        {
+        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
             public function assertVerified(User $user): void {}
         });
         $organization = Organization::query()->forceCreate([]);
@@ -82,7 +81,7 @@ final class CustomerWalletApiTest extends TestCase
         $actor = User::factory()->create(['organization_id' => $organization->id, 'is_financial_operator' => true]);
         $issued = app(ManageDeveloperApplicationCredentials::class)->issue($actor, 'Scoped consumer', ['wallets:read']);
         $customer = Customer::query()->create(['organization_id' => $other->id, 'private_lookup_digest' => str_repeat('b', 64)]);
-        $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        $this->expectException(ModelNotFoundException::class);
         app(CustomerWalletAccess::class)->change($actor, $issued->application->id, $customer->id, true);
     }
 }
