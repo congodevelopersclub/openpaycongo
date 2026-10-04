@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 
 import '../data/mobile_envelope_sealer.dart';
@@ -9,12 +11,24 @@ final class PlatformMobileEnvelopeVault implements MobileEnvelopeSealer {
 
   final MethodChannel _channel;
 
+  Future<String> journalBinding() async {
+    final String? binding = await _channel.invokeMethod<String>('journalBinding');
+    if (binding == null || !RegExp(r'^[a-f0-9]{64}$').hasMatch(binding)) {
+      throw StateError('Mobile journal binding unavailable');
+    }
+    return binding;
+  }
+
   @override
   Future<MobileRequestEnvelope> sealDeposit(Uint8List payload) async {
     try {
       final Map<Object?, Object?>? value = await _channel.invokeMapMethod<Object?, Object?>(
         'seal',
-        <String, Object>{'operation': 'deposit', 'payload': payload},
+        <String, Object>{
+          'operation': (jsonDecode(utf8.decode(payload)) as Map<String, dynamic>).containsKey('parser_evidence')
+              ? 'sms_deposit' : 'deposit',
+          'payload': payload,
+        },
       );
       if (value == null) {
         throw const FormatException();

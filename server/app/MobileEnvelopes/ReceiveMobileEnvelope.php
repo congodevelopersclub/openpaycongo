@@ -61,7 +61,7 @@ final readonly class ReceiveMobileEnvelope
                 throw new MobileEnvelopeUnavailable;
             }
 
-            $result = $this->deposits->submit($installation, MobileDepositInput::validate($payload));
+            $result = $this->deposits->submit($installation, MobileDepositInput::validate($payload), $operation === 'sms_deposit');
             $installation->forceFill(['mobile_replay_counter' => $counter])->save();
 
             return $this->encryptResponse($installation, $counter, match ($result->outcome) {
@@ -108,7 +108,7 @@ final readonly class ReceiveMobileEnvelope
         return [$outer['installation_id'], $counter, $nonce, $ciphertext];
     }
 
-    /** @param mixed $inner @return array{0: 'activation_acknowledgement'|'deposit', 1: array<string, mixed>} */
+    /** @param mixed $inner @return array{0: 'activation_acknowledgement'|'deposit'|'sms_deposit', 1: array<string, mixed>} */
     private function command(mixed $inner): array
     {
         if (! is_array($inner)
@@ -122,7 +122,7 @@ final readonly class ReceiveMobileEnvelope
         $payload = $inner['payload'];
         if (($inner['version'] ?? null) !== 1
             || ! is_string($operation)
-            || ! in_array($operation, ['activation_acknowledgement', 'deposit'], true)
+            || ! in_array($operation, ['activation_acknowledgement', 'deposit', 'sms_deposit'], true)
             || ! is_array($payload)) {
             throw new MobileEnvelopeUnavailable;
         }

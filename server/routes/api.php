@@ -7,6 +7,7 @@ use App\Http\Controllers\ConfirmPairingIntentController;
 use App\Http\Controllers\GetPairingActivationController;
 use App\Http\Controllers\GetPairingConfirmationController;
 use App\Http\Controllers\IssuePairingIntentController;
+use App\Http\Controllers\ShowCustomerWalletController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Controllers\StoreMobileEnvelopeController;
 use App\Http\Middleware\RequireClientCredentialsGrant;
@@ -81,3 +82,7 @@ Route::get('/services/identity', static function () {
     ], 200, ['cache-control' => 'no-store']);
 })->middleware([CheckToken::using('payment-requests:read'), ResolveDeveloperApplication::class])
     ->name('services.identity');
+
+Route::get('/services/customers/{customer}/wallet', ShowCustomerWalletController::class)
+    ->middleware([CheckToken::using('wallets:read'), ResolveDeveloperApplication::class, 'throttle:service-api'])
+    ->name('services.wallet.show');

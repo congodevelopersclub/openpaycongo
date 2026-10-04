@@ -315,7 +315,9 @@ Map<String, Object> mobileDepositPayload(ProviderDeposit deposit) => <String, Ob
   'provider_reference': deposit.providerReference,
   'amount_minor': deposit.amountMinor,
   'currency': deposit.currency,
-  'provider_occurred_at': deposit.providerOccurredAt,
+    'provider_occurred_at': deposit.providerOccurredAt,
+    if (deposit.parserEvidence case final DepositParserEvidence value)
+      'parser_evidence': value.toMap(),
   if (deposit.senderIdentifier case final String value) 'sender_identifier': value,
   if (deposit.receiverIdentifier case final String value)
     'receiver_identifier': value,

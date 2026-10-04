@@ -230,6 +230,7 @@ final class RecordProviderDepositTest extends TestCase
         $reversal = app(ReverseDeposit::class);
         $operator = User::factory()->create();
         $operator->is_financial_operator = true;
+        $operator->organization_id = $deposit->organization_id;
         $operator->save();
         $first = $reversal->reverse($operator, $deposit, 'provider_correction');
         $replay = $reversal->reverse($operator, $deposit, 'provider_correction');
@@ -254,6 +255,7 @@ final class RecordProviderDepositTest extends TestCase
 
         $operator = User::factory()->create();
         $operator->is_financial_operator = true;
+        $operator->organization_id = $deposit->organization_id;
         $operator->save();
         $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
 

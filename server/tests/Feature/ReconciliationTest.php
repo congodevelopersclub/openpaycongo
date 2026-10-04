@@ -43,8 +43,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_an_operator_can_reconcile_a_reversal_without_rewriting_history(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
 
         $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
         $report = app(ReconcileDeposit::class)->report($reversal->deposit);
@@ -67,8 +67,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_an_operator_can_repair_a_missing_credit_posting_once_and_the_replay_is_a_no_op(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
         CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 0]);
 
@@ -84,9 +84,9 @@ final class ReconciliationTest extends TestCase
 
     public function test_repair_replay_requires_matching_intent_and_evidence(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
-        $otherOperator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer('repair-replay'))->deposit;
+        $operator = $this->userFor($deposit, true);
+        $otherOperator = $this->userFor($deposit, true);
         CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
         CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 0]);
         $repair = app(RepairMissingCustomerCredit::class);
@@ -106,8 +106,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_repair_rejects_a_normal_existing_posting_without_correction_evidence(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer('normal-posting'))->deposit;
+        $operator = $this->userFor($deposit, true);
         $credit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->firstOrFail();
 
         $this->expectException(ValidationException::class);
@@ -122,10 +122,10 @@ final class ReconciliationTest extends TestCase
 
     public function test_repair_replay_rejects_missing_evidence_or_an_unreconciled_state_without_mutation(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $repair = app(RepairMissingCustomerCredit::class);
 
         $withoutAudit = app(RecordProviderDeposit::class)->record($this->transfer('repair-audit-deleted'))->deposit;
+        $operator = $this->userFor($withoutAudit, true);
         CustomerCreditPosting::query()->where('deposit_id', $withoutAudit->id)->delete();
         CustomerCredit::query()->where('customer_id', $withoutAudit->customer_id)->where('currency', $withoutAudit->currency)->update(['available_minor' => 0]);
         $repair->repair($operator, $withoutAudit, 'missing_credit_posting', 'confirmed');
@@ -159,7 +159,7 @@ final class ReconciliationTest extends TestCase
     public function test_a_non_operator_cannot_reverse_or_repair_financial_records(): void
     {
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
-        $operator = User::factory()->create(['is_financial_operator' => false]);
+        $operator = $this->userFor($deposit, false);
 
         $this->expectException(AuthorizationException::class);
         app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction');
@@ -168,8 +168,8 @@ final class ReconciliationTest extends TestCase
     public function test_a_password_only_operator_cannot_invoke_correction_actions_directly(): void
     {
         $this->app->instance(FinancialOperatorMfaSession::class, new UnavailableFinancialOperatorMfaSession);
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer('password-only-action'))->deposit;
+        $operator = $this->userFor($deposit, true);
         $credit = CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->firstOrFail();
 
         foreach ([
@@ -189,8 +189,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_reconciliation_surfaces_missing_original_ledger_linkage_and_the_database_rejects_duplicates(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
         $entry = LedgerEntry::query()->where('deposit_id', $reversal->id)->firstOrFail();
 
@@ -215,8 +215,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_repair_rejects_a_missing_posting_when_the_credit_balance_is_not_exactly_short(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
 
         $this->expectException(ValidationException::class);
@@ -225,8 +225,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_reconciliation_surfaces_mis_scoped_postings_and_partial_reversals(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         $other = Customer::query()->create([
             'organization_id' => $deposit->organization_id,
             'private_lookup_digest' => hash('sha256', 'other-customer'),
@@ -254,8 +254,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_reconciliation_rejects_same_sided_original_ledger_links_and_missing_audit_evidence(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
 
         DB::table('ledger_entries')->where('deposit_id', $reversal->id)->where('account', 'customer_credit')->update(['debit_minor' => 0, 'credit_minor' => 12500]);
@@ -270,8 +270,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_reversal_refuses_a_customer_credit_balance_drift(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         CustomerCredit::query()->where('customer_id', $deposit->customer_id)->where('currency', $deposit->currency)->update(['available_minor' => 1]);
 
         $this->expectException(ValidationException::class);
@@ -280,8 +280,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_reversal_refuses_an_unreconciled_original_and_legacy_replay_without_evidence(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         CustomerCreditPosting::query()->where('deposit_id', $deposit->id)->delete();
 
         try {
@@ -302,9 +302,9 @@ final class ReconciliationTest extends TestCase
 
     public function test_reversal_replay_requires_the_exact_original_intent_and_clean_evidence(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
-        $otherOperator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer('exact-replay'))->deposit;
+        $operator = $this->userFor($deposit, true);
+        $otherOperator = $this->userFor($deposit, true);
         $action = app(ReverseDeposit::class);
         $first = $action->reverse($operator, $deposit, 'provider_correction', 'operator-confirmed');
 
@@ -375,8 +375,8 @@ final class ReconciliationTest extends TestCase
 
     public function test_reconciliation_requires_a_provider_credit_as_the_reversal_original(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $deposit = app(RecordProviderDeposit::class)->record($this->transfer())->deposit;
+        $operator = $this->userFor($deposit, true);
         $reversal = app(ReverseDeposit::class)->reverse($operator, $deposit, 'provider_correction')->deposit;
         DB::table('deposits')->where('id', $deposit->id)->update(['kind' => 'provider_reversal']);
 
@@ -385,11 +385,11 @@ final class ReconciliationTest extends TestCase
 
     public function test_reconciliation_rejects_the_exact_malformed_evidence_states_without_a_correction(): void
     {
-        $operator = User::factory()->create(['is_financial_operator' => true]);
         $reverse = app(ReverseDeposit::class);
         $reconcile = app(ReconcileDeposit::class);
 
         $misScoped = app(RecordProviderDeposit::class)->record($this->transfer('mis-scoped-original'))->deposit;
+        $operator = $this->userFor($misScoped, true);
         $otherCustomer = Customer::query()->create([
             'organization_id' => $misScoped->organization_id,
             'private_lookup_digest' => hash('sha256', 'mis-scoped-customer'),
@@ -477,5 +477,13 @@ final class ReconciliationTest extends TestCase
             senderIdentifier: null,
             receiverIdentifier: null,
         );
+    }
+
+    private function userFor(Deposit $deposit, bool $isFinancialOperator): User
+    {
+        $user = User::factory()->create(['is_financial_operator' => $isFinancialOperator]);
+        $user->forceFill(['organization_id' => $deposit->organization_id])->save();
+
+        return $user;
     }
 }

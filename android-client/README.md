@@ -1,48 +1,50 @@
-# OpenPay Congo Android prototype
+# OpenPay Congo Android client
 
-> **Prototype only.** This Flutter application is not a production payment client. Do not install it for real payment processing, provide real API/HMAC credentials, or grant it access to real SMS data.
+> **Prototype only.** This client and its server integration are not approved for real payments, real SMS, production credentials, or customer data. Use a disposable Android profile and synthetic messages.
 
-## Setup
+The implemented product path is **SMS → Android → Laravel → customer wallet → signed outbound HTTP webhook**. Android captures and parses SMS locally, then sends parsed deposit data through the paired encrypted-envelope protocol. The server records a provisional credit; the message does not establish provider settlement. This is not a websocket flow.
 
-Install Flutter 3.38+ with Dart 3.12+, Android Studio/SDK, and a physical Android device or emulator. From this directory:
+## Build and test
+
+Repository verification runs in Docker. From the repository root:
 
 ```bash
-flutter pub get
-flutter analyze
-flutter test
-flutter run
+bash scripts/ci/fast-feedback.sh local flutter
+bash scripts/ci/fast-feedback.sh pr flutter
 ```
 
-The project currently targets Android first. A device may show SMS and biometric permission prompts; use an isolated test profile and synthetic SMS fixtures only. The current Gradle release configuration is debug-signed, so `flutter build apk --release` is **not** a distributable release process.
+The PR tier runs analysis and Flutter tests, Android native unit tests, a native cryptography test, and exports a debug-signed APK to `android-client/build/ci/app-debug.apk`. Install it only on an isolated test emulator or device:
 
-## What currently exists
+```bash
+adb install -r android-client/build/ci/app-debug.apk
+adb shell monkey -p com.congodeveloperclub.opencongopay 1
+```
 
-The Android slice requests `RECEIVE_SMS` in context, blocks product access until granted, and captures only exact trusted senders through the platform broadcast receiver. Trusted rules and evidence use explicit v3 AES-GCM envelopes, separate Android Keystore keys, and separate tagged ciphertext inventories in `noBackupFilesDir`; ciphertext in one domain does not invalidate first key creation in the other, while a missing key still fails closed for its own ciphertext. Rules are atomically listed, added, revoked, or cleared only through the foreground/unlocked bridge. Decision tombstones are append-only until future server-acknowledged pruning, with bounded cursor export through encrypted index segments. Bridge deadlines are `outcome_unknown`, so mutating UI attempts authoritative native reconciliation and remains explicitly unknown if that reload also fails or times out. Every journal-ciphertext quarantine, including a decision tombstone, is preceded by a written and directory-synced persistent `journal-recovery-required` marker. Status/export/recovery remain typed recovery across calls and restarts; journal, rules, or raw-inbox corruption and key loss always publish null decision count/byte fields rather than fabricated zero/empty status. No in-app marker-clear API exists. Scheduler saturation finishes the broadcast before a best-effort overload report. Capture-miss reason/timestamp state is minimal plaintext metadata and never contains sender/body/digest. Unreleased v2 ciphertext fails closed and requires explicit Clear storage/reinstall recovery. This is implementation evidence, not Play-policy approval or real-device power-loss/Keystore proof.
+The Gradle `release` build is currently debug-signed and is not a distributable release. Review the [English developer guide](../docs/developer-guide.en.md), [French developer guide](../docs/developer-guide.fr.md), and [SMS-to-wallet acceptance path](../docs/sms-to-wallet-acceptance.md) for setup and end-to-end boundaries.
 
-- A local Flutter UI prototype with parser, configuration, and biometric-gate screens.
-- A bounded trusted-SMS receiver, encrypted local inbox, deterministic manual parser and review-only model boundary.
-- Local SQLite stores used by the prototype.
-- A contract-only sync cursor BLoC seam. `SyncCursorStore` persists an opaque
-  checkpoint and `SyncCursorContract` reconciles it; neither accepts records,
-  sender identities, SMS bodies, credentials, or a fabricated server protocol.
-- A contract-only pairing enrollment BLoC seam. `PairingEnrollmentStore`
-  persists only a redacted lifecycle result, while
-  `PairingEnrollmentTransport` owns the future ADR-004 authenticated
-  completion/status exchange. It must supply Keystore-backed secrets and the
-  documented Laravel contract; this prototype does not parse QR material,
-  manufacture credentials, or implement pairing HTTP.
+## Delivered composition
 
-## Known limitations
+- `PairingRuntime` is composed by the app at startup. The existing signed QR/SAS pairing, activation retrieval, native promotion, final encrypted activation acknowledgement, and foreground recovery flow are connected to the inbox experience. Android native code owns pairing secrets, directional envelope keys, the credential, and the pinned HTTPS origin in a Keystore-backed no-backup vault.
+- The app requests Android `RECEIVE_SMS` permission before product content. The manifest registers `SmsDeliverReceiver`; native code applies bounded capture, normalized exact trusted-sender rules, duplicate suppression, and encrypted local SMS storage. Flutter exposes the foreground/unlocked rules and review workflow.
+- The inbox composes pairing state with the encrypted SMS parser-release store and `SmsDepositCoordinator`. An administrator-published signed v2 parser bundle must match the signing key pinned by the existing pairing trust store, the exact trusted sender, its expiry, and monotonic version. A bounded literal scanner extracts only the required transfer fields. It does not execute uploaded regular expressions or send the raw SMS to the server, analytics, or model services.
+- Parsed data is staged in the encrypted deposit submission journal. Android's native vault seals the `sms_deposit` command into the v1 `POST /mobile/envelopes` protocol, persists its outbound counter before transmission, and authenticates the encrypted response. Unknown network results remain pending and retry with a fresh durable counter; server idempotency prevents duplicate credit. Dart handles bounded routing and redacted outcomes, not the directional keys.
+- The inbox displays whether a message is waiting, needs review, has been queued, or received a server result. A server-recorded SMS deposit is explicitly provisional; the UI does not claim that a mobile-money provider settled funds.
 
-- No canonical `/v1/sync/*` client, replicated ledger, or server-acknowledged decision pruning.
-- No verified server authentication/HMAC, production API-credential storage, encrypted canonical ledger database, or proven recovery flow.
-- No production Android signing, Play distribution, offline delivery guarantees, or real-app screenshot test.
-- The home view is incomplete and the documented backend integration is not wired into the prototype.
-- The sync cursor seam has no server transport implementation yet. A future
-  authenticated Laravel contract must supply it before it can represent server
-  delivery or acknowledgement.
-- The pairing enrollment seam has no authenticated Laravel transport or secure
-  storage implementation yet. It cannot be used for real enrollment until the
-  documented `/v1/pairing/complete` and status contract are implemented.
+The legacy credential-authenticated `POST /mobile/deposits` route remains separate. It uses a paired mobile bearer token and a compatibility transfer payload; it is not the `sms_deposit` path and does not require signed parser evidence by default. See the [mobile envelope v1 contract](../docs/mobile-envelope-v1.md).
 
-Read the repository [mobile PRD](../docs/prd-mobile.md), [architecture](../docs/architecture.md), and [reliability plan](../docs/reliability.md) before extending the app.
+## Capture, storage, and recovery
+
+Trusted rules and SMS evidence use explicit v3 AES-GCM envelopes, separate Android Keystore keys, and separate tagged ciphertext inventories in `noBackupFilesDir`. A missing key or damaged ciphertext fails closed for its own store. Trusted rules are changed only through the foreground/unlocked bridge. Capture is bounded by sender, segment count, age, future skew, and body size. The manifest exports the receiver only for the protected Android SMS broadcast.
+
+Native capture misses retain only minimal reason/timestamp metadata; they do not record sender, body, digest, or message content. Scheduler saturation finishes the broadcast before reporting a best-effort overload. Corrupt journals and invalidated keys surface typed recovery instead of invented empty status. Quarantining journal ciphertext first persists a `journal-recovery-required` marker. No in-app operation clears that marker; recovery requires the explicit documented recovery path or app reinstall, which discards local evidence. Legacy v2 ciphertext fails closed. These are code-level guarantees, not proof of power-loss behavior on every device or Play-policy approval.
+
+The encrypted deposit retry journal is installation-bound. It does not sync raw SMS or place customer/payment payloads in logs, BLoC state, telemetry, screenshots, or Android backups. The platform bridge has bounded deadlines; an `outcome_unknown` mutation reconciles against authoritative native state before the UI reports a final result.
+
+## Remaining limits
+
+- The app supports the delivered point-to-point SMS deposit envelope. It does not implement a general `/v1/sync/*` ledger replication protocol or server-acknowledged pruning of capture decision tombstones.
+- A CI APK and automated host tests do not prove delivery on every carrier/device, survival under all power-loss or filesystem behaviors, production signing, Play distribution, provider settlement, or real-world SMS authenticity.
+- Pairing trust inherits the documented QR and administrator-session boundaries. This implementation does not provide forward secrecy, multi-device enrollment, or recovery from a compromised administrator session or hosting edge.
+- The app can show a provisional credit from SMS evidence. Independent provider settlement and production reconciliation remain outside this prototype's claim.
+
+For the complete backend, wallet, administrator, webhook, and verification flow, see the [developer guides](../docs/developer-guide.en.md) and the [acceptance procedure](../docs/sms-to-wallet-acceptance.md).

@@ -40,8 +40,10 @@ Event::listen(CustomerCreditCreationPending::class, function () use ($barrier, $
     }
 });
 
+$deposit = Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID'));
 $actor = User::query()->create(['name' => 'Test operator', 'email' => 'test-operator-'.$worker.'@example.test', 'password' => 'unused']);
 $actor->is_financial_operator = true;
+$actor->organization_id = $deposit->organization_id;
 $actor->save();
-$result = app(ReverseDeposit::class)->reverse($actor, Deposit::query()->findOrFail((string) getenv('PAYMENT_REQUEST_TEST_DEPOSIT_ID')), 'provider_correction');
+$result = app(ReverseDeposit::class)->reverse($actor, $deposit, 'provider_correction');
 echo $result->outcome->value.PHP_EOL;

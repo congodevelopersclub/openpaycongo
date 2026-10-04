@@ -18,5 +18,7 @@ final readonly class ProviderTransfer
         public ?string $customerAddress = null,
         public ?string $customerPhone = null,
         public ?string $customerEmail = null,
+        /** @var array{kind: string, provider: string, sms_sender: string, parser_version: int, sms_received_at: string, evidence_digest: string, parser_release_id: string}|null */
+        public ?array $parserEvidence = null,
     ) {}
 }

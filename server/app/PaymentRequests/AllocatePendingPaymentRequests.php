@@ -87,6 +87,7 @@ final class AllocatePendingPaymentRequests
                     }
 
                     $credit->save();
+                    app(\App\Webhooks\RecordWalletCreditWebhook::class)->record($deposit, $credit);
                 }, attempts: 3);
 
                 return;

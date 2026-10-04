@@ -18,6 +18,7 @@ final class ProviderDeposit {
     this.customerAddress,
     this.customerPhone,
     this.customerEmail,
+    this.parserEvidence,
   });
 
   final String customerLookupIdentifier;
@@ -31,6 +32,55 @@ final class ProviderDeposit {
   final String? customerAddress;
   final String? customerPhone;
   final String? customerEmail;
+  final DepositParserEvidence? parserEvidence;
+}
+
+/// Signed parser provenance remains encrypted with the immutable request.
+/// A trusted SMS sender is evidence of a report, not proof of settlement.
+final class DepositParserEvidence {
+  const DepositParserEvidence({
+    required this.provider,
+    required this.smsSender,
+    required this.parserVersion,
+    required this.smsReceivedAt,
+    required this.evidenceDigest,
+    required this.parserReleaseId,
+  });
+
+  final String provider;
+  final String smsSender;
+  final int parserVersion;
+  final String smsReceivedAt;
+  final String evidenceDigest;
+  final String parserReleaseId;
+
+  Map<String, Object> toMap() => <String, Object>{
+    'kind': 'signed_release',
+    'provider': provider,
+    'sms_sender': smsSender,
+    'parser_version': parserVersion,
+    'sms_received_at': smsReceivedAt,
+    'evidence_digest': evidenceDigest,
+    'parser_release_id': parserReleaseId,
+  };
+
+  static DepositParserEvidence fromMap(Object? value) {
+    if (value is! Map<String, dynamic> || value.length != 7 ||
+        value['kind'] != 'signed_release' || value['provider'] is! String ||
+        value['sms_sender'] is! String || value['parser_version'] is! int ||
+        (value['parser_version'] as int) < 1 || value['sms_received_at'] is! String ||
+        value['evidence_digest'] is! String || value['parser_release_id'] is! String) {
+      throw const FormatException('invalid_parser_evidence');
+    }
+    return DepositParserEvidence(
+      provider: value['provider'] as String,
+      smsSender: value['sms_sender'] as String,
+      parserVersion: value['parser_version'] as int,
+      smsReceivedAt: value['sms_received_at'] as String,
+      evidenceDigest: value['evidence_digest'] as String,
+      parserReleaseId: value['parser_release_id'] as String,
+    );
+  }
 }
 
 enum DepositSubmissionOutcome { recorded, replayed, conflict }
@@ -130,6 +180,26 @@ final class _DepositSubmissionStartAwaited extends DepositSubmissionEvent {
   final Completer<void> completer;
 }
 
+/// Keeps the first signed SMS request immutable across duplicate capture,
+/// including after server acknowledgement. Evidence times never become a new
+/// financial intent merely because the operator repeats its notification.
+abstract interface class ImmutableSmsDepositJournal {
+  Future<StagedSmsDeposit> stageSms(ProviderDeposit deposit);
+}
+
+final class StagedSmsDeposit {
+  const StagedSmsDeposit(this.deposit, {this.acknowledged = false});
+  final ProviderDeposit deposit;
+  final bool acknowledged;
+}
+
+final class _DepositSubmissionStageAwaited extends DepositSubmissionEvent {
+  const _DepositSubmissionStageAwaited(this.deposit, this.afterStage, this.completion);
+  final ProviderDeposit deposit;
+  final Future<void> Function() afterStage;
+  final Completer<bool> completion;
+}
+
 /// Staging or durable terminal-state update failed. No request is retried by
 /// this state; an owner must reconcile encrypted journal state first.
 final class DepositSubmissionPersistenceFailure extends DepositSubmissionState {
@@ -140,10 +210,17 @@ final class DepositSubmissionBloc
     extends Bloc<DepositSubmissionEvent, DepositSubmissionState> {
   DepositSubmissionBloc({required this.transport, required this.journal})
     : super(const DepositSubmissionIdle()) {
-    on<DepositSubmissionRequested>(_submit);
-    on<DepositSubmissionStarted>(_start);
-    on<_DepositSubmissionStartAwaited>(_startAwaited);
-    on<DepositSubmissionRetryRequested>(_retry);
+    on<DepositSubmissionEvent>((event, emit) {
+      final Future<void> operation = _events.then<void>((_) => switch (event) {
+        DepositSubmissionRequested() => _submit(event, emit),
+        DepositSubmissionStarted() => _start(event, emit),
+        _DepositSubmissionStartAwaited() => _startAwaited(event, emit),
+        DepositSubmissionRetryRequested() => _retry(event, emit),
+        _DepositSubmissionStageAwaited() => _stageAwaited(event, emit),
+      });
+      _events = operation.catchError((Object _) {});
+      return operation;
+    });
   }
 
   final AuthenticatedDepositTransport transport;
@@ -151,6 +228,7 @@ final class DepositSubmissionBloc
   final Queue<ProviderDeposit> _pending = Queue<ProviderDeposit>();
   final List<ProviderDeposit> _retryable = <ProviderDeposit>[];
   bool _draining = false;
+  Future<void> _events = Future<void>.value();
 
   /// Runtime-only startup barrier. The public event remains available for an
   /// explicit reconnect, while composition awaits durable replay before
@@ -159,6 +237,43 @@ final class DepositSubmissionBloc
     final Completer<void> completer = Completer<void>();
     add(_DepositSubmissionStartAwaited(completer));
     return completer.future;
+  }
+
+  /// Transfers native evidence only after encrypted intent is durable.
+  /// A process death between the two writes leaves the raw SMS available for
+  /// the same idempotent request, while startup replays the staged request.
+  Future<bool> stageCaptured(
+    ProviderDeposit deposit, {
+    required Future<void> Function() afterStage,
+  }) {
+    final Completer<bool> completion = Completer<bool>();
+    add(_DepositSubmissionStageAwaited(deposit, afterStage, completion));
+    return completion.future;
+  }
+
+  Future<void> _stageAwaited(
+    _DepositSubmissionStageAwaited event,
+    Emitter<DepositSubmissionState> emit,
+  ) async {
+    StagedSmsDeposit staged = StagedSmsDeposit(event.deposit);
+    try {
+      if (journal case final ImmutableSmsDepositJournal immutable when event.deposit.parserEvidence != null) {
+        staged = await immutable.stageSms(event.deposit);
+      } else {
+        await journal.stage(event.deposit);
+      }
+      await event.afterStage();
+    } on Object {
+      emit(const DepositSubmissionPersistenceFailure());
+      event.completion.complete(false);
+      return;
+    }
+    event.completion.complete(true);
+    if (staged.acknowledged) {
+      emit(const DepositSubmissionReplayed());
+      return;
+    }
+    await _enqueue(<ProviderDeposit>[staged.deposit], emit);
   }
 
   Future<void> _submit(

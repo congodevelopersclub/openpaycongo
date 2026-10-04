@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../deposit_sync/presentation/sms_deposit_coordinator.dart';
+import '../../deposit_sync/presentation/sms_deposit_status_card.dart';
+
 import '../../pairing/presentation/pairing_session_bloc.dart';
 import '../../pairing/presentation/pairing_session_status_card.dart';
 import '../../pairing/presentation/pairing_enrollment_bloc.dart';
@@ -34,6 +37,8 @@ final class PaymentInboxScreen extends StatefulWidget {
     this.paymentRequestLifecycle,
     this.syncCursor,
     this.inboxBloc,
+    this.smsDeposits,
+    this.depositRuntimeUnavailable = false,
     required this.gateway,
   });
   final SmsPermissionState smsPermissionState;
@@ -47,6 +52,8 @@ final class PaymentInboxScreen extends StatefulWidget {
   final PaymentRequestLifecycleBloc? paymentRequestLifecycle;
   final SyncCursorBloc? syncCursor;
   final PaymentInboxBloc? inboxBloc;
+  final SmsDepositCoordinator? smsDeposits;
+  final bool depositRuntimeUnavailable;
   final SmsGatewayPort gateway;
   @override
   State<PaymentInboxScreen> createState() => _PaymentInboxScreenState();
@@ -113,6 +120,16 @@ final class _PaymentInboxScreenState extends State<PaymentInboxScreen> {
                   ),
                   const SizedBox(height: 24),
                   _CaptureStatusCard(state: widget.smsPermissionState),
+                  if (widget.smsDeposits case final SmsDepositCoordinator coordinator) ...<Widget>[
+                    const SizedBox(height: 12),
+                    SmsDepositStatusCard(coordinator: coordinator,
+                      onRefreshInbox: () => _inboxBloc.add(const PaymentInboxReloadRequested())),
+                  ],
+                  if (widget.depositRuntimeUnavailable) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const Card(child: Padding(padding: EdgeInsets.all(16),
+                      child: Text('Encrypted deposit sync is unavailable. Captured SMS stays in the inbox. Unlock again to retry secure setup.'))),
+                  ],
                   if (widget.pairingEnrollment
                       case final PairingEnrollmentBloc enrollment) ...<Widget>[
                     const SizedBox(height: 12),

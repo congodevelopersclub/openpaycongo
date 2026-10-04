@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\CustomerCredit;
 use App\Models\Deposit;
 use App\Models\User;
 use App\Reconciliation\ReconcileDeposit as ReconcileDepositAction;
@@ -88,14 +89,23 @@ final class ReconcileDeposit extends Page
             });
     }
 
-    /** @return array{deposits: Collection<int, Deposit>} */
+    /** @return array{deposits: Collection<int, Deposit>, selectedDeposit: ?Deposit, availableMinor: ?int} */
     protected function getViewData(): array
     {
+        $actor = $this->verifiedActor();
+        $selected = $this->deposit === null ? null : $this->depositRecord();
+        $balance = $selected === null ? null : CustomerCredit::query()
+            ->where('customer_id', $selected->customer_id)->where('currency', $selected->currency)
+            ->value('available_minor');
+
         return [
             'deposits' => Deposit::query()
+                ->where('organization_id', $actor->organization_id)
                 ->latest('received_at')
                 ->limit(50)
-                ->get(['id', 'kind', 'currency', 'received_at']),
+                ->get(['id', 'customer_id', 'kind', 'amount_minor', 'currency', 'received_at']),
+            'selectedDeposit' => $selected,
+            'availableMinor' => $balance === null ? null : (int) $balance,
         ];
     }
 

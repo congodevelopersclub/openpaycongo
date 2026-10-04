@@ -29,6 +29,7 @@ x-application-environment: &application-environment
   CACHE_STORE: database
   SESSION_DRIVER: database
   QUEUE_CONNECTION: database
+  OPENPAY_WEBHOOK_ALLOWED_HOSTS: ${OPENPAY_WEBHOOK_ALLOWED_HOSTS:-[]}
 
 x-application: &application
   image: ${OPENPAY_FPM_IMAGE:-congo-openpay-fpm:local}

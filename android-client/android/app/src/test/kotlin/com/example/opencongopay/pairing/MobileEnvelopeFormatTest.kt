@@ -11,6 +11,15 @@ import java.util.UUID
 
 class MobileEnvelopeFormatTest {
     @Test
+    fun wrapsSmsDepositWithParserProvenanceWithoutChangingIt() {
+        val payload = "{\"amount_minor\":1250,\"parser_evidence\":{\"kind\":\"signed_release\",\"parser_version\":2}}".toByteArray()
+        val envelope = JSONObject(String(MobileEnvelopeFormat.plaintext("sms_deposit", payload), StandardCharsets.UTF_8))
+        assertEquals("sms_deposit", envelope.getString("operation"))
+        assertEquals("signed_release", envelope.getJSONObject("payload").getJSONObject("parser_evidence").getString("kind"))
+        assertEquals(2, envelope.getJSONObject("payload").getJSONObject("parser_evidence").getInt("parser_version"))
+    }
+
+    @Test
     fun wrapsOnlyDepositObjectPayloadIntoCanonicalEnvelopePlaintext() {
         val plaintext = MobileEnvelopeFormat.plaintext("deposit", "{\"amount_minor\":1250}".toByteArray(StandardCharsets.UTF_8))
 
