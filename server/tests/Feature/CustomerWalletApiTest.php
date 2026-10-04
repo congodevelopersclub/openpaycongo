@@ -24,9 +24,7 @@ final class CustomerWalletApiTest extends TestCase
     public function test_authenticated_deposit_retry_updates_one_wallet_and_requires_explicit_customer_access(): void
     {
         Artisan::call('passport:keys', ['--force' => true]);
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
-            public function assertVerified(User $user): void {}
-        });
+        $this->mock(FinancialOperatorMfaSession::class)->shouldReceive('assertVerified')->andReturnNull();
         $organization = Organization::query()->forceCreate([]);
         $actor = User::factory()->create(['organization_id' => $organization->id, 'is_financial_operator' => true]);
         $installation = SourceInstallation::query()->create([
@@ -73,9 +71,7 @@ final class CustomerWalletApiTest extends TestCase
 
     public function test_wallet_access_cannot_be_granted_across_organizations(): void
     {
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
-            public function assertVerified(User $user): void {}
-        });
+        $this->mock(FinancialOperatorMfaSession::class)->shouldReceive('assertVerified')->andReturnNull();
         $organization = Organization::query()->forceCreate([]);
         $other = Organization::query()->forceCreate([]);
         $actor = User::factory()->create(['organization_id' => $organization->id, 'is_financial_operator' => true]);

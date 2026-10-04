@@ -103,6 +103,8 @@ jobs:
         run: bash scripts/ci/fast-feedback.sh focused flutter test/features/sms_deposit_pipeline_test.dart
       - name: Run canonical pull-request Flutter gate
         run: bash scripts/ci/fast-feedback.sh pr flutter
+      - name: Record debug APK digest
+        run: sha256sum android-client/build/ci/app-debug.apk
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openpaycongo-debug-apk-${{ github.sha }}

@@ -30,9 +30,7 @@ final class WalletAdministrationTest extends WalletWebhookTestCase
         Filament::setCurrentPanel(Filament::getPanel('operations'));
         config(['webhooks.allowed_hosts' => ['receiver.example']]);
         Queue::fake();
-        $this->app->instance(FinancialOperatorMfaSession::class, new class implements FinancialOperatorMfaSession {
-            public function assertVerified(User $user): void {}
-        });
+        $this->mock(FinancialOperatorMfaSession::class)->shouldReceive('assertVerified')->andReturnNull();
     }
 
     public function test_customer_provisioning_action_grants_access_without_creating_a_deposit_or_balance(): void
