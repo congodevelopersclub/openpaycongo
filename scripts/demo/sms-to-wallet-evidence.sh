@@ -48,6 +48,7 @@ run_gate() {
 ci=(bash scripts/ci/fast-feedback.sh)
 run_gate focused_mobile_deposit "${ci[@]}" focused laravel MobileDepositCreditWorkflowTest
 run_gate focused_sms_parser "${ci[@]}" focused laravel SmsParserEvidenceTest
+run_gate focused_sms_envelope "${ci[@]}" focused laravel SmsDepositEnvelopeIntegrationTest
 run_gate focused_customer_wallet "${ci[@]}" focused laravel CustomerWalletApiTest
 run_gate focused_wallet_webhook "${ci[@]}" focused laravel WalletWebhookDeliveryTest
 run_gate focused_wallet_webhook_receiver "${ci[@]}" focused laravel WalletWebhookReceiverIntegrationTest

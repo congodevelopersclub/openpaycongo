@@ -6,6 +6,8 @@
 !README.md
 !docs/
 !docs/**
+!examples/
+!examples/webhook-receiver.php
 !server/
 !server/**
 server/vendor
@@ -50,3 +52,4 @@ android-client/android/app/src/main/*
 !android-client/android/app/src/main/AndroidManifest.xml
 server/.env
 docs/node_modules
+
