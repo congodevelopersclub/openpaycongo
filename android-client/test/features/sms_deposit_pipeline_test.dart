@@ -101,9 +101,11 @@ final class _Exchange implements MobileDepositHttpExchange {
 
 final class _RecordingTransport implements AuthenticatedDepositTransport {
   final List<ProviderDeposit> submissions = <ProviderDeposit>[];
+  bool offline = false;
   @override
   Future<DepositSubmissionResult> submit(ProviderDeposit deposit) async {
     submissions.add(deposit);
+    if (offline) throw const DepositTransportUnavailable();
     return const DepositSubmissionResult.recorded();
   }
 }
@@ -193,6 +195,48 @@ void main() {
     await coordinator.sync(); await pumpEventQueue();
     expect(gateway.records, isEmpty);
     expect(sealed, hasLength(2), reason: 'acknowledged duplicate capture never generates a new financial request');
+    await coordinator.close(); await runtime.close(); await releases.close(); await directory.delete(recursive: true);
+  });
+
+  test('duplicate offline captures retry one immutable intent without a false persistence failure', () async {
+    final signed = await _signed();
+    final Directory directory = await Directory.systemTemp.createTemp('duplicate-sms-retry-');
+    final _Cipher cipher = _Cipher();
+    final _Location location = _Location(directory.path);
+    final _Gateway gateway = _Gateway(<String>[])
+      ..records.addAll(<NativeSmsRecord>[
+        _sms(), _sms(idCharacter: 'B', receivedAt: _now.add(const Duration(seconds: 1))),
+      ]);
+    final _RecordingTransport transport = _RecordingTransport()..offline = true;
+    final EncryptedSmsReleaseStore releases = await EncryptedSmsReleaseStore.open(
+      verifier: signed.verifier, cipher: cipher, location: location);
+    final DepositSubmissionRuntime runtime = await DepositSubmissionRuntime.create(
+      transport: transport, cipher: cipher, location: location);
+    final SmsDepositCoordinator coordinator = SmsDepositCoordinator(
+      gateway: gateway, releases: releases, submissions: runtime.bloc, now: () => _now);
+    final List<DepositSubmissionState> states = <DepositSubmissionState>[];
+    final subscription = runtime.bloc.stream.listen(states.add);
+    expect(await coordinator.installRelease(signed.bundle), isTrue);
+    await pumpEventQueue();
+    expect(gateway.records, isEmpty);
+    expect(transport.submissions, hasLength(2));
+    expect(runtime.bloc.state, isA<DepositSubmissionRetryableFailure>());
+
+    transport.offline = false;
+    await coordinator.sync();
+    await pumpEventQueue();
+    expect(transport.submissions, hasLength(3), reason: 'only one durable intent needs replay');
+    expect(mobileDepositPayload(transport.submissions.last), mobileDepositPayload(transport.submissions.first));
+    expect(runtime.bloc.state, isA<DepositSubmissionRecorded>());
+    expect(states.whereType<DepositSubmissionPersistenceFailure>(), isEmpty);
+
+    gateway.records.add(_sms(idCharacter: 'C', receivedAt: _now.add(const Duration(seconds: 2))));
+    await coordinator.sync();
+    await pumpEventQueue();
+    expect(gateway.records, isEmpty);
+    expect(transport.submissions, hasLength(3), reason: 'acknowledged duplicates do not submit again');
+    expect(runtime.bloc.state, isA<DepositSubmissionReplayed>());
+    await subscription.cancel();
     await coordinator.close(); await runtime.close(); await releases.close(); await directory.delete(recursive: true);
   });
 
