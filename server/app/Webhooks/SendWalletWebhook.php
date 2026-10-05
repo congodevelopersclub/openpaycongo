@@ -27,12 +27,11 @@ final class SendWalletWebhook
         return Http::withOptions([
             'allow_redirects' => false,
             'verify' => true,
+            'protocols' => $destination['test'] ? ['http', 'https'] : ['https'],
+            // An explicit empty proxy disables Guzzle's environment proxy fallback.
             'proxy' => '',
             'curl' => [
                 CURLOPT_RESOLVE => [$destination['host'].':'.$destination['port'].':'.$ip],
-                CURLOPT_PROXY => '',
-                CURLOPT_PROTOCOLS => $destination['test'] ? CURLPROTO_HTTP | CURLPROTO_HTTPS : CURLPROTO_HTTPS,
-                CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
             ],
         ])->setHandler(new CurlHandler)->timeout($timeout)->connectTimeout($timeout)
             ->withHeaders([

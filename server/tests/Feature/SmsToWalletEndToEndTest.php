@@ -138,7 +138,8 @@ final class SmsToWalletEndToEndTest extends WalletWebhookTestCase
             $delivery = WalletWebhookDelivery::query()->sole();
             self::assertSame($endpoint->id, $delivery->webhook_endpoint_id);
             self::assertSame($deposit->id, $delivery->deposit_id);
-            self::assertSame('delivered', $delivery->status);
+            self::assertSame('delivered', $delivery->status, 'Wallet webhook failed with safe code: '.($delivery->last_error_code ?? 'none'));
+            self::assertNull($delivery->last_error_code);
             self::assertSame(1, $delivery->attempts);
             self::assertSame([
                 'event_id' => $delivery->event_id, 'type' => 'wallet.credit_posted', 'customer_id' => $customer->id,

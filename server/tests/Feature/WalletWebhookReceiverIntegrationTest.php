@@ -99,7 +99,7 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
             $this->travelTo($delivery->next_attempt_at);
             (new DeliverWalletWebhook($delivery->id))->handle(app(SendWalletWebhook::class));
             $delivery->refresh();
-            self::assertSame('delivered', $delivery->status);
+            self::assertSame('delivered', $delivery->status, 'Wallet webhook failed with safe code: '.($delivery->last_error_code ?? 'none'));
             self::assertSame(2, $delivery->attempts);
             self::assertSame($eventId, $delivery->event_id);
             self::assertSame($body, $delivery->body);
@@ -198,7 +198,9 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
             app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
             $firstDelivery = WalletWebhookDelivery::query()->where('deposit_id', $deposit->id)->sole();
             (new DeliverWalletWebhook($firstDelivery->id))->handle(app(SendWalletWebhook::class));
-            self::assertSame('delivered', $firstDelivery->fresh()->status);
+            $firstDelivery->refresh();
+            self::assertSame('delivered', $firstDelivery->status, 'Wallet webhook failed with safe code: '.($firstDelivery->last_error_code ?? 'none'));
+            self::assertNull($firstDelivery->last_error_code);
             $request = app(CreatePaymentRequest::class)->create($customer->id, 100, 'CDF', 'synthetic-reversal-debt-charge');
             self::assertSame(PaymentRequestStatus::Charged, $request->status);
             self::assertDatabaseHas('customer_credits', ['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 0]);
@@ -227,8 +229,9 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
             self::assertDatabaseCount('customer_credit_postings', 3);
             self::assertDatabaseCount('wallet_webhook_deliveries', 2);
             (new DeliverWalletWebhook($delivery->id))->handle(app(SendWalletWebhook::class));
-            self::assertSame('delivered', $delivery->fresh()->status);
-            self::assertNull($delivery->fresh()->last_error_code);
+            $delivery->refresh();
+            self::assertSame('delivered', $delivery->status, 'Wallet webhook failed with safe code: '.($delivery->last_error_code ?? 'none'));
+            self::assertNull($delivery->last_error_code);
             $database = new PDO('sqlite:'.$databasePath);
             self::assertSame(2, (int) $database->query('SELECT COUNT(*) FROM received_wallet_events')->fetchColumn());
             self::assertSame(150, (int) $database->query('SELECT amount_minor FROM wallet_credit_totals')->fetchColumn());
