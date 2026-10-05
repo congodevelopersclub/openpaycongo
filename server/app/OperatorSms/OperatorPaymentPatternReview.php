@@ -56,7 +56,7 @@ final class OperatorPaymentPatternReview
                 'provider' => $provider,
                 'sender' => $sender,
                 'template_sha256' => $templateDigest,
-                'proposal_revision' => ($latest?->proposal_revision ?? 0) + 1,
+                'proposal_revision' => ($latest->proposal_revision ?? 0) + 1,
                 'template' => $template,
                 'model' => null,
                 'status' => 'pending_review',
