@@ -4,6 +4,7 @@ FROM nginx:alpine@sha256:1f25fedd50aec27413031afb3a4f8ee4effcc9d843f6a76e81bfa92
 RUN apk add --no-cache --upgrade \
         expat=2.8.5-r0 \
         libuuid=2.42.3-r1 \
+        pcre2=10.49-r0 \
         libcrypto3=3.5.9-r0 \
         libssl3=3.5.9-r0 \
         openssl=3.5.9-r0
