@@ -184,15 +184,18 @@ final class SmsParserEvidenceTest extends TestCase
             $this->operator, 'OPERATOR_A', '12345', self::WalletTemplate,
         ));
 
-        Livewire::actingAs($this->operator)
+        $page = Livewire::actingAs($this->operator)
             ->test(ManageOperatorSmsPatterns::class)
-            ->mountAction('releasePattern')
-            ->assertSee('OPERATOR_A / 12345 / revision 1 /')
-            ->assertSee('OPERATOR_A / 12345 / revision 2 /')
-            ->callMountedAction(data: [
+            ->mountAction('releasePattern');
+        $modal = $page->getMountedActionModalHtml();
+        self::assertStringContainsString('OPERATOR_A / 12345 / revision 1 /', $modal);
+        self::assertStringContainsString('OPERATOR_A / 12345 / revision 2 /', $modal);
+
+        $page->setActionData([
                 'proposal_id' => $renewal->id,
                 'expires_at' => CarbonImmutable::now('UTC')->addDay()->format('Y-m-d H:i:s'),
             ])
+            ->callMountedAction()
             ->assertHasNoFormErrors();
 
         self::assertDatabaseCount('operator_sms_pattern_releases', 2);
