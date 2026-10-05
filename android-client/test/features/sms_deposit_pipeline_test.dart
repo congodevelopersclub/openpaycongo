@@ -217,14 +217,14 @@ void main() {
     final List<DepositSubmissionState> states = <DepositSubmissionState>[];
     final subscription = runtime.bloc.stream.listen(states.add);
     expect(await coordinator.installRelease(signed.bundle), isTrue);
-    await pumpEventQueue();
+    await runtime.bloc.start();
     expect(gateway.records, isEmpty);
     expect(transport.submissions, hasLength(2));
     expect(runtime.bloc.state, isA<DepositSubmissionRetryableFailure>());
 
     transport.offline = false;
     await coordinator.sync();
-    await pumpEventQueue();
+    await runtime.bloc.start();
     expect(transport.submissions, hasLength(3), reason: 'only one durable intent needs replay');
     expect(mobileDepositPayload(transport.submissions.last), mobileDepositPayload(transport.submissions.first));
     expect(runtime.bloc.state, isA<DepositSubmissionRecorded>());
@@ -232,7 +232,7 @@ void main() {
 
     gateway.records.add(_sms(idCharacter: 'C', receivedAt: _now.add(const Duration(seconds: 2))));
     await coordinator.sync();
-    await pumpEventQueue();
+    await runtime.bloc.start();
     expect(gateway.records, isEmpty);
     expect(transport.submissions, hasLength(3), reason: 'acknowledged duplicates do not submit again');
     expect(runtime.bloc.state, isA<DepositSubmissionReplayed>());
