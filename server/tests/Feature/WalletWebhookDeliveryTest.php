@@ -69,6 +69,8 @@ final class WalletWebhookDeliveryTest extends WalletWebhookTestCase
 
     public function test_retries_keep_event_and_body_and_end_in_replayable_dead_letter(): void
     {
+        // Persisted delivery timestamps use whole seconds; pin the clock to that precision.
+        $this->freezeSecond();
         [$actor, $application, , $deposit] = $this->fixture();
         $this->dns(['8.8.8.8']);
         Http::fake(['receiver.example/*' => Http::response('must not retain this response', 503)]);
@@ -100,6 +102,7 @@ final class WalletWebhookDeliveryTest extends WalletWebhookTestCase
 
     public function test_pause_revocation_redirect_and_claim_recovery_preserve_delivery_boundaries(): void
     {
+        $this->freezeSecond();
         [$actor, $application, , $deposit, $endpoint] = $this->fixture();
         $this->dns(['8.8.8.8']);
         Http::fake(['receiver.example/*' => Http::response('', 302, ['Location' => 'http://127.0.0.1/private'])]);
@@ -118,10 +121,16 @@ final class WalletWebhookDeliveryTest extends WalletWebhookTestCase
         app(ManageWebhookEndpoint::class)->pause($actor, $application->id);
         $this->deliver($delivery);
         Http::assertSentCount(1);
+        self::assertSame('retry', $delivery->fresh()->status);
+        // pause() changed another model instance; refresh before marking enabled dirty again.
+        $endpoint->refresh();
+        self::assertFalse($endpoint->enabled);
         $endpoint->forceFill(['enabled' => true])->save();
+        self::assertTrue($endpoint->fresh()->enabled);
         DeveloperCustomerAccess::query()->delete();
         $this->deliver($delivery);
         self::assertSame('cancelled', $delivery->fresh()->status);
+        self::assertSame('authorization_revoked', $delivery->fresh()->last_error_code);
         Http::assertSentCount(1);
     }
 

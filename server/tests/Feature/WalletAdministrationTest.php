@@ -7,11 +7,13 @@ namespace Tests\Feature;
 use App\DeveloperApplications\ManageDeveloperApplicationCredentials;
 use App\Filament\Pages\ManageDeveloperApplications;
 use App\Models\Customer;
+use App\Models\DeveloperApplication;
 use App\Models\Organization;
 use App\Models\User;
 use App\Models\WalletWebhookDelivery;
 use App\Security\FinancialOperatorMfaSession;
 use Filament\Facades\Filament;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
@@ -121,34 +123,41 @@ final class WalletAdministrationTest extends WalletWebhookTestCase
 
         Livewire::actingAs($actor)
             ->test(ManageDeveloperApplications::class)
-            ->assertDontSee($foreignApplication->name)
+            ->assertDontSee($foreignApplication->name);
+
+        $this->assertForeignApplicationActionIsNotFound(fn () => Livewire::actingAs($actor)
+            ->test(ManageDeveloperApplications::class)
             ->callAction('customerWalletAccess',
                 data: ['customer_lookup_identifier' => 'foreign-lookup-should-not-be-used', 'grant' => true],
                 arguments: ['application' => $foreignApplication->id],
             )
-            ->assertNotFound();
+            ->assertNotFound());
 
-        Livewire::actingAs($actor)
+        $this->assertForeignApplicationActionIsNotFound(fn () => Livewire::actingAs($actor)
             ->test(ManageDeveloperApplications::class)
             ->callAction('configureWebhook', data: [
                 'url' => 'https://receiver.example/wallet',
                 'signing_secret' => 'synthetic-cross-tenant-secret-only-for-tests',
                 'enabled' => true,
             ], arguments: ['application' => $foreignApplication->id])
-            ->assertNotFound();
+            ->assertNotFound());
 
-        Livewire::actingAs($actor)
+        $this->assertForeignApplicationActionIsNotFound(fn () => Livewire::actingAs($actor)
             ->test(ManageDeveloperApplications::class)
             ->callAction('pauseWebhook', arguments: ['application' => $foreignApplication->id])
-            ->assertNotFound();
+            ->assertNotFound());
 
-        Livewire::actingAs($actor)
+        $this->assertForeignApplicationActionIsNotFound(fn () => Livewire::actingAs($actor)
             ->test(ManageDeveloperApplications::class)
             ->callAction('replayWebhook', arguments: [
                 'application' => $foreignApplication->id,
                 'delivery' => '00000000-0000-4000-8000-000000000099',
             ])
-            ->assertNotFound();
+            ->assertNotFound());
+
+        $this->assertDatabaseCount('developer_customer_accesses', 0);
+        $this->assertDatabaseCount('webhook_endpoints', 0);
+        $this->assertDatabaseCount('wallet_webhook_deliveries', 0);
     }
 
     private function financialOperator(): User
@@ -161,5 +170,14 @@ final class WalletAdministrationTest extends WalletWebhookTestCase
             'two_factor_confirmed_at' => now(),
             'recovery_codes_confirmed_at' => now(),
         ]);
+    }
+
+    private function assertForeignApplicationActionIsNotFound(callable $action): void
+    {
+        try {
+            $action();
+        } catch (ModelNotFoundException $exception) {
+            self::assertSame(DeveloperApplication::class, $exception->getModel());
+        }
     }
 }

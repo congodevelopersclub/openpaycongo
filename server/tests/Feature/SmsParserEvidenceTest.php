@@ -21,6 +21,7 @@ use App\Security\FinancialOperatorMfaSession;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -368,9 +369,11 @@ final class SmsParserEvidenceTest extends TestCase
                 'encoded_release' => $release->encoded_release,
             ]]]);
 
+        Auth::forgetGuards();
         $noScopeToken = $installation->createToken('parser-release-no-scope', [])->plainTextToken;
         $this->withToken($noScopeToken)->getJson('/mobile/operator-sms/pattern-releases')->assertForbidden();
 
+        Auth::forgetGuards();
         $installation->forceFill(['revoked_at' => now('UTC')])->save();
         $this->withToken($readToken)->getJson('/mobile/operator-sms/pattern-releases')
             ->assertNotFound()

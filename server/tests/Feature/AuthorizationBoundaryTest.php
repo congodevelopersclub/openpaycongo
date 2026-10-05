@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Middleware\CheckServiceToken;
 use App\Http\Middleware\RequireFinancialOperatorMfa;
+use App\Http\Middleware\ResolveDeveloperApplication;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\Authorize;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
@@ -43,6 +44,8 @@ final class AuthorizationBoundaryTest extends TestCase
         ];
         $authorizedRoutes = [
             'POST v1/pairing/intents' => ['web', 'auth', 'pairing.issuer'],
+            'GET|HEAD mobile/operator-sms/pattern-releases' => ['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'],
+            'GET|HEAD services/customers/{customer}/wallet' => [CheckServiceToken::using('wallets:read'), ResolveDeveloperApplication::class, 'throttle:service-api'],
         ];
         // These routes authenticate with a pairing secret or encrypted proof, not framework middleware.
         $cryptographicPossessionRoutes = [
@@ -56,7 +59,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
         self::assertCount(1, $confidentialClientTokenExchangeRoutes);
-        self::assertCount(1, $authorizedRoutes);
+        self::assertCount(3, $authorizedRoutes);
         self::assertCount(3, $cryptographicPossessionRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
@@ -110,7 +113,8 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(52, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        // Main's 50 routes plus the approved-pattern page, mobile releases, and scoped wallet read.
+        self::assertSame(53, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void
