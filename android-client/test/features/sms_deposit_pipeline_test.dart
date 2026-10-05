@@ -217,7 +217,7 @@ void main() {
     final List<DepositSubmissionState> states = <DepositSubmissionState>[];
     final subscription = runtime.bloc.stream.listen(states.add);
     expect(await coordinator.installRelease(signed.bundle), isTrue);
-    await runtime.bloc.start();
+    await pumpEventQueue();
     expect(gateway.records, isEmpty);
     expect(transport.submissions, hasLength(2));
     expect(runtime.bloc.state, isA<DepositSubmissionRetryableFailure>());
