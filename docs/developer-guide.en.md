@@ -61,7 +61,7 @@ The existing endpoint `GET /mobile/operator-sms/pattern-releases` lists up to 10
 
 The server signing seed is the protected existing `OPENPAY_OPERATOR_SMS_PATTERN_SIGNING_SECRET` configuration. Set the matching existing parser public-key pin as `OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY` when building the APK. The pin is not a secret. Do not generate a new authority, use the pairing key, or put a signing seed in a command, client, or release. The CI artifact uses a synthetic test authority and accepts only a matching test release in a disposable environment. Never use that test authority for a real deployment. An absent or mismatched pin makes import fail closed.
 
-Only releases with all five fields can drive the wallet path. Older three-field patterns cannot provide customer identity or provider time and remain review-only. Changing a template requires a new proposal, MFA approval, and signed release. See [the operator pattern integration boundary](operator-pattern-integration.md) for the exact LP16 transcript, identifier semantics, and migration limits.
+Only releases with all five fields can drive the wallet path. Older three-field patterns cannot provide customer identity or provider time and remain review-only. Changing a template requires a new proposal, MFA approval, and signed release. To renew an unchanged template, propose it again: this creates a new pending revision requiring fresh MFA approval and a new signed release, while preserving earlier approvals and releases. Repeated submissions of that pending revision reuse it. See [the operator pattern integration boundary](operator-pattern-integration.md) for the exact LP16 transcript, identifier semantics, and migration limits.
 
 ## Wallet and webhook receiver contract
 

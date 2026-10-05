@@ -279,6 +279,16 @@ final class DepositSubmissionBloc
       return;
     }
     event.completion.complete(true);
+    if (journal is ImmutableSmsDepositJournal && staged.deposit.parserEvidence != null) {
+      // A duplicate capture returns the first immutable request. Replace its
+      // retained retry before enqueueing it again, so one acknowledgement
+      // cannot be followed by a second journal update for the same intent.
+      _retryable.removeWhere((ProviderDeposit retry) =>
+          retry.parserEvidence != null &&
+          retry.providerReference == staged.deposit.providerReference &&
+          retry.parserEvidence!.provider == staged.deposit.parserEvidence!.provider &&
+          retry.parserEvidence!.smsSender == staged.deposit.parserEvidence!.smsSender);
+    }
     if (staged.acknowledged) {
       emit(const DepositSubmissionReplayed());
       return;

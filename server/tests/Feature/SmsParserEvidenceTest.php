@@ -8,6 +8,7 @@ use App\Deposits\MobileDepositInput;
 use App\Deposits\RecordProviderDeposit;
 use App\Deposits\RecordResult;
 use App\Deposits\SubmitMobileDeposit;
+use App\Filament\Pages\ManageOperatorSmsPatterns;
 use App\Models\Deposit;
 use App\Models\OperatorSmsPatternProposal;
 use App\Models\OperatorSmsPatternRelease;
@@ -19,12 +20,14 @@ use App\OperatorSms\OperatorPaymentPatternReview;
 use App\OperatorSms\ReleaseApprovedOperatorPaymentPattern;
 use App\Security\FinancialOperatorMfaSession;
 use Carbon\CarbonImmutable;
+use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 use LogicException;
 use Tests\TestCase;
 
@@ -167,6 +170,112 @@ final class SmsParserEvidenceTest extends TestCase
         } catch (AuthorizationException) {
             self::assertDatabaseCount('operator_sms_pattern_releases', 0);
             self::assertSame('pending_review', $pending->fresh()->status);
+        }
+    }
+
+    public function test_release_selector_distinguishes_unchanged_renewals_and_publishes_the_selected_revision(): void
+    {
+        Filament::setCurrentPanel(Filament::getPanel('operations'));
+        $original = $this->approvedWalletRelease(CarbonImmutable::now('UTC')->addHour()->startOfSecond());
+        $originalJson = $original->encoded_release;
+        $this->travel(2)->hours();
+        $review = app(OperatorPaymentPatternReview::class);
+        $renewal = $review->approve($this->operator, $review->proposeManual(
+            $this->operator, 'OPERATOR_A', '12345', self::WalletTemplate,
+        ));
+
+        $page = Livewire::actingAs($this->operator)
+            ->test(ManageOperatorSmsPatterns::class)
+            ->mountAction('releasePattern');
+        $modal = $page->getMountedActionModalHtml();
+        self::assertStringContainsString('OPERATOR_A / 12345 / revision 1 /', $modal);
+        self::assertStringContainsString('OPERATOR_A / 12345 / revision 2 /', $modal);
+
+        $page->setActionData([
+            'proposal_id' => $renewal->id,
+            'expires_at' => CarbonImmutable::now('UTC')->addDay()->format('Y-m-d H:i:s'),
+        ])
+            ->callMountedAction()
+            ->assertHasNoFormErrors();
+
+        self::assertDatabaseCount('operator_sms_pattern_releases', 2);
+        self::assertSame($originalJson, $original->fresh()->encoded_release);
+        $renewedRelease = OperatorSmsPatternRelease::query()->where('operator_sms_pattern_proposal_id', $renewal->id)->sole();
+        self::assertSame(2, $renewedRelease->pattern_version);
+        self::assertTrue($renewedRelease->expires_at->isFuture());
+    }
+
+    public function test_an_unchanged_expired_parser_can_be_reproposed_with_fresh_approval(): void
+    {
+        $approvedAt = CarbonImmutable::parse('2026-10-05T12:00:00Z');
+        $this->travelTo($approvedAt);
+        $original = $this->approvedWalletRelease($approvedAt->addHour());
+        $originalJson = $original->encoded_release;
+        $review = app(OperatorPaymentPatternReview::class);
+        $publisher = app(ReleaseApprovedOperatorPaymentPattern::class);
+
+        $this->travelTo($approvedAt->addHours(2));
+        $renewal = $review->proposeManual($this->operator, 'OPERATOR_A', '12345', self::WalletTemplate);
+        self::assertNotSame($original->operator_sms_pattern_proposal_id, $renewal->id);
+        self::assertSame('pending_review', $renewal->status);
+        self::assertSame(2, $renewal->proposal_revision);
+        self::assertNull($renewal->reviewed_at);
+        self::assertSame($renewal->id, $review->proposeManual($this->operator, 'OPERATOR_A', '12345', self::WalletTemplate)->id);
+
+        try {
+            $publisher->release($this->operator, $renewal, $approvedAt->addDay());
+            self::fail('A renewal was published without fresh approval.');
+        } catch (AuthorizationException) {
+            self::assertDatabaseCount('operator_sms_pattern_releases', 1);
+        }
+
+        $approved = $review->approve($this->operator, $renewal);
+        $renewed = $publisher->release($this->operator, $approved, $approvedAt->addDay());
+        $fields = json_decode($renewed->encoded_release, true, 16, JSON_THROW_ON_ERROR);
+        self::assertSame(2, $renewed->pattern_version);
+        self::assertSame('2026-10-05T14:00:00Z', $fields['approved_at']);
+        self::assertSame($originalJson, $original->fresh()->encoded_release);
+        self::assertSame($renewed->id, $publisher->release($this->operator, $approved, $approvedAt->addDays(2))->id);
+        self::assertSame($original->id, $publisher->release($this->operator, $original->proposal, $approvedAt->addDays(2))->id);
+        self::assertDatabaseCount('operator_sms_pattern_proposals', 2);
+        self::assertDatabaseCount('operator_sms_pattern_releases', 2);
+
+        $payload = [...$this->depositPayload(), 'parser_evidence' => $this->evidence($renewed->parser_release_digest)];
+        $payload['parser_evidence']['parser_version'] = 2;
+        $installation = $this->installation();
+        self::assertSame(RecordResult::Recorded, app(SubmitMobileDeposit::class)->submit($installation, $payload, requireParserEvidence: true)->outcome);
+        $payload['parser_evidence']['sms_received_at'] = $approvedAt->addHour()->format('Y-m-d\\TH:i:s\\Z');
+        $this->expectException(ValidationException::class);
+        app(SubmitMobileDeposit::class)->submit($installation, $payload, requireParserEvidence: true);
+    }
+
+    public function test_proposal_revision_migration_preserves_existing_records_and_refuses_lossy_rollback(): void
+    {
+        $migration = require database_path('migrations/2026_10_05_000003_add_operator_sms_pattern_proposal_revisions.php');
+        $migration->down();
+        $original = OperatorSmsPatternProposal::query()->create([
+            'organization_id' => self::OrganizationId,
+            'provider' => 'OPERATOR_A',
+            'sender' => '12345',
+            'template' => self::WalletTemplate,
+            'template_sha256' => hash('sha256', self::WalletTemplate),
+            'status' => 'pending_review',
+        ]);
+        $migration->up();
+        self::assertSame(1, $original->fresh()->proposal_revision);
+
+        $review = app(OperatorPaymentPatternReview::class);
+        self::assertSame($original->id, $review->proposeManual($this->operator, 'OPERATOR_A', '12345', self::WalletTemplate)->id);
+        $review->approve($this->operator, $original->fresh());
+        $renewal = $review->proposeManual($this->operator, 'OPERATOR_A', '12345', self::WalletTemplate);
+        self::assertSame(2, $renewal->proposal_revision);
+
+        try {
+            $migration->down();
+            self::fail('Rollback removed a proposal revision.');
+        } catch (LogicException) {
+            self::assertTrue(Schema::hasColumn('operator_sms_pattern_proposals', 'proposal_revision'));
+            self::assertDatabaseCount('operator_sms_pattern_proposals', 2);
         }
     }
 

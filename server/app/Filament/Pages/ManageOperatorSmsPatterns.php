@@ -122,7 +122,7 @@ final class ManageOperatorSmsPatterns extends Page
             ->orderByDesc('created_at')
             ->get()
             ->mapWithKeys(static fn (OperatorSmsPatternProposal $proposal): array => [
-                $proposal->id => $proposal->provider.' / '.$proposal->sender.' / '.$proposal->template,
+                $proposal->id => $proposal->provider.' / '.$proposal->sender.' / revision '.$proposal->proposal_revision.' / '.$proposal->template,
             ])->all();
     }
 
