@@ -192,9 +192,9 @@ final class SmsParserEvidenceTest extends TestCase
         self::assertStringContainsString('OPERATOR_A / 12345 / revision 2 /', $modal);
 
         $page->setActionData([
-                'proposal_id' => $renewal->id,
-                'expires_at' => CarbonImmutable::now('UTC')->addDay()->format('Y-m-d H:i:s'),
-            ])
+            'proposal_id' => $renewal->id,
+            'expires_at' => CarbonImmutable::now('UTC')->addDay()->format('Y-m-d H:i:s'),
+        ])
             ->callMountedAction()
             ->assertHasNoFormErrors();
 
