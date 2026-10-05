@@ -62,10 +62,18 @@ final class SmsDepositCoordinator extends Cubit<SmsDepositSyncStatus> {
         final ProviderDeposit? deposit = release == null || !trusted.contains(record.sender) ? null
             : const SignedSmsDepositParser().parse(record, release, now());
         if (deposit == null) { review++; continue; }
-        final bool staged = await submissions.stageCaptured(deposit, afterStage: () async {
-          if (_stopped) throw StateError('sms_sync_stopped');
-          await gateway.commitInboxDecision(record.id, NativeCaptureDecision.processed);
-        });
+        bool staged;
+        try {
+          staged = await submissions.stageCaptured(deposit, afterStage: () async {
+            if (_stopped) throw StateError('sms_sync_stopped');
+            await gateway.commitInboxDecision(record.id, NativeCaptureDecision.processed);
+          });
+        } on SmsDepositSemanticConflict {
+          // The incoming raw SMS remains in the encrypted native inbox. The
+          // first immutable request and its acknowledgement remain unchanged.
+          review++;
+          continue;
+        }
         if (_stopped) return;
         if (!staged) { emit(SmsDepositSyncStatus.storageUnavailable); return; }
         queued++;

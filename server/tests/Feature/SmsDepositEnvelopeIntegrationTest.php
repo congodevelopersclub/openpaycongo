@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use App\Models\ApprovedSmsParserRelease;
 use App\Models\CustomerCredit;
 use App\Models\CustomerCreditPosting;
 use App\Models\Deposit;
 use App\Models\LedgerEntry;
+use App\Models\Organization;
 use App\Models\SourceInstallation;
+use App\Models\User;
+use App\OperatorSms\OperatorPaymentPatternReview;
+use App\OperatorSms\ReleaseApprovedOperatorPaymentPattern;
 use App\PaymentRequests\AllocatePendingPaymentRequests;
+use App\Security\FinancialOperatorMfaSession;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -21,22 +25,42 @@ final class SmsDepositEnvelopeIntegrationTest extends TestCase
 
     private const string InstallationId = '00000000-0000-4000-8000-000000000029';
 
+    private const string OrganizationId = '00000000-0000-4000-8000-000000000001';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        (new Organization)->forceFill(['id' => self::OrganizationId])->save();
+        $this->mock(FinancialOperatorMfaSession::class)
+            ->shouldReceive('assertVerified')
+            ->zeroOrMoreTimes()
+            ->andReturnNull();
+        config(['openpay.operator_sms_patterns.signing_secret' => rtrim(strtr(base64_encode(str_repeat("\x01", SODIUM_CRYPTO_SIGN_SEEDBYTES)), '+/', '-_'), '=')]);
+    }
+
     public function test_encrypted_sms_deposit_requires_release_evidence_and_replays_wallet_credit_once(): void
     {
         $installation = $this->installation();
-        $receivedAt = CarbonImmutable::now('UTC')->startOfSecond();
-        $releaseId = hash('sha256', 'sms-deposit-integration-release');
-        ApprovedSmsParserRelease::query()->create([
-            'release_id' => $releaseId,
-            'provider' => 'OPERATOR_A',
-            'sender' => '12345',
-            'template' => 'Received {amount} {currency}; ref {reference}; customer {customer}; at {occurred_at}',
-            'pattern_version' => 1,
-            'approved_at' => $receivedAt->subMinute(),
-            'expires_at' => $receivedAt->addDay(),
-            'signature' => $this->encode(str_repeat('s', SODIUM_CRYPTO_SIGN_BYTES)),
-            'signing_public_key' => $this->encode(str_repeat('p', SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES)),
+        $operator = User::factory()->create([
+            'organization_id' => self::OrganizationId,
+            'is_financial_operator' => true,
         ]);
+        $review = app(OperatorPaymentPatternReview::class);
+        $proposal = $review->proposeManual(
+            $operator,
+            'OPERATOR_A',
+            '12345',
+            'Received {amount} {currency}; ref {reference}; customer {customer}; at {occurred_at}',
+        );
+        $approved = $review->approve($operator, $proposal);
+        $release = app(ReleaseApprovedOperatorPaymentPattern::class)->release(
+            $operator,
+            $approved,
+            CarbonImmutable::now('UTC')->startOfSecond()->addDay(),
+        );
+        $receivedAt = CarbonImmutable::now('UTC')->startOfSecond();
+        $releaseId = $release->parser_release_digest;
         $payload = [
             'customer_lookup_identifier' => 'sms-wallet-customer-001',
             'provider_reference' => 'sms-wallet-reference-001',

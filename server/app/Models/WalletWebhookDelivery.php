@@ -2,10 +2,16 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property CarbonImmutable|null $claimed_at
+ * @property CarbonImmutable|null $next_attempt_at
+ * @property CarbonImmutable|null $delivered_at
+ */
 final class WalletWebhookDelivery extends Model
 {
     use HasUuids;

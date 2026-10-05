@@ -11,7 +11,6 @@ import 'package:opencongopay/features/deposit_sync/domain/signed_sms_deposit_par
 import 'package:opencongopay/features/deposit_sync/presentation/deposit_submission_bloc.dart';
 import 'package:opencongopay/features/deposit_sync/presentation/deposit_submission_runtime.dart';
 import 'package:opencongopay/features/deposit_sync/presentation/sms_deposit_coordinator.dart';
-import 'package:opencongopay/features/pairing/presentation/pairing_qr_bloc.dart';
 import 'package:opencongopay/features/payment_outbox/data/sqlite_payment_outbox_repository.dart';
 import 'package:opencongopay/features/sms_gateway/domain/sms_gateway.dart';
 import 'package:path/path.dart';
@@ -21,17 +20,9 @@ final DateTime _now = DateTime.utc(2026, 10, 5, 10);
 const String _template = 'Received {amount} {currency}; ref {reference}; customer {customer}; at {occurred_at}';
 const String _installation = '123e4567-e89b-12d3-a456-426614174000';
 const String _server = 'https://pairing.example.test';
+// Public half of PR225's existing disposable 0x01 seed fixture.
+const String _parserSigningPublicKey = 'iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w';
 final String _binding = sha256.convert(utf8.encode('$_installation\n$_server')).toString();
-
-final class _Trust implements PairingQrTrustStore {
-  _Trust(this.fingerprint);
-  final String fingerprint;
-  @override
-  Future<PairingQrPinState> lookup(String value) async => value == fingerprint
-      ? const PairingQrPinState.matching() : const PairingQrPinState.conflict();
-  @override
-  Future<PairingQrPinWrite> persistVerifiedFingerprint(String value) => throw StateError('must not pin a release key');
-}
 
 final class _Cipher implements PaymentOutboxCipher {
   _Cipher([this.order]);
@@ -108,24 +99,36 @@ final class _Exchange implements MobileDepositHttpExchange {
   void abort() {}
 }
 
-NativeSmsRecord _sms({String? body, String sender = 'ORANGE'}) => NativeSmsRecord(
-  id: List<String>.filled(43, 'A').join(), sender: sender, receivedAt: _now,
+final class _RecordingTransport implements AuthenticatedDepositTransport {
+  final List<ProviderDeposit> submissions = <ProviderDeposit>[];
+  @override
+  Future<DepositSubmissionResult> submit(ProviderDeposit deposit) async {
+    submissions.add(deposit);
+    return const DepositSubmissionResult.recorded();
+  }
+}
+
+NativeSmsRecord _sms({String? body, String sender = 'ORANGE', String idCharacter = 'A',
+  DateTime? receivedAt}) => NativeSmsRecord(
+  id: List<String>.filled(43, idCharacter).join(), sender: sender, receivedAt: receivedAt ?? _now,
   segments: 1, body: body ?? 'Received 125.50 CDF; ref REF-1234; customer customer-private-001; at 2026-10-05T09:59:00Z');
 
 Future<({String bundle, SignedSmsDepositReleaseVerifier verifier})> _signed({
   int version = 1, String template = _template, String expires = '2026-10-06T10:00:00Z',
+  String approved = '2026-10-04T10:00:00Z',
 }) async {
-  final SimpleKeyPair key = await Ed25519().newKeyPairFromSeed(List<int>.generate(32, (int i) => i));
+  // Existing PR225 disposable test signing fixture, never production authority.
+  final SimpleKeyPair key = await Ed25519().newKeyPairFromSeed(List<int>.filled(32, 1));
   final SimplePublicKey public = await key.extractPublicKey();
+  expect(base64UrlEncode(public.bytes).replaceAll('=', ''), _parserSigningPublicKey);
   final Map<String, dynamic> release = <String, dynamic>{
-    'schema_version': 2, 'provider': 'ORANGE', 'sender': 'ORANGE', 'template': template,
-    'pattern_version': version, 'approved_at': '2026-10-04T10:00:00Z', 'expires_at': expires,
+    'schema_version': '1', 'provider': 'ORANGE', 'sender': 'ORANGE', 'template': template,
+    'pattern_version': version, 'approved_at': approved, 'expires_at': expires,
   };
   final Signature signature = await Ed25519().sign(SignedSmsDepositReleaseVerifier.canonicalPayload(release), keyPair: key);
   release['signature'] = base64UrlEncode(signature.bytes).replaceAll('=', '');
-  return (bundle: jsonEncode(<String, Object>{'signing_public_key': base64UrlEncode(public.bytes).replaceAll('=', ''),
-    'release': release}), verifier: SignedSmsDepositReleaseVerifier(
-      _Trust(base64UrlEncode(sha256.convert(public.bytes).bytes).replaceAll('=', ''))));
+  return (bundle: jsonEncode(release), verifier: SignedSmsDepositReleaseVerifier(
+    pinnedSigningPublicKey: base64UrlEncode(public.bytes).replaceAll('=', '')));
 }
 
 void main() {
@@ -197,14 +200,26 @@ void main() {
     final signed = await _signed();
     final SignedSmsDepositRelease? release = await signed.verifier.verify(signed.bundle, _now);
     expect(release, isNotNull);
-    expect(await SignedSmsDepositReleaseVerifier(_Trust('other')).verify(signed.bundle, _now), isNull);
+    expect(await SignedSmsDepositReleaseVerifier(pinnedSigningPublicKey:
+      base64UrlEncode(List<int>.filled(32, 0)).replaceAll('=', '')).verify(signed.bundle, _now), isNull);
+    expect(await const SignedSmsDepositReleaseVerifier(pinnedSigningPublicKey: '').verify(signed.bundle, _now), isNull);
     final legacy = await _signed(template: '{amount} {currency} {reference}');
     expect(await legacy.verifier.verify(legacy.bundle, _now), isNull);
     final expired = await _signed(expires: '2026-10-05T09:00:00Z');
     expect(await expired.verifier.verify(expired.bundle, _now), isNull);
     final Map<String, dynamic> tampered = jsonDecode(signed.bundle) as Map<String, dynamic>;
-    (tampered['release'] as Map<String, dynamic>)['provider'] = 'AIRTEL';
+    tampered['provider'] = 'AIRTEL';
     expect(await signed.verifier.verify(jsonEncode(tampered), _now), isNull);
+    final String validCarrier = jsonEncode(<String, Object>{
+      'signing_public_key': _parserSigningPublicKey, 'release': jsonDecode(signed.bundle) as Map<String, dynamic>,
+    });
+    expect(await signed.verifier.verify(validCarrier, _now), isNotNull);
+    final String untrustedCarrier = jsonEncode(<String, Object>{
+      'signing_public_key': base64UrlEncode(List<int>.filled(32, 0)).replaceAll('=', ''),
+      'release': jsonDecode(signed.bundle) as Map<String, dynamic>,
+    });
+    expect(await signed.verifier.verify(untrustedCarrier, _now), isNull,
+      reason: 'a carrier cannot override the configured parser authority');
     const SignedSmsDepositParser parser = SignedSmsDepositParser();
     for (final String body in <String>[
       _sms().body.replaceFirst('125.50', '125,50'), _sms().body.replaceFirst('CDF', 'USD'),
@@ -251,6 +266,68 @@ void main() {
     await coordinator.sync(); await pumpEventQueue();
     expect(coordinator.state, SmsDepositSyncStatus.reviewRequired);
     expect(gateway.records, hasLength(1)); expect(order, isEmpty);
+    await coordinator.close(); await runtime.close(); await releases.close(); await directory.delete(recursive: true);
+  });
+
+  test('a new release retains SMS captured before approval without staging or native acknowledgement', () async {
+    final signed = await _signed(approved: '2026-10-05T10:00:00Z');
+    final SignedSmsDepositRelease release = (await signed.verifier.verify(signed.bundle, _now))!;
+    expect(release.approvedAt, _now);
+    expect(const SignedSmsDepositParser().parse(_sms(), release, _now), isNotNull,
+      reason: 'capture exactly at approval remains eligible');
+    final Directory directory = await Directory.systemTemp.createTemp('historical-sms-');
+    final List<String> order = <String>[];
+    final _Cipher cipher = _Cipher(order);
+    final _Location location = _Location(directory.path);
+    final _Gateway gateway = _Gateway(order)
+      ..records.add(_sms(receivedAt: _now.subtract(const Duration(seconds: 1))));
+    final _RecordingTransport transport = _RecordingTransport();
+    final EncryptedSmsReleaseStore releases = await EncryptedSmsReleaseStore.open(
+      verifier: signed.verifier, cipher: cipher, location: location);
+    final DepositSubmissionRuntime runtime = await DepositSubmissionRuntime.create(
+      transport: transport, cipher: cipher, location: location);
+    final SmsDepositCoordinator coordinator = SmsDepositCoordinator(
+      gateway: gateway, releases: releases, submissions: runtime.bloc, now: () => _now);
+    expect(await coordinator.installRelease(signed.bundle), isTrue);
+    await pumpEventQueue();
+    expect(coordinator.state, SmsDepositSyncStatus.reviewRequired);
+    expect(gateway.records, hasLength(1));
+    expect(order, isEmpty, reason: 'historical capture must not stage or commit a processed native decision');
+    expect(transport.submissions, isEmpty);
+    await coordinator.sync(); await pumpEventQueue();
+    expect(gateway.records, hasLength(1)); expect(order, isEmpty);
+    await coordinator.close(); await runtime.close(); await releases.close(); await directory.delete(recursive: true);
+  });
+
+  test('changed business fields under reference A retain raw evidence while unrelated B still submits', () async {
+    final signed = await _signed();
+    final Directory directory = await Directory.systemTemp.createTemp('semantic-sms-conflict-');
+    final _Cipher cipher = _Cipher();
+    final _Location location = _Location(directory.path);
+    final _Gateway gateway = _Gateway(<String>[])..records.add(_sms());
+    final _RecordingTransport transport = _RecordingTransport();
+    final EncryptedSmsReleaseStore releases = await EncryptedSmsReleaseStore.open(
+      verifier: signed.verifier, cipher: cipher, location: location);
+    final DepositSubmissionRuntime runtime = await DepositSubmissionRuntime.create(
+      transport: transport, cipher: cipher, location: location);
+    final SmsDepositCoordinator coordinator = SmsDepositCoordinator(
+      gateway: gateway, releases: releases, submissions: runtime.bloc, now: () => _now);
+    final List<DepositSubmissionState> states = <DepositSubmissionState>[];
+    final subscription = runtime.bloc.stream.listen(states.add);
+    expect(await coordinator.installRelease(signed.bundle), isTrue);
+    await pumpEventQueue();
+    expect(transport.submissions, hasLength(1));
+    final NativeSmsRecord conflictA = _sms(idCharacter: 'B', body: _sms().body.replaceFirst('125.50', '900.00'));
+    final NativeSmsRecord validB = _sms(idCharacter: 'C', body: _sms().body.replaceFirst('REF-1234', 'REF-9999'));
+    gateway.records.addAll(<NativeSmsRecord>[conflictA, validB]);
+    await coordinator.sync(); await pumpEventQueue();
+    expect(coordinator.state, SmsDepositSyncStatus.reviewRequired);
+    expect(gateway.records, <NativeSmsRecord>[conflictA]);
+    expect(transport.submissions.map((ProviderDeposit deposit) => deposit.providerReference),
+      <String>['REF-1234', 'REF-9999']);
+    expect(states.whereType<DepositSubmissionConflict>(), hasLength(1));
+    expect(states.whereType<DepositSubmissionPersistenceFailure>(), isEmpty);
+    await subscription.cancel();
     await coordinator.close(); await runtime.close(); await releases.close(); await directory.delete(recursive: true);
   });
 }

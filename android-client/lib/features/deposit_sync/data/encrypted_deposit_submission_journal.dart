@@ -98,7 +98,7 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
           first.parserEvidence!.provider != deposit.parserEvidence!.provider ||
           first.parserEvidence!.smsSender != deposit.parserEvidence!.smsSender ||
           stored.entry.state == _JournalState.conflict) {
-        throw const DepositJournalRecoveryRequiredException();
+        throw const SmsDepositSemanticConflict();
       }
       return StagedSmsDeposit(first, acknowledged: stored.entry.state == _JournalState.acknowledged);
     }

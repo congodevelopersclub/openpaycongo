@@ -18,6 +18,9 @@ $passkeysConfigured = is_string($relyingPartyId)
     && strlen($userHandleSecret) >= 32;
 
 return [
+    'operator_sms_patterns' => [
+        'signing_secret' => env('OPENPAY_OPERATOR_SMS_PATTERN_SIGNING_SECRET'),
+    ],
     'pairing' => [
         'endpoint' => env('OPENPAY_PAIRING_ENDPOINT'),
         'enrollment_signing_secret' => env('OPENPAY_PAIRING_ENROLLMENT_SIGNING_SECRET'),

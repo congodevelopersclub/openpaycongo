@@ -187,6 +187,12 @@ abstract interface class ImmutableSmsDepositJournal {
   Future<StagedSmsDeposit> stageSms(ProviderDeposit deposit);
 }
 
+/// Valid encrypted storage contains conflicting transfer semantics. Retain the
+/// native SMS for review without treating unrelated pending evidence as corrupt.
+final class SmsDepositSemanticConflict implements Exception {
+  const SmsDepositSemanticConflict();
+}
+
 final class StagedSmsDeposit {
   const StagedSmsDeposit(this.deposit, {this.acknowledged = false});
   final ProviderDeposit deposit;
@@ -263,6 +269,10 @@ final class DepositSubmissionBloc
         await journal.stage(event.deposit);
       }
       await event.afterStage();
+    } on SmsDepositSemanticConflict {
+      emit(const DepositSubmissionConflict());
+      event.completion.completeError(const SmsDepositSemanticConflict());
+      return;
     } on Object {
       emit(const DepositSubmissionPersistenceFailure());
       event.completion.complete(false);

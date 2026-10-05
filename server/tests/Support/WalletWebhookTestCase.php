@@ -25,7 +25,7 @@ abstract class WalletWebhookTestCase extends TestCase
     protected const SECRET = 'synthetic-webhook-secret-only-for-tests-123456';
 
     /** @return array{User, DeveloperApplication, Customer, Deposit, WebhookEndpoint} */
-    protected function fixture(string $url = 'https://receiver.example/wallet'): array
+    protected function fixture(string $url = 'https://receiver.example/wallet', int $amountMinor = 12500): array
     {
         Queue::fake();
         config(['webhooks.allowed_hosts' => ['receiver.example']]);
@@ -45,7 +45,7 @@ abstract class WalletWebhookTestCase extends TestCase
             installationIdentifier: 'synthetic-webhook-installation',
             customerLookupIdentifier: 'synthetic-webhook-customer',
             providerReference: 'synthetic-webhook-reference',
-            amountMinor: 12500,
+            amountMinor: $amountMinor,
             currency: 'CDF',
             providerOccurredAt: '2026-08-31T01:00:00Z',
             senderIdentifier: null,

@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /artifacts/security/*.cdx.json
+/artifacts/sms-to-wallet-evidence/
 
 # Docker-only documentation contract validator dependencies
 /docs/node_modules/

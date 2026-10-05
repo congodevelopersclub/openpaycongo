@@ -35,7 +35,7 @@ final class SmsDepositStatusCard extends StatelessWidget {
           builder: (_, state) => Text(switch (state) {
             DepositSubmissionRecorded() => 'Server recorded provisional credit. Settlement is unverified.',
             DepositSubmissionReplayed() => 'Server recognized an existing deposit. No duplicate credit was created.',
-            DepositSubmissionConflict() => 'Server rejected conflicting evidence. The encrypted request is retained for recovery.',
+            DepositSubmissionConflict() => 'Conflicting evidence needs review. Stored records are retained for recovery.',
             DepositSubmissionRetryableFailure() => 'No authenticated acknowledgement received. The encrypted request remains pending.',
             DepositSubmissionPersistenceFailure() => 'Encrypted queue update failed. Recovery is required.',
             DepositSubmissionSubmitting() => 'Sending paired encrypted evidence.',
@@ -55,10 +55,10 @@ final class SmsDepositStatusCard extends StatelessWidget {
     final String? bundle = await showDialog<String>(context: context, builder: (BuildContext context) => AlertDialog(
       title: const Text('Import signed operator parser'),
       content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-        const Text('Paste the administrator-published release bundle. Its signing key must match this installation\'s paired server. No new trust pin is accepted here.'),
+        const Text('Paste the developer-approved encoded_release JSON. Its signature must match the parser signing authority configured in this APK. The release cannot choose its own trusted key.'),
         const SizedBox(height: 12),
         TextField(controller: controller, maxLength: 12288, maxLines: 6,
-          decoration: const InputDecoration(labelText: 'Signed release bundle')),
+          decoration: const InputDecoration(labelText: 'Signed encoded_release JSON')),
       ])),
       actions: <Widget>[
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
@@ -70,6 +70,6 @@ final class SmsDepositStatusCard extends StatelessWidget {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(accepted
         ? 'Signed parser installed. Retained messages were checked.'
-        : 'Parser refused. Check its signature, paired signing authority, required fields, expiry, and version.')));
+        : 'Parser refused. Check its signature, configured parser signing authority, required fields, expiry, and version.')));
   }
 }

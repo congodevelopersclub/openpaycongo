@@ -89,7 +89,7 @@
                 @forelse ($this->webhookDeliveries() as $delivery)
                     <li>
                         <span>{{ $delivery->event_id }}. {{ $delivery->status }}. Attempts {{ $delivery->attempts }}. {{ $delivery->last_error_code }}</span>
-                        @if (in_array($delivery->status, ['retry', 'dead_letter'], true))
+                        @if (in_array($delivery->status, ['retry', 'dead_letter', 'cancelled'], true))
                             {{ ($this->replayWebhookAction)(['application' => $this->deliveryApplication($delivery->webhook_endpoint_id), 'delivery' => $delivery->id]) }}
                         @endif
                     </li>

@@ -50,7 +50,7 @@ if (! is_array($payload) || ($payload['event_id'] ?? null) !== $eventId || ! pre
     || ! is_string($payload['deposit_id'] ?? null) || ! preg_match($uuid, $payload['deposit_id'])
     || ! is_string($payload['currency'] ?? null) || ! preg_match('/\A[A-Z]{3}\z/D', $payload['currency'])
     || ! is_int($payload['amount_minor'] ?? null) || $payload['amount_minor'] <= 0
-    || ! is_int($payload['available_minor'] ?? null) || $payload['available_minor'] < 0
+    || ! is_int($payload['available_minor'] ?? null)
     || ($payload['settlement_status'] ?? null) !== 'unverified') {
     $respond(400, 'payload_rejected');
 }

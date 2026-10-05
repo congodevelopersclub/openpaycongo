@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
@@ -24,6 +24,12 @@ printf 'kind\tname\tvalue\tstarted_utc\tended_utc\texit_status\n' > "$summary"
 printf 'metadata\tcommit\t%s\t\t\t\n' "$commit" >> "$summary"
 printf 'metadata\tworking_tree\t%s\t\t\t\n' "$working_tree" >> "$summary"
 printf 'metadata\tstarted_utc\t%s\t\t\t\n' "$started_utc" >> "$summary"
+parser_public_key="${OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY:-}"
+if [[ ! "$parser_public_key" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
+  printf 'Set OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY to the existing parser authority public key before building a runnable SMS demo APK.\n' >&2
+  exit 64
+fi
+printf 'metadata\tparser_signing_public_key\t%s\t\t\t\n' "$parser_public_key" >> "$summary"
 
 failures=0
 last_exit_status=0
@@ -52,6 +58,7 @@ run_gate focused_sms_envelope "${ci[@]}" focused laravel SmsDepositEnvelopeInteg
 run_gate focused_customer_wallet "${ci[@]}" focused laravel CustomerWalletApiTest
 run_gate focused_wallet_webhook "${ci[@]}" focused laravel WalletWebhookDeliveryTest
 run_gate focused_wallet_webhook_receiver "${ci[@]}" focused laravel WalletWebhookReceiverIntegrationTest
+run_gate focused_sms_to_wallet_end_to_end "${ci[@]}" focused laravel SmsToWalletEndToEndTest
 run_gate full_laravel_local "${ci[@]}" local laravel
 run_gate full_flutter_local "${ci[@]}" local flutter
 run_gate flutter_native_and_debug_apk "${ci[@]}" pr flutter

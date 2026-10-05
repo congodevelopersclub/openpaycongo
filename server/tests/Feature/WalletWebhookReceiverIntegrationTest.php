@@ -2,9 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Deposits\ProviderTransfer;
+use App\Deposits\RecordProviderDeposit;
 use App\Jobs\DeliverWalletWebhook;
+use App\Models\SourceInstallation;
 use App\Models\WalletWebhookDelivery;
 use App\PaymentRequests\AllocatePendingPaymentRequests;
+use App\PaymentRequests\CreatePaymentRequest;
+use App\PaymentRequests\PaymentRequestStatus;
+use App\Reconciliation\ReverseDeposit;
 use App\Webhooks\SendWalletWebhook;
 use App\Webhooks\WebhookDestinationPolicy;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
@@ -147,5 +153,96 @@ final class WalletWebhookReceiverIntegrationTest extends WalletWebhookTestCase
         $this->app->instance('env', 'production');
         $this->expectException(InvalidArgumentException::class);
         app(WebhookDestinationPolicy::class)->validateUrl($url);
+    }
+
+    public function test_real_receiver_accepts_a_credit_snapshot_that_remains_negative_after_reversal_debt(): void
+    {
+        $router = dirname(base_path()).'/examples/webhook-receiver.php';
+        self::assertFileExists($router);
+        $socket = stream_socket_server('tcp://127.0.0.1:0');
+        self::assertIsResource($socket);
+        $address = stream_socket_get_name($socket, false);
+        self::assertIsString($address);
+        $port = (int) substr($address, strrpos($address, ':') + 1);
+        fclose($socket);
+        $databasePath = tempnam(sys_get_temp_dir(), 'wallet-debt-consumer-');
+        $logPath = tempnam(sys_get_temp_dir(), 'wallet-debt-receiver-');
+        self::assertIsString($databasePath);
+        self::assertIsString($logPath);
+        $process = null;
+        try {
+            $url = 'http://receiver.example:'.$port.'/wallet';
+            config(['webhooks.test_receiver_url' => $url]);
+            [$actor, , $customer, $deposit] = $this->fixture($url, 100);
+            $this->dns(['127.0.0.1']);
+            $process = proc_open([PHP_BINARY, '-d', 'display_errors=0', '-S', '127.0.0.1:'.$port, $router], [
+                0 => ['file', '/dev/null', 'r'], 1 => ['file', $logPath, 'a'], 2 => ['file', $logPath, 'a'],
+            ], $pipes, base_path(), array_merge(getenv(), [
+                'OPENPAY_WEBHOOK_SIGNING_SECRET' => self::SECRET,
+                'OPENPAY_WEBHOOK_RECEIVER_DB' => $databasePath,
+            ]));
+            self::assertIsResource($process);
+            $ready = false;
+            $deadline = microtime(true) + 5;
+            do {
+                $connection = @fsockopen('127.0.0.1', $port, $errorCode, $errorMessage, 0.1);
+                if (is_resource($connection)) {
+                    fclose($connection);
+                    $ready = true;
+                    break;
+                }
+                usleep(50000);
+            } while (microtime(true) < $deadline);
+            self::assertTrue($ready, 'Controlled HTTP receiver failed to start.');
+
+            app(AllocatePendingPaymentRequests::class)->forDeposit($deposit);
+            $firstDelivery = WalletWebhookDelivery::query()->where('deposit_id', $deposit->id)->sole();
+            (new DeliverWalletWebhook($firstDelivery->id))->handle(app(SendWalletWebhook::class));
+            self::assertSame('delivered', $firstDelivery->fresh()->status);
+            $request = app(CreatePaymentRequest::class)->create($customer->id, 100, 'CDF', 'synthetic-reversal-debt-charge');
+            self::assertSame(PaymentRequestStatus::Charged, $request->status);
+            self::assertDatabaseHas('customer_credits', ['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => 0]);
+            app(ReverseDeposit::class)->reverse($actor, $deposit, 'synthetic_debt_correction');
+            self::assertDatabaseHas('customer_credits', ['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => -100]);
+
+            $nextDeposit = app(RecordProviderDeposit::class)->record(new ProviderTransfer(
+                organizationId: $deposit->organization_id,
+                installationIdentifier: 'synthetic-webhook-installation',
+                customerLookupIdentifier: 'synthetic-webhook-customer',
+                providerReference: 'synthetic-webhook-debt-credit',
+                amountMinor: 50,
+                currency: 'CDF',
+                providerOccurredAt: '2026-08-31T01:01:00Z',
+                senderIdentifier: null,
+                receiverIdentifier: null,
+            ), SourceInstallation::query()->findOrFail($deposit->source_installation_id))->deposit;
+            app(AllocatePendingPaymentRequests::class)->forDeposit($nextDeposit);
+            $delivery = WalletWebhookDelivery::query()->where('deposit_id', $nextDeposit->id)->sole();
+            $payload = json_decode($delivery->body, true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame(50, $payload['amount_minor']);
+            self::assertSame(-50, $payload['available_minor']);
+            self::assertSame('unverified', $payload['settlement_status']);
+            self::assertDatabaseHas('customer_credits', ['customer_id' => $customer->id, 'currency' => 'CDF', 'available_minor' => -50]);
+            self::assertDatabaseCount('ledger_entries', 6);
+            self::assertDatabaseCount('customer_credit_postings', 3);
+            self::assertDatabaseCount('wallet_webhook_deliveries', 2);
+            (new DeliverWalletWebhook($delivery->id))->handle(app(SendWalletWebhook::class));
+            self::assertSame('delivered', $delivery->fresh()->status);
+            self::assertNull($delivery->fresh()->last_error_code);
+            $database = new PDO('sqlite:'.$databasePath);
+            self::assertSame(2, (int) $database->query('SELECT COUNT(*) FROM received_wallet_events')->fetchColumn());
+            self::assertSame(150, (int) $database->query('SELECT amount_minor FROM wallet_credit_totals')->fetchColumn());
+            $database = null;
+        } finally {
+            if (is_resource($process)) {
+                proc_terminate($process);
+                proc_close($process);
+            }
+            foreach ([$databasePath, $databasePath.'-journal', $databasePath.'-wal', $databasePath.'-shm', $logPath] as $temporary) {
+                if (is_file($temporary)) {
+                    unlink($temporary);
+                }
+            }
+        }
     }
 }

@@ -13,7 +13,7 @@ abstract interface class SmsDepositReleaseStore {
   Future<bool> install(String bundle, DateTime now);
 }
 
-/// Signature, paired signing pin, expiry, and version are checked on every
+/// Signature, configured parser signing pin, expiry, and version are checked on every
 /// read. SQLite retains the whole signed bundle inside Keystore ciphertext.
 final class EncryptedSmsReleaseStore implements SmsDepositReleaseStore {
   EncryptedSmsReleaseStore._(this._database, this._cipher, this._verifier);
@@ -75,10 +75,12 @@ final class EncryptedSmsReleaseStore implements SmsDepositReleaseStore {
       // An expired stored release must still block rollback. Its authenticated
       // ciphertext retains the previously verified sender/version authority.
       final Object? decoded = jsonDecode(row.bundle);
-      if (decoded is! Map<String, dynamic> || decoded['release'] is! Map<String, dynamic>) {
+      if (decoded is! Map<String, dynamic>) {
         throw const OutboxRecoveryRequiredException();
       }
-      final Map<String, dynamic> stored = decoded['release'] as Map<String, dynamic>;
+      final Object? storedValue = decoded.containsKey('release') ? decoded['release'] : decoded;
+      if (storedValue is! Map<String, dynamic>) throw const OutboxRecoveryRequiredException();
+      final Map<String, dynamic> stored = storedValue;
       if (stored['sender'] != incoming.sender) continue;
       final Object? version = stored['pattern_version'];
       if (version is! int) throw const OutboxRecoveryRequiredException();

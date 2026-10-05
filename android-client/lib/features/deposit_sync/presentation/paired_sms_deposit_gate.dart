@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../pairing/infrastructure/platform_pairing_qr_trust_store.dart';
 import '../../pairing/presentation/pairing_protocol_bloc.dart';
 import '../../sms_gateway/domain/sms_gateway.dart';
 import '../data/encrypted_sms_release_store.dart';
@@ -66,7 +65,8 @@ final class _PairedSmsDepositGateState extends State<PairedSmsDepositGate> {
     EncryptedSmsReleaseStore? releases;
     try {
       releases = await EncryptedSmsReleaseStore.open(
-        verifier: const SignedSmsDepositReleaseVerifier(PlatformPairingQrTrustStore()));
+        verifier: const SignedSmsDepositReleaseVerifier(
+          pinnedSigningPublicKey: String.fromEnvironment('OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY')));
       runtime = await DepositSubmissionRuntime.createPairedMobileEnvelope();
       if (!mounted || generation != _generation) {
         await runtime.close();

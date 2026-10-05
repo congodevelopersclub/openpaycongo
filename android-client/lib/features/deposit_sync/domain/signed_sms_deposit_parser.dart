@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 
-import '../../pairing/presentation/pairing_qr_bloc.dart';
 import '../../payment_inbox/domain/payment_ingestion.dart';
 import '../../sms_gateway/domain/sms_gateway.dart';
 import '../presentation/deposit_submission_bloc.dart';
@@ -14,38 +13,42 @@ import '../presentation/deposit_submission_bloc.dart';
 final class SignedSmsDepositRelease {
   const SignedSmsDepositRelease._({
     required this.provider, required this.sender, required this.template,
-    required this.version, required this.releaseId, required this.expiresAt,
+    required this.version, required this.releaseId, required this.approvedAt, required this.expiresAt,
   });
   final String provider;
   final String sender;
   final DepositSmsTemplate template;
   final int version;
   final String releaseId;
+  final DateTime approvedAt;
   final DateTime expiresAt;
 }
 
 final class SignedSmsDepositReleaseVerifier {
-  const SignedSmsDepositReleaseVerifier(this.trust);
-  final PairingQrTrustStore trust;
+  const SignedSmsDepositReleaseVerifier({required this.pinnedSigningPublicKey});
+  final String pinnedSigningPublicKey;
 
   Future<SignedSmsDepositRelease?> verify(String bundle, DateTime now) async {
     if (utf8.encode(bundle).length > 12288) return null;
     try {
       final Object? decoded = jsonDecode(bundle);
-      if (decoded is! Map<String, dynamic> || decoded.length != 2 ||
-          decoded['signing_public_key'] is! String || decoded['release'] is! Map<String, dynamic>) {
-        return null;
-      }
-      final String encodedKey = decoded['signing_public_key'] as String;
-      final Uint8List? key = _base64(encodedKey, 32);
+      if (decoded is! Map<String, dynamic>) return null;
+      final Uint8List? key = _base64(pinnedSigningPublicKey, 32);
       if (key == null) return null;
-      final String fingerprint = base64UrlEncode(sha256.convert(key).bytes).replaceAll('=', '');
-      if (await trust.lookup(fingerprint) is! PairingQrMatchingPin) return null;
-      final Map<String, dynamic> release = decoded['release'] as Map<String, dynamic>;
+      // PR225's encoded_release is the canonical flat signed object. A wrapper
+      // is only an import carrier and can never establish signing authority.
+      Map<String, dynamic> release = decoded;
+      if (decoded.containsKey('release')) {
+        if (decoded.length != 2 || decoded['signing_public_key'] != pinnedSigningPublicKey ||
+            decoded['release'] is! Map<String, dynamic>) {
+          return null;
+        }
+        release = decoded['release'] as Map<String, dynamic>;
+      }
       const Set<String> keys = <String>{'schema_version', 'provider', 'sender', 'template',
         'pattern_version', 'approved_at', 'expires_at', 'signature'};
       if (release.length != keys.length || !release.keys.every(keys.contains) ||
-          release['schema_version'] != 2 || release['provider'] is! String ||
+          release['schema_version'] != '1' || release['provider'] is! String ||
           release['sender'] is! String || release['template'] is! String ||
           release['pattern_version'] is! int || release['approved_at'] is! String ||
           release['expires_at'] is! String || release['signature'] is! String) {
@@ -70,7 +73,8 @@ final class SignedSmsDepositReleaseVerifier {
         return null;
       }
       return SignedSmsDepositRelease._(provider: provider, sender: sender,
-        template: template, version: version, releaseId: sha256.convert(payload).toString(), expiresAt: expiry);
+        template: template, version: version, releaseId: sha256.convert(payload).toString(),
+        approvedAt: approved, expiresAt: expiry);
     } on Object {
       return null;
     }
@@ -79,7 +83,7 @@ final class SignedSmsDepositReleaseVerifier {
   /// Same LP16 context and order as the published backend release.
   static Uint8List canonicalPayload(Map<String, dynamic> release) {
     final BytesBuilder result = BytesBuilder(copy: false);
-    for (final String value in <String>['openpaycongo/operator-payment-pattern', '2',
+    for (final String value in <String>['openpaycongo/operator-payment-pattern', '1',
       release['provider'] as String, release['sender'] as String,
       release['template'] as String, '${release['pattern_version']}',
       release['approved_at'] as String, release['expires_at'] as String]) {
@@ -163,7 +167,9 @@ final class SignedSmsDepositParser {
     final SenderIdentity? expected = SenderIdentity.fromOsMetadata(release.sender);
     if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(record.id) || sender == null || expected == null ||
         record.sender != expected.value || !TrustedSenderRule(expected).allows(sender) ||
-        !release.expiresAt.isAfter(now.toUtc())) {
+        !release.expiresAt.isAfter(now.toUtc()) ||
+        record.receivedAt.toUtc().isBefore(release.approvedAt) ||
+        !record.receivedAt.toUtc().isBefore(release.expiresAt)) {
       return null;
     }
     final SmsEnvelope? sms = SmsEnvelope.fromOs(sender: sender, body: record.body,
