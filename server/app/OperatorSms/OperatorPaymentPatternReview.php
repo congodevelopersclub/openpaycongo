@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\OperatorSms;
 
 use App\Models\OperatorSmsPatternProposal;
+use App\Models\Organization;
 use App\Models\User;
 use App\Security\FinancialOperatorMfaSession;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -33,19 +34,34 @@ final class OperatorPaymentPatternReview
             throw ValidationException::withMessages(['pattern' => 'Use canonical provider and sender IDs and a literal template with all five required fields.']);
         }
 
-        return OperatorSmsPatternProposal::query()->firstOrCreate(
-            [
+        return DB::transaction(function () use ($organizationId, $provider, $sender, $template): OperatorSmsPatternProposal {
+            // Serialize identical submissions while preserving every earlier approval.
+            Organization::query()->lockForUpdate()->findOrFail($organizationId);
+            $templateDigest = hash('sha256', $template);
+            $latest = OperatorSmsPatternProposal::query()
+                ->where('organization_id', $organizationId)
+                ->where('provider', $provider)
+                ->where('sender', $sender)
+                ->where('template_sha256', $templateDigest)
+                ->orderByDesc('proposal_revision')
+                ->lockForUpdate()
+                ->first();
+
+            if ($latest !== null && $latest->status === 'pending_review') {
+                return $latest;
+            }
+
+            return OperatorSmsPatternProposal::query()->create([
                 'organization_id' => $organizationId,
                 'provider' => $provider,
                 'sender' => $sender,
-                'template_sha256' => hash('sha256', $template),
-            ],
-            [
+                'template_sha256' => $templateDigest,
+                'proposal_revision' => ($latest?->proposal_revision ?? 0) + 1,
                 'template' => $template,
                 'model' => null,
                 'status' => 'pending_review',
-            ],
-        );
+            ]);
+        });
     }
 
     public function approve(User $actor, OperatorSmsPatternProposal $proposal): OperatorSmsPatternProposal

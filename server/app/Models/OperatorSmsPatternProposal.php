@@ -25,6 +25,7 @@ final class OperatorSmsPatternProposal extends Model
         'sender',
         'template',
         'template_sha256',
+        'proposal_revision',
         'model',
         'status',
         'reviewed_by_user_id',
@@ -48,7 +49,10 @@ final class OperatorSmsPatternProposal extends Model
 
     protected function casts(): array
     {
-        return ['reviewed_at' => 'immutable_datetime'];
+        return [
+            'proposal_revision' => 'integer',
+            'reviewed_at' => 'immutable_datetime',
+        ];
     }
 
     /** @return BelongsTo<User, $this> */
