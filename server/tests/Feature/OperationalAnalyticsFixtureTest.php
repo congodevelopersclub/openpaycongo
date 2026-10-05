@@ -18,7 +18,7 @@ final class OperationalAnalyticsFixtureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const CURRENT_MIGRATION_REVISION = '2026_10_05_000002_create_wallet_webhook_outbox';
+    private const CURRENT_MIGRATION_REVISION = '2026_10_05_000003_add_operator_sms_pattern_proposal_revisions';
 
     public function test_ready_stack_reports_live_dependencies_and_admits_writes(): void
     {
