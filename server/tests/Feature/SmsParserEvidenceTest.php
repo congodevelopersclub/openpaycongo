@@ -8,6 +8,7 @@ use App\Deposits\MobileDepositInput;
 use App\Deposits\RecordProviderDeposit;
 use App\Deposits\RecordResult;
 use App\Deposits\SubmitMobileDeposit;
+use App\Filament\Pages\ManageOperatorSmsPatterns;
 use App\Models\Deposit;
 use App\Models\OperatorSmsPatternProposal;
 use App\Models\OperatorSmsPatternRelease;
@@ -19,6 +20,7 @@ use App\OperatorSms\OperatorPaymentPatternReview;
 use App\OperatorSms\ReleaseApprovedOperatorPaymentPattern;
 use App\Security\FinancialOperatorMfaSession;
 use Carbon\CarbonImmutable;
+use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -26,6 +28,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use LogicException;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 final class SmsParserEvidenceTest extends TestCase
@@ -168,6 +171,35 @@ final class SmsParserEvidenceTest extends TestCase
             self::assertDatabaseCount('operator_sms_pattern_releases', 0);
             self::assertSame('pending_review', $pending->fresh()->status);
         }
+    }
+
+    public function test_release_selector_distinguishes_unchanged_renewals_and_publishes_the_selected_revision(): void
+    {
+        Filament::setCurrentPanel(Filament::getPanel('operations'));
+        $original = $this->approvedWalletRelease(CarbonImmutable::now('UTC')->addHour()->startOfSecond());
+        $originalJson = $original->encoded_release;
+        $this->travel(2)->hours();
+        $review = app(OperatorPaymentPatternReview::class);
+        $renewal = $review->approve($this->operator, $review->proposeManual(
+            $this->operator, 'OPERATOR_A', '12345', self::WalletTemplate,
+        ));
+
+        Livewire::actingAs($this->operator)
+            ->test(ManageOperatorSmsPatterns::class)
+            ->mountAction('releasePattern')
+            ->assertSee('OPERATOR_A / 12345 / revision 1 /')
+            ->assertSee('OPERATOR_A / 12345 / revision 2 /')
+            ->callMountedAction(data: [
+                'proposal_id' => $renewal->id,
+                'expires_at' => CarbonImmutable::now('UTC')->addDay()->format('Y-m-d H:i:s'),
+            ])
+            ->assertHasNoFormErrors();
+
+        self::assertDatabaseCount('operator_sms_pattern_releases', 2);
+        self::assertSame($originalJson, $original->fresh()->encoded_release);
+        $renewedRelease = OperatorSmsPatternRelease::query()->where('operator_sms_pattern_proposal_id', $renewal->id)->sole();
+        self::assertSame(2, $renewedRelease->pattern_version);
+        self::assertTrue($renewedRelease->expires_at->isFuture());
     }
 
     public function test_an_unchanged_expired_parser_can_be_reproposed_with_fresh_approval(): void
