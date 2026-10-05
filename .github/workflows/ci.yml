@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check SMS-to-wallet delivery before the full gate
+        run: bash scripts/ci/fast-feedback.sh focused laravel SmsToWalletEndToEndTest
       - name: Run canonical pull-request Laravel gate
         run: bash scripts/ci/fast-feedback.sh pr laravel
 
@@ -95,8 +97,13 @@ jobs:
 
   flutter:
     runs-on: ubuntu-latest
+    env:
+      # Public key of PR225's existing synthetic test seed. This debug artifact is for isolated demos only.
+      OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY: iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check signed SMS submission before the full gate
+        run: bash scripts/ci/fast-feedback.sh focused flutter test/features/sms_deposit_pipeline_test.dart
       - name: Run canonical pull-request Flutter gate
         run: bash scripts/ci/fast-feedback.sh pr flutter
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

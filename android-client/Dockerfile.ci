@@ -99,7 +99,9 @@ RUN mkdir -p /tmp/libsodium-host \
     && /tmp/pairing-v2-native-test
 
 FROM native-test AS apk
-RUN flutter build apk --debug
+ARG OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY=""
+RUN flutter build apk --debug \
+    --dart-define="OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY=${OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY}"
 
 FROM scratch AS artifact
 COPY --from=apk /workspace/build/app/outputs/flutter-apk/app-debug.apk /app-debug.apk

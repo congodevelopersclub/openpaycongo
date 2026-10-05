@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import '../presentation/deposit_submission_bloc.dart';
 import 'mobile_deposit_http_transport.dart';
 import 'mobile_envelope_sealer.dart';
@@ -15,6 +17,7 @@ final class MobileEnvelopeHttpTransport implements AuthenticatedDepositTransport
     required this.http,
     this.maximumResponseBytes = 1024,
     this.timeout = const Duration(seconds: 3),
+    this.journalBinding,
   }) {
     if (maximumResponseBytes < 1 || maximumResponseBytes > 8192) {
       throw ArgumentError.value(maximumResponseBytes, 'maximumResponseBytes');
@@ -28,6 +31,7 @@ final class MobileEnvelopeHttpTransport implements AuthenticatedDepositTransport
   final MobileDepositHttpPort http;
   final int maximumResponseBytes;
   final Duration timeout;
+  final String? journalBinding;
 
   @override
   Future<DepositSubmissionResult> submit(ProviderDeposit deposit) async {
@@ -36,6 +40,10 @@ final class MobileEnvelopeHttpTransport implements AuthenticatedDepositTransport
     );
     try {
       final MobileRequestEnvelope envelope = await vault.sealDeposit(payload);
+      if (journalBinding != null && sha256.convert(utf8.encode(
+          '${envelope.installationId}\n${envelope.serverBaseUrl}')).toString() != journalBinding) {
+        throw const DepositTransportUnavailable();
+      }
       final MobileDepositHttpExchange exchange = http.post(
         MobileDepositHttpRequest(
           uri: _endpointFor(envelope.serverBaseUrl),

@@ -2,7 +2,7 @@
 
 `POST /mobile/envelopes` is the server-side encrypted transport for a paired installation. It has no bearer credential. The caller is authenticated by possession of the client-to-server directional key created during pairing.
 
-This document is normative with [ADR 004](adr-004-secure-device-enrollment.md). It specifies `deposit` and the internal `activation_acknowledgement` operation; Android seals and decrypts in native code while Dart owns only bounded HTTPS routing and retry scheduling.
+This document is normative with [ADR 004](adr-004-secure-device-enrollment.md). It specifies `deposit`, `sms_deposit`, and the internal `activation_acknowledgement` operation; Android seals and decrypts in native code while Dart owns only bounded HTTPS routing and retry scheduling.
 
 ## Security boundary
 
@@ -52,6 +52,36 @@ Deposit request plaintext is UTF-8 JSON with exactly:
   }
 }
 ```
+
+SMS-derived transfers use the same encrypted outer envelope and the following additional inner operation. The payload carries the ordinary validated transfer fields plus the exact parser evidence object shown here:
+
+```json
+{
+  "version": 1,
+  "operation": "sms_deposit",
+  "payload": {
+    "customer_lookup_identifier": "customer-001",
+    "provider_reference": "provider-reference",
+    "amount_minor": 12500,
+    "currency": "CDF",
+    "provider_occurred_at": "2026-09-01T01:00:00Z",
+    "sender_identifier": "PAYOUT",
+    "parser_evidence": {
+      "kind": "signed_release",
+      "provider": "OPERATOR_A",
+      "sms_sender": "PAYOUT",
+      "parser_version": 3,
+      "sms_received_at": "2026-09-01T01:00:01Z",
+      "evidence_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "parser_release_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}
+```
+
+`parser_evidence` has exactly `kind`, `provider`, `sms_sender`, `parser_version`, `sms_received_at`, `evidence_digest`, and `parser_release_id`. No raw SMS text or unrecognized property is accepted. `evidence_digest` is the SHA-256 digest of the locally captured SMS body; `parser_release_id` identifies the canonical signed release transcript, not the release endpoint's UUID. Android verifies the flat schema `"1"` release against its separately configured parser public-key pin and exact trusted sender before creating this command. The backend resolves the digest within the enrolled installation's organization and checks the approved proposal and release, provider, sender, and version. It verifies that the original SMS receipt falls within the approval/expiry interval and no more than five minutes in the future. If `sender_identifier` is supplied, it must equal `sms_sender`. See [approved pattern integration](operator-pattern-integration.md).
+
+This operation requires parser evidence and records the same immutable deposit and ledger result as `deposit`. Financial idempotency uses the transfer fields; evidence is excluded from its fingerprint so a repeated observation does not create a second credit. The first accepted evidence stays immutable and encrypted at rest. An exact transfer retry is replay-safe; changed financial fields under the same scoped provider reference conflict. Every incoming evidence document must still pass release validation. Laravel does not receive the SMS body. The compatibility `deposit` operation does not prove SMS parsing. Neither operation proves financial settlement.
 
 `payload` uses the same Laravel validation and immutable-deposit rules as `POST /mobile/deposits`: CDF-only positive integer money, strict portable timestamp, bounded control-character-free identifiers, and optional bounded customer PII. Tenant and source installation are always derived from the paired installation, never from plaintext input. Plaintext is not logged, queued, returned, or serialized; it is cleared from the PHP variable after JSON parsing.
 
@@ -143,7 +173,7 @@ Laravel submits this vector unchanged through `/mobile/envelopes` and decrypts t
 
 ## Compatibility and limits
 
-This endpoint is v1-only and accepts deposits plus the internal final activation acknowledgement. It deliberately does not turn the legacy credential-protected `POST /mobile/deposits` endpoint into an encrypted endpoint; that compatibility route remains separately protected.
+This endpoint is v1-only and accepts `deposit`, `sms_deposit`, and the internal final activation acknowledgement. It deliberately does not turn the legacy credential-protected `POST /mobile/deposits` endpoint into an encrypted endpoint; that compatibility route remains separately protected. That bearer-authenticated endpoint remains an alternate legacy transfer route and does not require SMS parser evidence by default.
 
 The Android mobile-envelope adapter is foreground/unlock-gated. It accepts a bounded deposit payload from Dart, reserves a Keystore-encrypted no-backup counter, reads the stored send key, installation ID, and pinned HTTPS origin from the same atomically promoted generation natively, and returns only routing metadata plus the encrypted request. Dart posts exactly that five-field envelope to `/mobile/envelopes`, with no bearer header. It passes the bounded encrypted response outer fields back to native code; native code checks the response AAD (including HTTP status), decrypts with the receive key, and returns only `recorded`, `replayed`, or `conflict`. Network, malformed, unavailable, or unauthenticated responses are one generic transport failure. The deposit payload originates in Dart and is staged only through the separate encrypted retry journal; it is never logged or placed in BLoC state.
 

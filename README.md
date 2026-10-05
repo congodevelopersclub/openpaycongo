@@ -8,7 +8,10 @@
 
 - `server/` — Congo OpenPay Server, the canonical Laravel backend.
 - `android-client/` — Flutter mobile prototype.
-- `docs/` — public contracts, runtime-neutral fixtures, ADRs, and design notes.
+- `docs/` - public contracts, runtime-neutral fixtures, ADRs, and design notes.
+
+Developer guides: [English](docs/developer-guide.en.md) · [Français](docs/developer-guide.fr.md).
+The end-to-end SMS-to-wallet acceptance steps and repeatable Docker evidence runner are in [sms-to-wallet-acceptance.md](docs/sms-to-wallet-acceptance.md).
 
 The public contracts describe planned behavior; they are not proof that every
 endpoint is implemented. Runtime-neutral fixtures remain in `docs/` so future

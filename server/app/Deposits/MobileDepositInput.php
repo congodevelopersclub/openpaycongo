@@ -28,13 +28,28 @@ final class MobileDepositInput
             'customer_address' => ['nullable', 'string', 'min:1', 'max:2000', 'not_regex:/[\\x00-\\x1F\\x7F]/'],
             'customer_phone' => ['nullable', 'string', 'min:1', 'max:64', 'not_regex:/[\\x00-\\x1F\\x7F]/'],
             'customer_email' => ['nullable', 'string', 'min:1', 'max:320', 'not_regex:/[\\x00-\\x1F\\x7F]/'],
+            'parser_evidence' => ['sometimes', 'array'],
+            'parser_evidence.kind' => ['required_with:parser_evidence', 'in:signed_release'],
+            'parser_evidence.provider' => ['required_with:parser_evidence', 'string', 'min:1', 'max:128', 'not_regex:/[\\x00-\\x1F\\x7F]/'],
+            'parser_evidence.sms_sender' => ['required_with:parser_evidence', 'string', 'min:1', 'max:255', 'not_regex:/[\\x00-\\x1F\\x7F]/'],
+            'parser_evidence.parser_version' => ['required_with:parser_evidence', 'integer', 'min:1'],
+            'parser_evidence.sms_received_at' => ['required_with:parser_evidence', 'string', 'max:25'],
+            'parser_evidence.evidence_digest' => ['required_with:parser_evidence', 'string', 'regex:/^[a-f0-9]{64}$/D'],
+            'parser_evidence.parser_release_id' => ['required_with:parser_evidence', 'string', 'regex:/^[a-f0-9]{64}$/D'],
         ];
     }
 
     /** @param array<string, mixed> $input @return array<string, mixed> */
-    public static function validate(array $input): array
+    public static function validate(array $input, bool $requireParserEvidence = false): array
     {
-        if (array_diff(array_keys($input), array_keys(self::rules())) !== []) {
+        $topLevelFields = array_filter(array_keys(self::rules()), static fn (string $field): bool => ! str_contains($field, '.'));
+        if (array_diff(array_keys($input), $topLevelFields) !== []
+            || (isset($input['parser_evidence']) && (! is_array($input['parser_evidence'])
+                || count($input['parser_evidence']) !== 7
+                || array_diff(array_keys($input['parser_evidence']), [
+                    'kind', 'provider', 'sms_sender', 'parser_version', 'sms_received_at', 'evidence_digest', 'parser_release_id',
+                ]) !== []))
+            || ($requireParserEvidence && ! array_key_exists('parser_evidence', $input))) {
             throw ValidationException::withMessages(['payload' => 'The deposit payload is invalid.']);
         }
 
@@ -43,6 +58,16 @@ final class MobileDepositInput
             $providerOccurredAt = $input['provider_occurred_at'] ?? null;
             if (is_string($providerOccurredAt) && ! self::isStrictPortableTimestamp($providerOccurredAt)) {
                 $validator->errors()->add('provider_occurred_at', 'The provider occurrence timestamp is invalid.');
+            }
+            $evidence = $input['parser_evidence'] ?? null;
+            if (is_array($evidence)) {
+                if (array_key_exists('parser_version', $evidence) && ! is_int($evidence['parser_version'])) {
+                    $validator->errors()->add('parser_evidence.parser_version', 'The parser version must be an integer.');
+                }
+                if (is_string($evidence['sms_received_at'] ?? null)
+                    && ! self::isStrictPortableTimestamp($evidence['sms_received_at'])) {
+                    $validator->errors()->add('parser_evidence.sms_received_at', 'The SMS receipt timestamp is invalid.');
+                }
             }
         });
 

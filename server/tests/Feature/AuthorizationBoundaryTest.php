@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\CheckServiceToken;
 use App\Http\Middleware\RequireFinancialOperatorMfa;
+use App\Http\Middleware\ResolveDeveloperApplication;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\Authorize;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
@@ -42,6 +44,8 @@ final class AuthorizationBoundaryTest extends TestCase
         ];
         $authorizedRoutes = [
             'POST v1/pairing/intents' => ['web', 'auth', 'pairing.issuer'],
+            'GET|HEAD mobile/operator-sms/pattern-releases' => ['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'],
+            'GET|HEAD services/customers/{customer}/wallet' => [CheckServiceToken::using('wallets:read'), ResolveDeveloperApplication::class, 'throttle:service-api'],
         ];
         // These routes authenticate with a pairing secret or encrypted proof, not framework middleware.
         $cryptographicPossessionRoutes = [
@@ -55,7 +59,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertCount(13, $anonymousRoutes);
         self::assertCount(4, $signedFrameworkRoutes);
         self::assertCount(1, $confidentialClientTokenExchangeRoutes);
-        self::assertCount(1, $authorizedRoutes);
+        self::assertCount(3, $authorizedRoutes);
         self::assertCount(3, $cryptographicPossessionRoutes);
 
         foreach (app('router')->getRoutes()->getRoutes() as $route) {
@@ -109,7 +113,8 @@ final class AuthorizationBoundaryTest extends TestCase
             );
         }
 
-        self::assertSame(50, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
+        // Main's 50 routes plus the approved-pattern page, mobile releases, and scoped wallet read.
+        self::assertSame(53, $runtimeRouteCount, 'Runtime route changes require an explicit authorization-boundary inventory review.');
     }
 
     public function test_operations_routes_require_mfa_without_capturing_the_global_livewire_update_boundary(): void
@@ -120,7 +125,7 @@ final class AuthorizationBoundaryTest extends TestCase
 
         self::assertNotNull($livewireUpdate);
         self::assertNotContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($livewireUpdate));
-        self::assertCount(5, $operationsRoutes);
+        self::assertCount(6, $operationsRoutes);
 
         foreach ($operationsRoutes as $route) {
             self::assertContains(RequireFinancialOperatorMfa::class, app('router')->gatherRouteMiddleware($route));
@@ -149,6 +154,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertTrue($this->isExpectedBoundaryMiddleware('can:view,deposit'));
         self::assertTrue($this->isExpectedBoundaryMiddleware(Authorize::class));
         self::assertTrue($this->isExpectedBoundaryMiddleware(CheckToken::class.':payment-requests:read'));
+        self::assertTrue($this->isExpectedBoundaryMiddleware(CheckServiceToken::class.':wallets:read'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('auth.optional'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('authorize-anything'));
 
@@ -195,7 +201,9 @@ final class AuthorizationBoundaryTest extends TestCase
             || $middleware === Authorize::class
             || str_starts_with($middleware, Authorize::class.':');
         $isServiceTokenForm = $middleware === CheckToken::class
-            || str_starts_with($middleware, CheckToken::class.':');
+            || str_starts_with($middleware, CheckToken::class.':')
+            || $middleware === CheckServiceToken::class
+            || str_starts_with($middleware, CheckServiceToken::class.':');
 
         if (! $isAuthenticationForm && ! $isAuthorizationForm && ! $isServiceTokenForm) {
             return false;
@@ -203,6 +211,6 @@ final class AuthorizationBoundaryTest extends TestCase
 
         return collect(app('router')->resolveMiddleware([$middleware]))
             ->map(static fn (string $resolved): string => explode(':', $resolved, 2)[0])
-            ->contains(static fn (string $resolved): bool => in_array($resolved, [Authenticate::class, Authorize::class, CheckToken::class], true));
+            ->contains(static fn (string $resolved): bool => in_array($resolved, [Authenticate::class, Authorize::class, CheckToken::class, CheckServiceToken::class], true));
     }
 }

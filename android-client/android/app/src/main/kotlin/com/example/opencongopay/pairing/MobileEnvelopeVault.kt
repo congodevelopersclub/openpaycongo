@@ -33,7 +33,7 @@ internal object MobileEnvelopeFormat {
 
     fun plaintext(operation: String, payload: ByteArray): ByteArray {
         val value = when (operation) {
-            "deposit" -> {
+            "deposit", "sms_deposit" -> {
                 if (payload.size !in 2..MAX_PAYLOAD_BYTES) throw MobileEnvelopeException()
                 try {
                     val tokener = JSONTokener(String(payload, StandardCharsets.UTF_8))
@@ -204,6 +204,16 @@ internal class MobileEnvelopeVault(
     private val counterStore = AndroidMobileEnvelopeCounterStore(context)
     private val counterAllocator = MobileEnvelopeCounterAllocator(counterStore)
     private val acknowledgementAccess = PairingActivationAcknowledgementAccess(accessLease)
+
+    @Synchronized
+    fun journalBinding(): String = accessLease.use {
+        val material = PairingDirectionalKeyVault(context).readOutboundMaterial()
+        try {
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest("${material.installationId}\n${material.canonicalServerBaseUrl}".toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { "%02x".format(it.toInt() and 255) }
+        } finally { material.dispose() }
+    }
 
     @Synchronized
     fun seal(operation: String, payload: ByteArray): Map<String, Any> {

@@ -6,6 +6,8 @@
 !README.md
 !docs/
 !docs/**
+!examples/
+!examples/webhook-receiver.php
 !server/
 !server/**
 server/vendor

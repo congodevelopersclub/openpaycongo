@@ -7,8 +7,11 @@ use App\Http\Controllers\ConfirmPairingIntentController;
 use App\Http\Controllers\GetPairingActivationController;
 use App\Http\Controllers\GetPairingConfirmationController;
 use App\Http\Controllers\IssuePairingIntentController;
+use App\Http\Controllers\ListOperatorSmsPatternReleasesController;
+use App\Http\Controllers\ShowCustomerWalletController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Controllers\StoreMobileEnvelopeController;
+use App\Http\Middleware\CheckServiceToken;
 use App\Http\Middleware\RequireClientCredentialsGrant;
 use App\Http\Middleware\ResolveDeveloperApplication;
 use App\Models\DeveloperApplication;
@@ -44,6 +47,10 @@ Route::get('/mobile/identity', static function () {
     return response()->json(['organization_id' => $installation->organization_id], 200, ['cache-control' => 'no-store']);
 })->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'])
     ->name('mobile.identity');
+
+Route::get('/mobile/operator-sms/pattern-releases', ListOperatorSmsPatternReleasesController::class)
+    ->middleware(['auth:mobile', 'abilities:mobile:sync:read', 'mobile.activation', 'throttle:mobile-api'])
+    ->name('mobile.operator-sms.pattern-releases.index');
 
 Route::post('/mobile/deposits', StoreMobileDepositController::class)
     ->middleware(['auth:mobile', 'abilities:mobile:deposits:write', 'mobile.activation', 'throttle:mobile-api'])
@@ -81,3 +88,7 @@ Route::get('/services/identity', static function () {
     ], 200, ['cache-control' => 'no-store']);
 })->middleware([CheckToken::using('payment-requests:read'), ResolveDeveloperApplication::class])
     ->name('services.identity');
+
+Route::get('/services/customers/{customer}/wallet', ShowCustomerWalletController::class)
+    ->middleware([CheckServiceToken::using('wallets:read'), ResolveDeveloperApplication::class, 'throttle:service-api'])
+    ->name('services.wallet.show');

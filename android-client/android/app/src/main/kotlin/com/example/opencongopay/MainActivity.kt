@@ -468,6 +468,22 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun handleMobileEnvelopeCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method == "journalBinding") {
+            val generation = requireSmsGatewayAccess(result) ?: return
+            smsTasks.submit(
+                generation = generation,
+                operation = {
+                    MobileEnvelopeVault(applicationContext, accessGuard.lease(
+                        permissionGranted = { checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED },
+                        expectedGeneration = generation,
+                    )).journalBinding()
+                },
+                onSuccess = result::success,
+                onFailure = { result.error("envelope_unavailable", "Mobile envelope is unavailable", null) },
+                onDenied = { deliverAccessDenied(result) },
+            )
+            return
+        }
         if (call.method == "open") {
             openMobileEnvelope(call, result)
             return
@@ -479,7 +495,7 @@ class MainActivity : FlutterFragmentActivity() {
         val arguments = call.arguments as? Map<*, *>
         val operation = arguments?.get("operation") as? String
         val payload = arguments?.get("payload") as? ByteArray
-        if (arguments == null || arguments.keys != setOf("operation", "payload") || operation != "deposit" || payload == null) {
+        if (arguments == null || arguments.keys != setOf("operation", "payload") || operation == null || operation !in setOf("deposit", "sms_deposit") || payload == null) {
             payload?.fill(0)
             result.error("envelope_unavailable", "Mobile envelope is unavailable", null)
             return

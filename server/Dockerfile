@@ -35,6 +35,7 @@ RUN composer install --no-interaction --prefer-dist --no-scripts
 FROM dependencies AS quality
 
 COPY server/ ./
+COPY examples/webhook-receiver.php /examples/webhook-receiver.php
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
@@ -56,6 +57,7 @@ FROM dependencies AS focused
 
 ARG TEST_FILTER
 COPY server/ ./
+COPY examples/webhook-receiver.php /examples/webhook-receiver.php
 COPY docs/sales-analytics-response.valid.json docs/sales-analytics.vector.json docs/operations.md /docs/
 COPY compose.yaml /compose.yaml
 COPY .dockerignore /dockerignore
@@ -99,9 +101,9 @@ FROM php:8.3-fpm-alpine@sha256:958112faffb434ca47ac10e51ef40506af76505adac4b879f
 RUN apk add --no-cache --upgrade \
         icu-libs=78.1-r0 \
         libzip=1.11.4-r2 \
-        libcrypto3=3.5.8-r0 \
-        libssl3=3.5.8-r0 \
-        openssl=3.5.8-r0 \
+        libcrypto3=3.5.9-r0 \
+        libssl3=3.5.9-r0 \
+        openssl=3.5.9-r0 \
     && apk add --no-cache --virtual .build-deps \
         autoconf=2.73-r0 \
         dpkg=1.23.7-r0 \

@@ -52,6 +52,9 @@
                                 <td class="flex gap-2 py-3 pr-4">
                                     {{ ($this->rotateDeveloperApplicationAction)(['application' => $application->getKey()]) }}
                                     {{ ($this->revokeDeveloperApplicationAction)(['application' => $application->getKey()]) }}
+                                    {{ ($this->customerWalletAccessAction)(['application' => $application->getKey()]) }}
+                                    {{ ($this->configureWebhookAction)(['application' => $application->getKey()]) }}
+                                    {{ ($this->pauseWebhookAction)(['application' => $application->getKey()]) }}
                                 </td>
                             </tr>
                         @empty
@@ -76,6 +79,22 @@
                     </li>
                 @empty
                     <li class="text-gray-600 dark:text-gray-400">No credential audit events yet.</li>
+                @endforelse
+            </ul>
+        </section>
+        <section aria-label="Webhook delivery status" class="max-w-4xl rounded-xl border p-4">
+            <h2 class="text-lg font-semibold">Webhook deliveries</h2>
+            <p class="mt-2 text-sm">Notifications describe committed provisional credit. Consumers must deduplicate by event ID.</p>
+            <ul class="mt-3 space-y-3">
+                @forelse ($this->webhookDeliveries() as $delivery)
+                    <li>
+                        <span>{{ $delivery->event_id }}. {{ $delivery->status }}. Attempts {{ $delivery->attempts }}. {{ $delivery->last_error_code }}</span>
+                        @if (in_array($delivery->status, ['retry', 'dead_letter', 'cancelled'], true))
+                            {{ ($this->replayWebhookAction)(['application' => $this->deliveryApplication($delivery->webhook_endpoint_id), 'delivery' => $delivery->id]) }}
+                        @endif
+                    </li>
+                @empty
+                    <li>No webhook deliveries yet.</li>
                 @endforelse
             </ul>
         </section>

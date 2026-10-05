@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Http\Responses\PasskeyLoginResponse;
 use App\Models\Deposit;
+use App\Models\DeveloperApplication;
 use App\Models\OAuthClient;
 use App\OAuth\ClientScopeRepository;
 use App\Operations\LaravelMigrationReadiness;
@@ -67,6 +68,8 @@ class AppServiceProvider extends ServiceProvider
         Passport::tokensCan($serviceScopes);
         Passport::tokensExpireIn(now()->addMinutes(15));
         RateLimiter::for('mobile-api', static fn (Request $request): Limit => Limit::perMinute(60)->by((string) $request->user('mobile')?->getAuthIdentifier()));
+        RateLimiter::for('service-api', static fn (Request $request): Limit => Limit::perMinute(60)
+            ->by((string) $request->attributes->get(DeveloperApplication::class)?->id));
         RateLimiter::for('mobile-envelope', static function (Request $request): Limit {
             return Limit::perMinute(60)
                 ->by('mobile-envelope:'.$request->ip())

@@ -19,9 +19,14 @@ final class DepositSubmissionRuntime {
     required AuthenticatedDepositTransport transport,
     PaymentOutboxCipher? cipher,
     PaymentOutboxStorageLocation? location,
+    String? installationBinding,
   }) async {
     final EncryptedDepositSubmissionJournal journal =
-        await EncryptedDepositSubmissionJournal.open(cipher: cipher, location: location);
+        await EncryptedDepositSubmissionJournal.open(
+          cipher: cipher,
+          location: location,
+          installationBinding: installationBinding,
+        );
     final DepositSubmissionBloc bloc = DepositSubmissionBloc(
       transport: transport,
       journal: journal,
@@ -37,14 +42,21 @@ final class DepositSubmissionRuntime {
     MobileDepositHttpPort? http,
     PaymentOutboxCipher? cipher,
     PaymentOutboxStorageLocation? location,
-  }) => create(
-    transport: MobileEnvelopeHttpTransport(
-      vault: vault ?? const PlatformMobileEnvelopeVault(),
-      http: http ?? DartMobileDepositHttpPort(),
-    ),
-    cipher: cipher,
-    location: location,
-  );
+  }) async {
+    final MobileEnvelopeSealer sealer = vault ?? const PlatformMobileEnvelopeVault();
+    final String? binding = sealer is PlatformMobileEnvelopeVault
+        ? await sealer.journalBinding() : null;
+    return create(
+      transport: MobileEnvelopeHttpTransport(
+        vault: sealer,
+        http: http ?? DartMobileDepositHttpPort(),
+        journalBinding: binding,
+      ),
+      cipher: cipher,
+      location: location,
+      installationBinding: binding,
+    );
+  }
 
   Future<void> close() async {
     await bloc.close();

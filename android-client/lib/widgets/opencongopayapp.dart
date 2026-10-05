@@ -8,6 +8,7 @@ import '../bloc/parser_bloc.dart';
 import '../features/app_lock/infrastructure/platform_app_lock_port.dart';
 import '../features/app_lock/presentation/app_lock_bloc.dart';
 import '../features/app_lock/presentation/app_lock_gate.dart';
+import '../features/deposit_sync/presentation/paired_sms_deposit_gate.dart';
 import '../features/pairing/presentation/pairing_enrollment_bloc.dart';
 import '../features/pairing/presentation/pairing_qr_bloc.dart';
 import '../features/pairing/presentation/pairing_protocol_bloc.dart';
@@ -155,16 +156,22 @@ final class _UnlockedOpenCongoPayAppState
   }
 
   List<Widget> get _pages => <Widget>[
-    PaymentInboxScreen(
+    PairedSmsDepositGate(
+      pairing: widget.pairingProtocol,
       gateway: _smsGateway,
-      paymentLifecycle: _paymentLifecycleBloc,
-      paymentRequestLifecycle: widget.paymentRequestLifecycle,
-      pairingEnrollment: widget.pairingEnrollment,
-      pairingSession: widget.pairingSession,
-      pairingQr: widget.pairingQr,
-      pairingProtocol: widget.pairingProtocol,
-      pairingRuntimeUnavailable: widget.pairingRuntimeUnavailable,
-      syncCursor: widget.syncCursor,
+      builder: (coordinator, unavailable) => PaymentInboxScreen(
+        gateway: _smsGateway,
+        smsDeposits: coordinator,
+        depositRuntimeUnavailable: unavailable,
+        paymentLifecycle: _paymentLifecycleBloc,
+        paymentRequestLifecycle: widget.paymentRequestLifecycle,
+        pairingEnrollment: widget.pairingEnrollment,
+        pairingSession: widget.pairingSession,
+        pairingQr: widget.pairingQr,
+        pairingProtocol: widget.pairingProtocol,
+        pairingRuntimeUnavailable: widget.pairingRuntimeUnavailable,
+        syncCursor: widget.syncCursor,
+      ),
     ),
     const ParsersScreen(),
     const RegexBuilderScreen(),

@@ -120,6 +120,14 @@ final class _BlockingExchange implements MobileDepositHttpExchange {
 }
 
 void main() {
+  test('re-pairing cannot send a pending request through another installation binding', () async {
+    final _Http http = _Http();
+    await expectLater(MobileEnvelopeHttpTransport(vault: _EnvelopeVault(), http: http,
+      journalBinding: List<String>.filled(64, '0').join()).submit(deposit),
+      throwsA(isA<DepositTransportUnavailable>()));
+    expect(http.requests, isEmpty);
+  });
+
   test('sends only a native-sealed envelope and accepts only its native-authenticated result', () async {
     final _EnvelopeVault vault = _EnvelopeVault();
     final _Http http = _Http();

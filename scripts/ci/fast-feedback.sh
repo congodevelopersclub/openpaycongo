@@ -166,7 +166,7 @@ case "$tier" in
     case "$component" in
       contracts) run_contracts ;;
       laravel) run_laravel_pr ;;
-      flutter) run_flutter_quality_and_tests; docker build --target artifact --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client ;;
+      flutter) run_flutter_quality_and_tests; docker build --target artifact --build-arg "OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY=${OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY:-}" --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client ;;
       postgres-migration) run_postgres_migration ;;
       deposit-concurrency) run_deposit_concurrency "$@" ;;
       security) run_security_fast ;;

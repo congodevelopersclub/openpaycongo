@@ -59,6 +59,25 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
+  test('a new installation binding cannot load the previous encrypted pending journal', () async {
+    final Directory directory = await Directory.systemTemp.createTemp('deposit-binding-');
+    final _MemoryCipher cipher = _MemoryCipher();
+    final _Location location = _Location(directory.path);
+    final String firstBinding = List<String>.filled(64, 'a').join();
+    final String replacementBinding = List<String>.filled(64, 'b').join();
+    final EncryptedDepositSubmissionJournal first = await EncryptedDepositSubmissionJournal.open(
+      cipher: cipher, location: location, installationBinding: firstBinding);
+    await first.stage(_deposit); await first.close();
+    final EncryptedDepositSubmissionJournal replacement = await EncryptedDepositSubmissionJournal.open(
+      cipher: cipher, location: location, installationBinding: replacementBinding);
+    expect(await replacement.loadPending(), isEmpty);
+    await replacement.close();
+    final EncryptedDepositSubmissionJournal retained = await EncryptedDepositSubmissionJournal.open(
+      cipher: cipher, location: location, installationBinding: firstBinding);
+    expect(await retained.loadPending(), hasLength(1));
+    await retained.close(); await directory.delete(recursive: true);
+  });
+
   test('staged deposit survives reopen while SQLite contains ciphertext only', () async {
     final Directory directory = await Directory.systemTemp.createTemp('openpay-deposit-journal-');
     final _MemoryCipher cipher = _MemoryCipher();

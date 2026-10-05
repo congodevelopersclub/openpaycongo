@@ -28,7 +28,7 @@ final class RecordProviderDeposit
         $transfer = $this->normalise($transfer);
         $this->assertPortableProviderOccurrence($transfer->providerOccurredAt);
         $providerReferenceDigests = $this->digests('provider_reference', $transfer->organizationId, $transfer->providerReference);
-        $idempotencyDigests = $this->digests('idempotency', $transfer->organizationId, json_encode([
+        $idempotencyPayload = [
             'organization_id' => $transfer->organizationId,
             'installation_identifier' => $transfer->installationIdentifier,
             'customer_lookup_identifier' => $transfer->customerLookupIdentifier,
@@ -38,7 +38,8 @@ final class RecordProviderDeposit
             'provider_occurred_at' => $transfer->providerOccurredAt,
             'sender_identifier' => $transfer->senderIdentifier,
             'receiver_identifier' => $transfer->receiverIdentifier,
-        ], JSON_THROW_ON_ERROR));
+        ];
+        $idempotencyDigests = $this->digests('idempotency', $transfer->organizationId, json_encode($idempotencyPayload, JSON_THROW_ON_ERROR));
 
         $existing = $this->existing($transfer->organizationId, $providerReferenceDigests);
         if ($existing !== null) {
@@ -79,6 +80,7 @@ final class RecordProviderDeposit
                         'received_at' => $receivedAt,
                         'sender_identifier' => $transfer->senderIdentifier,
                         'receiver_identifier' => $transfer->receiverIdentifier,
+                        'parser_evidence' => $transfer->parserEvidence,
                         'idempotency_digest' => $this->activeDigest($idempotencyDigests),
                         'idempotency_key_version' => $this->activeKeyId(),
                     ]);
@@ -140,7 +142,41 @@ final class RecordProviderDeposit
             customerAddress: $transfer->customerAddress === null ? null : trim($transfer->customerAddress),
             customerPhone: $transfer->customerPhone === null ? null : trim($transfer->customerPhone),
             customerEmail: $transfer->customerEmail === null ? null : trim($transfer->customerEmail),
+            parserEvidence: $this->canonicalParserEvidence($transfer->parserEvidence),
         );
+    }
+
+    /** @param array<string, mixed>|null $evidence @return array{kind: string, provider: string, sms_sender: string, parser_version: int, sms_received_at: string, evidence_digest: string, parser_release_id: string}|null */
+    private function canonicalParserEvidence(?array $evidence): ?array
+    {
+        if ($evidence === null) {
+            return null;
+        }
+
+        $expected = ['kind', 'provider', 'sms_sender', 'parser_version', 'sms_received_at', 'evidence_digest', 'parser_release_id'];
+        if (array_diff(array_keys($evidence), $expected) !== [] || array_diff($expected, array_keys($evidence)) !== []
+            || ! is_string($evidence['kind']) || ! is_string($evidence['provider']) || ! is_string($evidence['sms_sender'])
+            || ! is_int($evidence['parser_version']) || ! is_string($evidence['sms_received_at'])
+            || ! is_string($evidence['evidence_digest']) || ! is_string($evidence['parser_release_id'])
+            || $evidence['kind'] !== 'signed_release'
+            || $evidence['provider'] === '' || mb_strlen($evidence['provider']) > 128
+            || ! $this->isBoundedIdentifier($evidence['sms_sender'])
+            || $evidence['parser_version'] < 1
+            || ! MobileDepositInput::isStrictPortableTimestamp($evidence['sms_received_at'])
+            || preg_match('/^[a-f0-9]{64}$/D', $evidence['evidence_digest']) !== 1
+            || preg_match('/^[a-f0-9]{64}$/D', $evidence['parser_release_id']) !== 1) {
+            throw new InvalidArgumentException('Invalid SMS parser evidence.');
+        }
+
+        return [
+            'kind' => $evidence['kind'],
+            'provider' => $evidence['provider'],
+            'sms_sender' => $evidence['sms_sender'],
+            'parser_version' => $evidence['parser_version'],
+            'sms_received_at' => $evidence['sms_received_at'],
+            'evidence_digest' => $evidence['evidence_digest'],
+            'parser_release_id' => $evidence['parser_release_id'],
+        ];
     }
 
     private function isBoundedIdentifier(?string $value, bool $nullable = false): bool
@@ -213,34 +249,40 @@ final class RecordProviderDeposit
         );
     }
 
+    public function registerCustomer(string $organizationId, string $lookupIdentifier): Customer
+    {
+        if (! Str::isUuid($organizationId) || trim($organizationId) === '' || ! $this->isBoundedIdentifier($lookupIdentifier)) {
+            throw new InvalidArgumentException('Invalid customer registration input.');
+        }
+        $organizationId = strtolower(trim($organizationId));
+        $lookupIdentifier = trim($lookupIdentifier);
+        $digests = $this->digests('customer_lookup', $organizationId, $lookupIdentifier);
+
+        return DB::transaction(function () use ($organizationId, $digests): Customer {
+            $lookupId = $this->resolveLookupId('customer_lookup', $organizationId, $digests);
+
+            return Customer::query()->createOrFirst(
+                ['organization_id' => $organizationId, 'private_lookup_id' => $lookupId],
+                [
+                    'private_lookup_digest' => $this->activeDigest($digests),
+                    'private_lookup_key_version' => $this->activeKeyId(),
+                ],
+            );
+        }, attempts: 3);
+    }
+
     private function customer(ProviderTransfer $transfer): Customer
     {
-        $digests = $this->digests('customer_lookup', $transfer->organizationId, $transfer->customerLookupIdentifier);
+        $customer = $this->registerCustomer($transfer->organizationId, $transfer->customerLookupIdentifier);
 
-        $lookupId = $this->resolveLookupId('customer_lookup', $transfer->organizationId, $digests);
-
-        $customer = Customer::query()->createOrFirst(
-            ['organization_id' => $transfer->organizationId, 'private_lookup_id' => $lookupId],
-            [
-                'private_lookup_digest' => $this->activeDigest($digests),
-                'private_lookup_key_version' => $this->activeKeyId(),
-                'name' => $transfer->customerName,
-                'address' => $transfer->customerAddress,
-                'phone' => $transfer->customerPhone,
-                'email' => $transfer->customerEmail,
-            ],
-        );
-
-        if (! $customer->wasRecentlyCreated) {
-            $customer->fill(array_filter([
-                'name' => $transfer->customerName,
-                'address' => $transfer->customerAddress,
-                'phone' => $transfer->customerPhone,
-                'email' => $transfer->customerEmail,
-            ], static fn (?string $value): bool => $value !== null));
-            if ($customer->isDirty()) {
-                $customer->save();
-            }
+        $customer->fill(array_filter([
+            'name' => $transfer->customerName,
+            'address' => $transfer->customerAddress,
+            'phone' => $transfer->customerPhone,
+            'email' => $transfer->customerEmail,
+        ], static fn (?string $value): bool => $value !== null));
+        if ($customer->isDirty()) {
+            $customer->save();
         }
 
         return $customer;

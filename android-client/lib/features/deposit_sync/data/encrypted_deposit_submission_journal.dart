@@ -31,7 +31,7 @@ final class _JournalRecord {
   };
 }
 
-enum _JournalState { pending, conflict }
+enum _JournalState { pending, conflict, acknowledged }
 
 final class _JournalEntry {
   const _JournalEntry({
@@ -48,7 +48,7 @@ final class _JournalEntry {
 /// Ciphertext-only durable ingress journal. Native [PaymentOutboxCipher] binds
 /// every record to a random opaque identity and stores its database under the
 /// Android no-backup directory.
-final class EncryptedDepositSubmissionJournal implements DepositSubmissionJournal {
+final class EncryptedDepositSubmissionJournal implements DepositSubmissionJournal, ImmutableSmsDepositJournal {
   EncryptedDepositSubmissionJournal._(this._database, this._cipher);
 
   static const int _cipherVersion = 1;
@@ -60,11 +60,16 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
   static Future<EncryptedDepositSubmissionJournal> open({
     PaymentOutboxCipher? cipher,
     PaymentOutboxStorageLocation? location,
+    String? installationBinding,
   }) async {
     final PlatformPaymentOutboxCipher platform = const PlatformPaymentOutboxCipher();
     try {
+      if (installationBinding != null && !RegExp(r'^[a-f0-9]{64}$').hasMatch(installationBinding)) {
+        throw const DepositJournalRecoveryRequiredException();
+      }
       final Database database = await openDatabase(
-        join(await (location ?? platform).directory(), _databaseName),
+        join(await (location ?? platform).directory(), installationBinding == null
+            ? _databaseName : 'opencongopay-deposit-$installationBinding.db'),
         version: 1,
         onCreate: (Database db, int _) => db.execute(
           'CREATE TABLE deposit_submission_journal (record_id TEXT PRIMARY KEY, ciphertext TEXT NOT NULL, cipher_version INTEGER NOT NULL)',
@@ -82,6 +87,24 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
   }
 
   Future<void> close() => _database.close();
+
+  @override
+  Future<StagedSmsDeposit> stageSms(ProviderDeposit deposit) async {
+    if (deposit.parserEvidence == null) throw const DepositJournalRecoveryRequiredException();
+    for (final _StoredEntry stored in await _entries()) {
+      final ProviderDeposit first = stored.entry.deposit;
+      if (first.parserEvidence == null || first.providerReference != deposit.providerReference) continue;
+      if (!_sameBusinessDeposit(first, deposit) ||
+          first.parserEvidence!.provider != deposit.parserEvidence!.provider ||
+          first.parserEvidence!.smsSender != deposit.parserEvidence!.smsSender ||
+          stored.entry.state == _JournalState.conflict) {
+        throw const SmsDepositSemanticConflict();
+      }
+      return StagedSmsDeposit(first, acknowledged: stored.entry.state == _JournalState.acknowledged);
+    }
+    await stage(deposit);
+    return StagedSmsDeposit(deposit);
+  }
 
   @override
   Future<void> stage(ProviderDeposit deposit) async {
@@ -136,16 +159,19 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
   }
 
   @override
-  Future<void> remove(ProviderDeposit deposit) => _delete(deposit, requirePending: true);
+  Future<void> remove(ProviderDeposit deposit) => deposit.parserEvidence == null
+      ? _delete(deposit, requirePending: true) : _setState(deposit, _JournalState.acknowledged);
 
   @override
-  Future<void> markConflict(ProviderDeposit deposit) async {
+  Future<void> markConflict(ProviderDeposit deposit) => _setState(deposit, _JournalState.conflict);
+
+  Future<void> _setState(ProviderDeposit deposit, _JournalState state) async {
     try {
       final _StoredEntry stored = await _find(deposit, requirePending: true);
       final _JournalRecord replacement = await _seal(
         _JournalEntry(
           deposit: stored.entry.deposit,
-          state: _JournalState.conflict,
+            state: state,
           createdAt: stored.entry.createdAt,
         ),
         recordId: stored.record.recordId,
@@ -220,6 +246,7 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
             'customer_address': entry.deposit.customerAddress,
             'customer_phone': entry.deposit.customerPhone,
             'customer_email': entry.deposit.customerEmail,
+            'parser_evidence': entry.deposit.parserEvidence?.toMap(),
           }),
         ),
         cipherVersion: _cipherVersion,
@@ -256,6 +283,9 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
           customerAddress: _optionalString(decoded, 'customer_address'),
           customerPhone: _optionalString(decoded, 'customer_phone'),
           customerEmail: _optionalString(decoded, 'customer_email'),
+          parserEvidence: decoded['parser_evidence'] == null
+              ? null
+              : DepositParserEvidence.fromMap(decoded['parser_evidence']),
         ),
         state: _JournalState.values.byName(_requiredString(decoded, 'state')),
         createdAt: DateTime.parse(_requiredString(decoded, 'created_at')).toUtc(),
@@ -309,6 +339,10 @@ final class EncryptedDepositSubmissionJournal implements DepositSubmissionJourna
   }
 
   static bool _sameDeposit(ProviderDeposit left, ProviderDeposit right) =>
+      _sameBusinessDeposit(left, right) &&
+      jsonEncode(left.parserEvidence?.toMap()) == jsonEncode(right.parserEvidence?.toMap());
+
+  static bool _sameBusinessDeposit(ProviderDeposit left, ProviderDeposit right) =>
       left.customerLookupIdentifier == right.customerLookupIdentifier &&
       left.providerReference == right.providerReference &&
       left.amountMinor == right.amountMinor &&
