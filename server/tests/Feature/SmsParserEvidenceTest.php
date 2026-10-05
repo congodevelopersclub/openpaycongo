@@ -27,8 +27,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
-use LogicException;
 use Livewire\Livewire;
+use LogicException;
 use Tests\TestCase;
 
 final class SmsParserEvidenceTest extends TestCase
