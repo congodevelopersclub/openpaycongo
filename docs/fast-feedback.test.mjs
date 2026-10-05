@@ -77,7 +77,7 @@ test('fast-feedback runner exposes Docker-only focused, local, PR, main, and sch
     'docker build --target focused --build-arg TEST_PATH="$1" -f android-client/Dockerfile.ci android-client',
     'docker build --target test -f server/Dockerfile .',
     'docker build --target production-contract -f server/docker/nginx.Dockerfile .',
-    'docker build --target artifact --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client',
+    'docker build --target artifact --build-arg "OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY=${OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY:-}" --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client',
   ]) assert.ok(runner.includes(command), `missing canonical command: ${command}`);
 
   const postgresImage = 'postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685';
@@ -105,7 +105,7 @@ test('runner dispatches actual tier commands and fails closed for unavailable ti
       [['local', 'flutter'], ['docker build --target analyze -f android-client/Dockerfile.ci android-client', 'docker build --target test -f android-client/Dockerfile.ci android-client']],
       [['pr', 'contracts'], ['docker build --target test -f docs/Dockerfile .']],
       [['pr', 'laravel'], ['docker compose config APP_KEY=set DB_PASSWORD=set LOOKUP_TOKEN=set PASSPORT_PRIVATE_KEY_FILE=set PASSPORT_PUBLIC_KEY_FILE=set', 'docker build --target test -f server/Dockerfile .', 'docker build --target production-contract -f server/Dockerfile .', 'docker build --target production-contract -f server/docker/nginx.Dockerfile .', 'docker build --target production --tag congo-openpay-fpm:ci -f server/Dockerfile .', 'docker build --target production --tag congo-openpay-nginx:ci -f server/docker/nginx.Dockerfile .', 'image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check congo-openpay-fpm:ci', 'image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check congo-openpay-nginx:ci']],
-      [['pr', 'flutter'], ['docker build --target analyze -f android-client/Dockerfile.ci android-client', 'docker build --target test -f android-client/Dockerfile.ci android-client', 'docker build --target artifact --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client']],
+      [['pr', 'flutter'], ['docker build --target analyze -f android-client/Dockerfile.ci android-client', 'docker build --target test -f android-client/Dockerfile.ci android-client', `docker build --target artifact --build-arg OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY=${process.env.OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY ?? ''} --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client`]],
       [['pr', 'postgres-migration'], ['docker build --target quality --tag openpaycongo-server-postgres -f server/Dockerfile .', 'docker run --rm --network host --env APP_ENV=testing --env APP_KEY=base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE= --env DB_CONNECTION=pgsql --env DB_HOST=127.0.0.1 --env DB_PORT=5432 --env DB_DATABASE=openpaycongo --env DB_USERNAME=openpay --env DB_PASSWORD=openpay openpaycongo-server-postgres php artisan migrate:fresh --force', 'psql --host=127.0.0.1 --port=5432', 'grep -Fx deposits_reverses_deposit_id_foreign:FOREIGN KEY', 'grep -Fx deposits_reverses_deposit_id_unique:UNIQUE']],
       [['pr', 'deposit-concurrency', 'pgsql', '5432'], ['docker build --target quality --tag openpaycongo-server-concurrency -f server/Dockerfile .', 'bash server/tests/Support/run_provider_deposit_concurrency_matrix.sh openpaycongo-server-concurrency pgsql 5432', 'bash server/tests/Support/run_payment_request_concurrency_matrix.sh openpaycongo-server-concurrency pgsql 5432']],
       [['pr', 'security'], ['bash scripts/security/security-fast.sh', 'bash scripts/security/security-history.sh', 'bash scripts/security/verify-secret-scanner.sh', 'bash scripts/security/verify-enforced-controls.sh']],
@@ -119,6 +119,11 @@ test('runner dispatches actual tier commands and fails closed for unavailable ti
       for (const call of expected) assert.ok(log.includes(call), `missing call: ${call}`);
       if (arguments_[1] === 'postgres-migration') assert.equal((log.match(/psql --host=127\.0\.0\.1 --port=5432/g) ?? []).length, 2, 'expected two PostgreSQL constraint queries');
     }
+    await clearCalls();
+    const parserPin = 'iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w';
+    const pinnedApk = invokeWithEnvironment({ OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY: parserPin }, 'pr', 'flutter');
+    assert.equal(pinnedApk.status, 0, pinnedApk.stderr);
+    assert.ok((await calls()).includes(`docker build --target artifact --build-arg OPENPAY_OPERATOR_PATTERN_SIGNING_PUBLIC_KEY=${parserPin} --output type=local,dest=android-client/build/ci -f android-client/Dockerfile.ci android-client`));
     for (const tier of ['main', 'deploy']) {
       const result = invoke(tier, 'laravel');
       assert.notEqual(result.status, 0);

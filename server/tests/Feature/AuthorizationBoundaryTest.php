@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\CheckServiceToken;
 use App\Http\Middleware\RequireFinancialOperatorMfa;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\Authorize;
@@ -149,6 +150,7 @@ final class AuthorizationBoundaryTest extends TestCase
         self::assertTrue($this->isExpectedBoundaryMiddleware('can:view,deposit'));
         self::assertTrue($this->isExpectedBoundaryMiddleware(Authorize::class));
         self::assertTrue($this->isExpectedBoundaryMiddleware(CheckToken::class.':payment-requests:read'));
+        self::assertTrue($this->isExpectedBoundaryMiddleware(CheckServiceToken::class.':wallets:read'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('auth.optional'));
         self::assertFalse($this->isExpectedBoundaryMiddleware('authorize-anything'));
 
@@ -195,7 +197,9 @@ final class AuthorizationBoundaryTest extends TestCase
             || $middleware === Authorize::class
             || str_starts_with($middleware, Authorize::class.':');
         $isServiceTokenForm = $middleware === CheckToken::class
-            || str_starts_with($middleware, CheckToken::class.':');
+            || str_starts_with($middleware, CheckToken::class.':')
+            || $middleware === CheckServiceToken::class
+            || str_starts_with($middleware, CheckServiceToken::class.':');
 
         if (! $isAuthenticationForm && ! $isAuthorizationForm && ! $isServiceTokenForm) {
             return false;
@@ -203,6 +207,6 @@ final class AuthorizationBoundaryTest extends TestCase
 
         return collect(app('router')->resolveMiddleware([$middleware]))
             ->map(static fn (string $resolved): string => explode(':', $resolved, 2)[0])
-            ->contains(static fn (string $resolved): bool => in_array($resolved, [Authenticate::class, Authorize::class, CheckToken::class], true));
+            ->contains(static fn (string $resolved): bool => in_array($resolved, [Authenticate::class, Authorize::class, CheckToken::class, CheckServiceToken::class], true));
     }
 }

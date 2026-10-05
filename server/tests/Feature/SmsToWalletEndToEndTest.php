@@ -124,6 +124,8 @@ final class SmsToWalletEndToEndTest extends WalletWebhookTestCase
             $this->actingAs($actor);
             app(EstablishFinancialOperatorMfaSession::class)->establish($actor, app('session.store'));
 
+            // A verified administrator session cannot replace an application's OAuth bearer token.
+            $this->getJson('/services/customers/'.$customer->id.'/wallet')->assertUnauthorized();
             $token = (string) $this->postJson('/oauth/token', [
                 'grant_type' => 'client_credentials', 'client_id' => $issued->clientId,
                 'client_secret' => $issued->clientSecret, 'scope' => 'wallets:read',

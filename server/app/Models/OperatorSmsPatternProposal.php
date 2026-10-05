@@ -33,13 +33,13 @@ final class OperatorSmsPatternProposal extends Model
 
     protected static function booted(): void
     {
-        static::updating(static function (self $proposal): void {
+        self::updating(static function (self $proposal): void {
             if ($proposal->getOriginal('status') === 'approved') {
                 throw new LogicException('Approved parser proposals are immutable.');
             }
         });
 
-        static::deleting(static function (self $proposal): void {
+        self::deleting(static function (self $proposal): void {
             if ($proposal->status === 'approved') {
                 throw new LogicException('Approved parser proposals are immutable.');
             }

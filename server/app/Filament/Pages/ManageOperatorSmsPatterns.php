@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Models\OperatorSmsPatternProposal;
+use App\Models\OperatorSmsPatternRelease;
 use App\Models\User;
 use App\OperatorSms\OperatorPaymentPatternReview;
 use App\OperatorSms\ReleaseApprovedOperatorPaymentPattern;
@@ -102,10 +103,10 @@ final class ManageOperatorSmsPatterns extends Page
             ->get();
     }
 
-    /** @return Collection<int, \App\Models\OperatorSmsPatternRelease> */
+    /** @return Collection<int, OperatorSmsPatternRelease> */
     public function releases(): Collection
     {
-        return \App\Models\OperatorSmsPatternRelease::query()
+        return OperatorSmsPatternRelease::query()
             ->where('organization_id', $this->verifiedActor()->organization_id)
             ->latest('issued_at')
             ->limit(100)

@@ -11,6 +11,7 @@ use App\Http\Controllers\ListOperatorSmsPatternReleasesController;
 use App\Http\Controllers\ShowCustomerWalletController;
 use App\Http\Controllers\StoreMobileDepositController;
 use App\Http\Controllers\StoreMobileEnvelopeController;
+use App\Http\Middleware\CheckServiceToken;
 use App\Http\Middleware\RequireClientCredentialsGrant;
 use App\Http\Middleware\ResolveDeveloperApplication;
 use App\Models\DeveloperApplication;
@@ -89,5 +90,5 @@ Route::get('/services/identity', static function () {
     ->name('services.identity');
 
 Route::get('/services/customers/{customer}/wallet', ShowCustomerWalletController::class)
-    ->middleware([CheckToken::using('wallets:read'), ResolveDeveloperApplication::class, 'throttle:service-api'])
+    ->middleware([CheckServiceToken::using('wallets:read'), ResolveDeveloperApplication::class, 'throttle:service-api'])
     ->name('services.wallet.show');

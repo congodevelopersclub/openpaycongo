@@ -41,10 +41,10 @@ final class OperatorSmsPatternRelease extends Model
 
     protected static function booted(): void
     {
-        static::updating(static function (self $release): void {
+        self::updating(static function (self $release): void {
             throw new LogicException('Signed parser releases are immutable.');
         });
-        static::deleting(static function (self $release): void {
+        self::deleting(static function (self $release): void {
             throw new LogicException('Signed parser releases are immutable.');
         });
     }
