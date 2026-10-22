@@ -11,7 +11,7 @@ RUN apk add --no-cache libpq=18.6-r0 icu-libs=78.1-r0 libzip=1.11.4-r2 \
         icu-dev=78.1-r0 \
         libzip-dev=1.11.4-r2 \
         make=4.4.1-r4 \
-        musl-dev=1.2.6-r2 \
+        musl-dev=1.2.6-r3 \
         pkgconf=2.5.1-r0 \
         postgresql18-dev=18.6-r0 \
         re2c=4.5.1-r0 \
@@ -115,7 +115,7 @@ RUN apk add --no-cache --upgrade \
         libzip-dev=1.11.4-r2 \
         linux-headers=7.0.0-r1 \
         make=4.4.1-r4 \
-        musl-dev=1.2.6-r2 \
+        musl-dev=1.2.6-r3 \
         pkgconf=2.5.1-r0 \
         postgresql18-dev=18.6-r0 \
         re2c=4.5.1-r0 \
