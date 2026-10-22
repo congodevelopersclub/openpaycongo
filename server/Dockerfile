@@ -1,4 +1,4 @@
-FROM php:8.3-cli-alpine@sha256:afdf8b1fee58486ccc0dab5f30f634b86873d56dac985f71ba217945647c05ad AS php83-platform-check
+FROM php:8.3.36-cli-alpine@sha256:2424931b23ed08b65764a0efe258f9b62fe4e5bc363f685c9d39e7607433381e AS php83-platform-check
 
 RUN apk add --no-cache libpq=18.6-r0 icu-libs=78.1-r0 libzip=1.11.4-r2 \
     && apk add --no-cache --virtual .build-deps \
@@ -11,7 +11,7 @@ RUN apk add --no-cache libpq=18.6-r0 icu-libs=78.1-r0 libzip=1.11.4-r2 \
         icu-dev=78.1-r0 \
         libzip-dev=1.11.4-r2 \
         make=4.4.1-r4 \
-        musl-dev=1.2.6-r2 \
+        musl-dev=1.2.6-r3 \
         pkgconf=2.5.1-r0 \
         postgresql18-dev=18.6-r0 \
         re2c=4.5.1-r0 \
@@ -96,7 +96,7 @@ COPY server/ ./
 COPY --from=assets /app/public/build ./public/build
 RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
 
-FROM php:8.3-fpm-alpine@sha256:958112faffb434ca47ac10e51ef40506af76505adac4b879f013540a91d32a67 AS production
+FROM php:8.3.36-fpm-alpine@sha256:aaf1ad25fc6484613be770743d1038e98e3e7e07409d78b97410eccdf3628f75 AS production
 
 RUN apk add --no-cache --upgrade \
         icu-libs=78.1-r0 \
@@ -115,7 +115,7 @@ RUN apk add --no-cache --upgrade \
         libzip-dev=1.11.4-r2 \
         linux-headers=7.0.0-r1 \
         make=4.4.1-r4 \
-        musl-dev=1.2.6-r2 \
+        musl-dev=1.2.6-r3 \
         pkgconf=2.5.1-r0 \
         postgresql18-dev=18.6-r0 \
         re2c=4.5.1-r0 \

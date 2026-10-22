@@ -24,7 +24,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertIsString($nginxTemplate);
         self::assertIsString($nginxProxyMap);
         self::assertIsString($proxyRenderer);
-        self::assertStringContainsString('php:8.3-fpm-alpine@sha256:', $dockerfile);
+        self::assertStringContainsString('php:8.3.36-fpm-alpine@sha256:', $dockerfile);
         self::assertStringContainsString('FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS assets', $dockerfile);
         self::assertStringContainsString('RUN npm ci --ignore-scripts --no-audit --no-fund', $dockerfile);
         self::assertStringContainsString('COPY --from=assets /app/public/build ./public/build', $dockerfile);
@@ -129,7 +129,7 @@ final class ProductionRuntimeContractTest extends TestCase
         self::assertStringContainsString('bash scripts/ci/run-initial-setup-browser.sh', $runner);
         self::assertStringNotContainsString('production-security-contract', $workflow);
         self::assertStringNotContainsString('chown -R nginx:nginx /var/cache/nginx /var/www/html/public', $nginxDockerfile);
-        self::assertStringContainsString('expat=2.8.5-r0', $nginxDockerfile);
+        self::assertStringContainsString('expat=2.9.0-r0', $nginxDockerfile);
         self::assertStringContainsString('libuuid=2.42.3-r1', $nginxDockerfile);
         self::assertStringContainsString('chown -R nginx:nginx /var/cache/nginx', $nginxDockerfile);
         self::assertStringContainsString('FROM production AS production-contract', $nginxDockerfile);
