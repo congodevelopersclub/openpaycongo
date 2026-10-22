@@ -1,0 +1,22 @@
+name: Generate targeted Symfony security lock
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/php-security-lock.yml'
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Generate only audited Symfony patches
+        working-directory: server
+        run: docker run --rm --user "$(id -u):$(id -g)" --env COMPOSER_HOME=/tmp/composer --volume "$PWD:/app" --workdir /app composer:2.9@sha256:b09bccd91a78fe8a9ab4b33d707b862e8fe54fec17782e32683ad2a69c46867d update symfony/http-foundation:7.4.21 symfony/yaml:7.4.18 --no-install --no-scripts --no-plugins --no-interaction --prefer-dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: targeted-security-composer-lock
+          path: server/composer.lock
+          if-no-files-found: error
+          retention-days: 1
