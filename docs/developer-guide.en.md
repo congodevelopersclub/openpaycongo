@@ -69,7 +69,13 @@ Configure outbound host policy with `OPENPAY_WEBHOOK_ALLOWED_HOSTS` as a JSON al
 
 The response balance is the customer's final currently available balance after any pending payment-request allocations applied by that deposit. The webhook means the wallet ledger changed; `settlement_status` is deliberately `unverified`. It must not be presented as confirmation that a mobile-money provider settled funds.
 
-The prototype's `available_minor` is an internal ledger balance, not a settled or redeemable financial balance. The existing allocator makes SMS credits available and can automatically charge pending payment requests against them; `settlement_status: unverified` is descriptive metadata, not an enforced hold. This walkthrough therefore requires an isolated disposable organization, synthetic messages, and test payment requests. No payout or real transaction is authorized by this demo. Production use requires a separately reviewed product decision and an enforced settlement authority or provisional-balance gate before spending; this change does not introduce that policy.
+### Accepted enrolled-device credit model
+
+The selected policy trusts an active enrolled source installation. Its reported credits become available to the existing allocator, which can automatically charge pending payment requests; available credit can also fund a new request. No settlement hold or independent manual/provider confirmation gate is required by this policy. `settlement_status: unverified` remains descriptive metadata. Authenticating a device report or approving a signed parser does not prove that a provider sent the SMS or settled funds.
+
+A stolen phone that remains locked is different from a fully compromised enrolled application/device or possession of its usable installation credential or directional key. PIN/biometric unlock and native access guards protect local read/submission access; Keystore encryption protects persisted material; administrator QR/code confirmation controls enrollment, and administrator revocation disables the installation at the server. The server authenticates installation authority, not the phone's current biometric state. A compromised trusted source can fabricate reports under its valid authority until revoked; this is an accepted residual risk, not an unresolved requirement to add a settlement hold. See [the threat model](threat-model.md#accepted-enrolled-device-credit-model).
+
+The prototype's `available_minor` is an internal ledger balance, not proof of a settled or redeemable financial balance. This walkthrough still requires an isolated disposable organization, synthetic messages, and test payment requests. No payout, real transaction, or deployment is authorized by this demo or by accepting the trust model. Production readiness and physical-device security acceptance require separate verification.
 
 ## Verification record
 
